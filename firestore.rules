@@ -1,0 +1,81 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isSelf(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    function role() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && role() == 'admin';
+    }
+
+    function isSeller() {
+      return isSignedIn() && (role() == 'seller' || role() == 'admin');
+    }
+
+    function isActive() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'active';
+    }
+
+    match /users/{uid} {
+      allow read: if isSelf(uid) || isAdmin();
+
+      allow create: if isSelf(uid)
+        && request.resource.data.keys().hasAll(['name', 'email', 'role', 'status', 'createdAt'])
+        && request.resource.data.role == 'buyer'
+        && request.resource.data.status == 'active';
+
+      allow update: if (isSelf(uid)
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name']))
+        || (isAdmin()
+          && request.resource.data.diff(resource.data).affectedKeys()
+               .hasOnly(['role', 'status', 'suspendedAt', 'reinstatedAt']));
+
+      allow delete: if false;
+    }
+
+    match /wallets/{uid} {
+      allow read: if isSelf(uid) || isAdmin();
+
+      allow create: if isSelf(uid)
+        && request.resource.data.balance == 0
+        && request.resource.data.keys().hasAll(['userId', 'balance', 'updatedAt'])
+        && request.resource.data.userId == uid;
+
+      allow update: if false;
+      allow delete: if false;
+    }
+
+    match /sellerApplications/{appId} {
+      allow read: if isSignedIn()
+        && (resource.data.userId == request.auth.uid || isAdmin());
+
+      allow create: if isSignedIn()
+        && isActive()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.keys().hasAll([
+             'userId', 'businessName', 'description', 'status', 'createdAt'
+           ]);
+
+      allow update: if isAdmin()
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'reviewedBy', 'reviewedAt', 'reason']);
+
+      allow delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
