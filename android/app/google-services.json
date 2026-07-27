@@ -1,0 +1,46 @@
+{
+  "project_info": {
+    "project_number": "430187570326",
+    "project_id": "chokro-30887",
+    "storage_bucket": "chokro-30887.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:430187570326:android:35a6273222fb02e3f2ceb7",
+        "android_client_info": {
+          "package_name": "com.arnish.chokro"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "430187570326-jhiu3kun85qrfo5hks63bjui42uhvjjl.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBKAT7xOOII0qYCCVG07_rI8T9BQZNFTRg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "430187570326-jhiu3kun85qrfo5hks63bjui42uhvjjl.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "430187570326-3mpquf925jubtvr86bd86oto8h4jqt79.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.arnish.chokro"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
