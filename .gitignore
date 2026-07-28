@@ -43,3 +43,10 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# rules test harness
+rules_test/node_modules/
+
+# Firebase agent skills (not part of the app)
+.agents/
+.claude/skills/
