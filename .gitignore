@@ -50,3 +50,4 @@ rules_test/node_modules/
 # Firebase agent skills (not part of the app)
 .agents/
 .claude/skills/
+.firebase/
