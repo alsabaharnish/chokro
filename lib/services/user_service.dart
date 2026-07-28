@@ -100,7 +100,7 @@ class UserService {
         'status': status,
         'reviewedBy': reviewedBy,
         'reviewedAt': FieldValue.serverTimestamp(),
-        if (reason != null) 'reason': reason,
+        'reason': ?reason,
       },
     );
 
