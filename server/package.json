@@ -1,8 +1,8 @@
 {
   "name": "chokro-server",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": true,
-  "description": "Chokro trusted service — screening, verification and all wallet writes",
+  "description": "Chokro trusted service \u2014 screening, verification and all wallet writes",
   "main": "src/index.js",
   "type": "commonjs",
   "engines": {
@@ -10,7 +10,8 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js"
+    "dev": "node --watch src/index.js",
+    "test": "jest"
   },
   "dependencies": {
     "cloudinary": "^2.5.1",
@@ -18,5 +19,8 @@
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
     "firebase-admin": "^13.0.2"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0"
   }
 }

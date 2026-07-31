@@ -18,6 +18,8 @@ const cors = require('cors');
 const { initFirebase } = require('./firebase');
 const { requireAuth, requireAdmin } = require('./auth');
 const { uploadImage, MAX_BYTES } = require('./cloudinary');
+const { approveDisposal, rejectDisposal } = require('./award');
+const policyModule = require('./pointsPolicy');
 
 const app = express();
 
@@ -67,7 +69,7 @@ app.get('/health', (req, res) => {
   res.json({
     ok: true,
     service: 'chokro-server',
-    version: '0.2.0',
+    version: '0.3.0',
     time: new Date().toISOString(),
   });
 });
@@ -135,6 +137,85 @@ app.post('/photos/disposal', requireAuth, async (req, res) => {
 /** Lets the client show a sensible limit without hard-coding it twice. */
 app.get('/photos/limits', (req, res) => {
   res.json({ maxBytes: MAX_BYTES });
+});
+
+// ---------------------------------------------------------------------------
+// Disposal review (F2.8)
+// ---------------------------------------------------------------------------
+
+/**
+ * An administrator approves or rejects a pending submission.
+ *
+ * The admin's button calls this endpoint rather than writing Firestore directly,
+ * because there must be exactly one code path that credits a wallet. Rules deny
+ * an administrator every write to `wallets`, `transactions` and `disposals` —
+ * that is what makes "no client writes a balance" true without qualification.
+ *
+ * Body: { decision: 'approve' | 'reject', reason?: string }
+ */
+app.post('/disposals/:id/review', requireAuth, requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { decision, reason } = req.body || {};
+
+  if (decision !== 'approve' && decision !== 'reject') {
+    return res.status(400).json({
+      error: 'bad_decision',
+      message: "decision must be 'approve' or 'reject'.",
+    });
+  }
+
+  try {
+    const result =
+      decision === 'approve'
+        ? await approveDisposal({ disposalId: id, adminUid: req.user.uid })
+        : await rejectDisposal({
+            disposalId: id,
+            adminUid: req.user.uid,
+            reason,
+          });
+
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    // These throws carry messages written for an administrator to read — an
+    // already-decided submission, a missing wallet, a daily cap reached.
+    console.error(`Review of ${id} failed:`, err.message);
+    return res.status(409).json({ error: 'review_failed', message: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Points policy (F3.3)
+// ---------------------------------------------------------------------------
+
+/** Current policy, with defaults filled in for anything the document omits. */
+app.get('/config/points', requireAuth, async (req, res) => {
+  const { db } = require('./firebase');
+  const snap = await db().collection('config').doc('points').get();
+  res.json(policyModule.fromDoc(snap.exists ? snap.data() : null));
+});
+
+/**
+ * Writes the points policy after validation.
+ *
+ * Rules cannot express the invariant that matters here — that the claim award
+ * stays below the disposal award — so the write goes where that check can run.
+ */
+app.post('/config/points', requireAuth, requireAdmin, async (req, res) => {
+  const { db, serverTimestamp } = require('./firebase');
+
+  const proposed = policyModule.fromDoc(req.body || {});
+  const problems = policyModule.validate(proposed);
+
+  if (problems.length > 0) {
+    return res.status(400).json({ error: 'invalid_policy', problems });
+  }
+
+  await db()
+    .collection('config')
+    .doc('points')
+    .set({ ...proposed, updatedAt: serverTimestamp(), updatedBy: req.user.uid });
+
+  return res.json({ ok: true, policy: proposed });
 });
 
 // ---------------------------------------------------------------------------

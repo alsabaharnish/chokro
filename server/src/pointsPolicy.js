@@ -1,0 +1,150 @@
+/**
+ * Points policy — Node port of `lib/core/points_policy.dart` (§7.3).
+ *
+ * The client reads the policy to display "this is worth 50 points". The server
+ * reads it to decide what to actually credit, and is the only side whose reading
+ * matters. Both parse the same `config/points` document with the same per-field
+ * fallbacks, so a malformed document degrades identically on both.
+ *
+ * Reads are forgiving; writes are strict. `validate()` runs here before any
+ * policy is persisted, because Firestore rules cannot express a cross-field
+ * invariant like "the claim award must stay below the disposal award".
+ */
+
+const DEFAULTS = Object.freeze({
+  disposalAward: 50,
+  claimAward: 15,
+  claimQuotaPerWeek: 3,
+  purchaseAwardPercent: 5,
+  redemptionPointsPerBlock: 100,
+  redemptionTakaPerBlock: 10,
+  maxRedemptionPercentOfSubtotal: 50,
+  lockoutHours: 6,
+  dailyDisposalCap: 3,
+});
+
+function readInt(source, key) {
+  const value = source ? source[key] : undefined;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+  return DEFAULTS[key];
+}
+
+/**
+ * Builds a policy from a `config/points` document.
+ * Missing, null or wrongly-typed fields fall back to their defaults rather than
+ * throwing — a broken config must never be able to take the service down.
+ */
+function fromDoc(data) {
+  const source = data || {};
+  const policy = {};
+  for (const key of Object.keys(DEFAULTS)) {
+    policy[key] = readInt(source, key);
+  }
+  return policy;
+}
+
+function defaults() {
+  return { ...DEFAULTS };
+}
+
+/**
+ * Human-readable problems with a policy. Empty array means it is safe to save.
+ *
+ * The load-bearing rule is the last one: award value must track verification
+ * strength. A claim rests on an administrator's reading of a photograph; a
+ * disposal is geofenced, time-locked and hash-checked. If a claim ever pays more
+ * than a disposal, users optimise into the weaker route and the whole
+ * verification design stops meaning anything.
+ */
+function validate(policy) {
+  const problems = [];
+
+  const positive = (label, value) => {
+    if (!(value > 0)) problems.push(`${label} must be greater than zero.`);
+  };
+
+  positive('Disposal award', policy.disposalAward);
+  positive('Claim award', policy.claimAward);
+  positive('Claim quota per week', policy.claimQuotaPerWeek);
+  positive('Redemption points per block', policy.redemptionPointsPerBlock);
+  positive('Redemption taka per block', policy.redemptionTakaPerBlock);
+  positive('Lockout window', policy.lockoutHours);
+  positive('Daily disposal cap', policy.dailyDisposalCap);
+
+  if (policy.purchaseAwardPercent < 0 || policy.purchaseAwardPercent > 100) {
+    problems.push('Purchase award percent must be between 0 and 100.');
+  }
+  if (
+    policy.maxRedemptionPercentOfSubtotal < 0 ||
+    policy.maxRedemptionPercentOfSubtotal > 100
+  ) {
+    problems.push('Max redemption percent must be between 0 and 100.');
+  }
+  if (policy.lockoutHours > 24 * 7) {
+    problems.push('Lockout window may not exceed one week.');
+  }
+  if (policy.claimAward >= policy.disposalAward) {
+    problems.push(
+      `Claim award (${policy.claimAward}) must be lower than disposal award ` +
+        `(${policy.disposalAward}): the weaker verification route must pay less.`,
+    );
+  }
+
+  return problems;
+}
+
+/** Points required to buy one taka of value. With the defaults, 10. */
+function pointsPerTaka(policy) {
+  const ratio = Math.trunc(
+    policy.redemptionPointsPerBlock / policy.redemptionTakaPerBlock,
+  );
+  return ratio < 1 ? 1 : ratio;
+}
+
+/** Taka value of a points amount, rounded down. */
+function takaForPoints(policy, points) {
+  if (points <= 0) return 0;
+  return Math.trunc(points / pointsPerTaka(policy));
+}
+
+/** Points credited when an order is confirmed received. */
+function purchaseAward(policy, payable) {
+  if (payable <= 0) return 0;
+  return Math.trunc((payable * policy.purchaseAwardPercent) / 100);
+}
+
+/** When a lockout opened at [from] (a Date) expires. */
+function lockoutExpiry(policy, from) {
+  return new Date(from.getTime() + policy.lockoutHours * 60 * 60 * 1000);
+}
+
+/** ISO week key, e.g. `2026-W31`. Mirrors IsoWeek in the Dart implementation. */
+function isoWeekKey(date) {
+  const utc = new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
+  );
+  // ISO weekday: Monday 1 … Sunday 7.
+  const weekday = utc.getUTCDay() === 0 ? 7 : utc.getUTCDay();
+  const thursday = new Date(utc);
+  thursday.setUTCDate(utc.getUTCDate() + 4 - weekday);
+
+  const firstOfYear = new Date(Date.UTC(thursday.getUTCFullYear(), 0, 1));
+  const week =
+    Math.floor((thursday - firstOfYear) / (7 * 24 * 60 * 60 * 1000)) + 1;
+
+  return `${thursday.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+}
+
+module.exports = {
+  DEFAULTS,
+  defaults,
+  fromDoc,
+  validate,
+  pointsPerTaka,
+  takaForPoints,
+  purchaseAward,
+  lockoutExpiry,
+  isoWeekKey,
+};
