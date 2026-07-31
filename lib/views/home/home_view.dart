@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../controllers/auth_controller.dart';
 import '../../controllers/wallet_controller.dart';
+import '../../controllers/submission_history_controller.dart';
 import '../shared/app_shell.dart';
 
 class HomeView extends ConsumerWidget {
@@ -12,6 +13,7 @@ class HomeView extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final userAsync = ref.watch(currentUserProvider);
     final walletAsync = ref.watch(walletProvider);
+    final pendingCount = ref.watch(pendingSubmissionCountProvider);
     final theme = Theme.of(context);
 
     return AppShell(
@@ -146,6 +148,72 @@ class HomeView extends ConsumerWidget {
                               ),
                               if (user.isActive)
                                 const Icon(Icons.chevron_right),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // ── My submissions (F7.2 entry point) ─────────────
+                    //
+                    // Shown to every account, including a suspended one: a
+                    // user who cannot submit can still need to read why an
+                    // earlier submission was rejected.
+                    //
+                    // The badge watches `submissionHistoryProvider`, so this
+                    // screen holds a listener on the user's own disposals.
+                    // That is one query, the same one the history screen uses.
+                    // Drop `pendingCount` and the badge to remove it.
+                    const SizedBox(height: 16),
+                    Card(
+                      clipBehavior: Clip.antiAlias,
+                      child: InkWell(
+                        onTap: () => context.push('/history'),
+                        child: Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: Row(
+                            children: [
+                              CircleAvatar(
+                                radius: 24,
+                                backgroundColor:
+                                    theme.colorScheme.tertiaryContainer,
+                                child: Icon(
+                                  Icons.receipt_long_outlined,
+                                  color: theme.colorScheme.onTertiaryContainer,
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'My submissions',
+                                      style: theme.textTheme.titleMedium
+                                          ?.copyWith(
+                                              fontWeight: FontWeight.bold),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      pendingCount == 0
+                                          ? 'Status, reason and points for '
+                                              'everything you have sent.'
+                                          : pendingCount == 1
+                                              ? '1 submission is waiting for '
+                                                  'review.'
+                                              : '$pendingCount submissions are '
+                                                  'waiting for review.',
+                                      style: theme.textTheme.bodySmall,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (pendingCount > 0)
+                                Badge(
+                                  label: Text('$pendingCount'),
+                                  child: const SizedBox(width: 8, height: 20),
+                                ),
+                              const Icon(Icons.chevron_right),
                             ],
                           ),
                         ),

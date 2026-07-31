@@ -6,7 +6,8 @@ import '../views/auth/register_view.dart';
 import '../views/home/home_view.dart';
 import '../views/seller_application/seller_application_view.dart';
 import '../views/admin/admin_applications_view.dart';
-import '../views/wallet/wallet_view.dart';
+import '../views/history/submission_history_view.dart';
+import '../views/wallet/wallet_ledger_view.dart';
 import '../views/disposal/scan_view.dart';
 import '../views/disposal/photo_view.dart';
 import '../views/disposal/location_view.dart';
@@ -57,8 +58,17 @@ final routerProvider = Provider<GoRouter>((ref) {
         },
       ),
       GoRoute(
+        path: '/history',
+        builder: (context, state) => const SubmissionHistoryView(),
+        redirect: (context, state) {
+          final user = currentUser.value;
+          if (user == null) return '/login';
+          return null;
+        },
+      ),
+      GoRoute(
         path: '/wallet',
-        builder: (context, state) => const WalletView(),
+        builder: (context, state) => const WalletLedgerView(),
         redirect: (context, state) {
           final user = currentUser.value;
           if (user == null) return '/login';
