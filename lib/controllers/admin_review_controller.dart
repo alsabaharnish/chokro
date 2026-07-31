@@ -3,7 +3,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/bin_model.dart';
 import '../models/disposal_model.dart';
 import '../models/user_model.dart';
-import '../services/bin_service.dart';
 import '../services/review_service.dart';
 import '../services/user_service.dart';
 import 'disposal_controller.dart';
