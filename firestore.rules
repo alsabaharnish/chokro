@@ -1,6 +1,37 @@
 rules_version = '2';
+
+// Chokro — Firestore security rules.
+//
+// M2 revision. The M1 blocks for `users` and `sellerApplications` are unchanged.
+// The `wallets` block has been tightened, and `transactions`, `disposals`,
+// `bins`, `config`, `lockouts` and `claimQuotas` are new.
+//
+// THE ONE RULE THAT MATTERS
+// -------------------------
+// No client writes a balance. Not a user, not an administrator.
+//
+// Every field that decides or records a payout — wallet balances, ledger
+// entries, disposal status, points awarded, screening results, bin geofences,
+// and the points policy itself — is written by the trusted Node service using
+// the Firebase Admin SDK, which bypasses these rules entirely. What follows is
+// therefore not "the rules that award points"; it is the rules that make it
+// impossible for anything except the server to award points.
+//
+// Why the admin is blocked too: if administrators could write wallets directly,
+// there would be two code paths that credit a balance and rules could only
+// police one of them. The admin's approve button calls the server like
+// everything else. That is what makes the sentence above true without
+// qualification.
+//
+// Corollary: read access is generous here, write access is nearly absent. That
+// asymmetry is the design, not an oversight.
+
 service cloud.firestore {
   match /databases/{database}/documents {
+
+    // -------------------------------------------------------------------------
+    // Helpers (M1, unchanged)
+    // -------------------------------------------------------------------------
 
     function isSignedIn() {
       return request.auth != null;
@@ -26,6 +57,30 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'active';
     }
 
+    // -------------------------------------------------------------------------
+    // Helpers (M2)
+    // -------------------------------------------------------------------------
+
+    // A bin that exists and is currently accepting submissions.
+    function binIsOpen(binId) {
+      return exists(/databases/$(database)/documents/bins/$(binId))
+        && get(/databases/$(database)/documents/bins/$(binId)).data.active == true;
+    }
+
+    // Whether this user is inside the lockout window for this bin (§7.3, F2.6).
+    //
+    // Rules cannot run a time-window query across a collection, which is why the
+    // lockout is a single document keyed {userId}_{binId} whose expiry can be
+    // read in one lookup. Absent document or past expiry means free to submit.
+    function lockoutActive(uid, binId) {
+      return exists(/databases/$(database)/documents/lockouts/$(uid + '_' + binId))
+        && get(/databases/$(database)/documents/lockouts/$(uid + '_' + binId)).data.expiresAt > request.time;
+    }
+
+    // -------------------------------------------------------------------------
+    // users (M1, unchanged)
+    // -------------------------------------------------------------------------
+
     match /users/{uid} {
       allow read: if isSelf(uid) || isAdmin();
 
@@ -38,22 +93,157 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name']))
         || (isAdmin()
           && request.resource.data.diff(resource.data).affectedKeys()
-               .hasOnly(['role', 'status', 'suspendedAt', 'reinstatedAt']));
+               .hasOnly(['role', 'status', 'suspendedAt', 'reinstatedAt', 'suspendedUntil']));
 
       allow delete: if false;
     }
 
+    // -------------------------------------------------------------------------
+    // wallets — read your own, never write one
+    // -------------------------------------------------------------------------
+
     match /wallets/{uid} {
       allow read: if isSelf(uid) || isAdmin();
 
+      // Creation stays client-side and stays pinned to zero.
+      //
+      // This is the one client write to a wallet document, and it is deliberate:
+      // registration opens the user document and the wallet atomically in a
+      // single batch (§6 invariant, and a hard-won lesson from the sibling
+      // project). A wallet that can only ever be born holding zero cannot be
+      // used to steal anything, so allowing it costs nothing and keeps signup
+      // independent of the server being reachable.
       allow create: if isSelf(uid)
         && request.resource.data.balance == 0
         && request.resource.data.keys().hasAll(['userId', 'balance', 'updatedAt'])
         && request.resource.data.userId == uid;
 
+      // Every subsequent balance change belongs to the Admin SDK. An admin is
+      // refused here exactly as a buyer is.
       allow update: if false;
       allow delete: if false;
     }
+
+    // -------------------------------------------------------------------------
+    // transactions — the ledger. Append-only, and only by the server.
+    // -------------------------------------------------------------------------
+
+    match /transactions/{txId} {
+      allow read: if isSignedIn()
+        && (resource.data.userId == request.auth.uid || isAdmin());
+
+      // NFR-4: every balance change is a ledger entry, and balance is
+      // reconstructable from history. Both properties die the moment a client
+      // can write, amend or remove an entry.
+      allow create, update, delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // bins — read to scan, server to register
+    // -------------------------------------------------------------------------
+
+    match /bins/{binId} {
+      // Any signed-in user may resolve a scanned code. Inactive bins are
+      // readable too so the app can say "this bin is no longer in service"
+      // rather than failing as if the code were fake.
+      allow read: if isSignedIn();
+
+      // Written by the server, including for administrators. A bin's
+      // coordinates and radius are inputs the server trusts when deciding a
+      // payout, so they sit on the server side of the boundary with everything
+      // else the server trusts.
+      allow create, update, delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // disposals — the client may submit, and may do nothing else
+    // -------------------------------------------------------------------------
+
+    match /disposals/{disposalId} {
+      allow read: if isSignedIn()
+        && (resource.data.userId == request.auth.uid || isAdmin());
+
+      allow create: if isSignedIn()
+        && isActive()
+        && request.resource.data.userId == request.auth.uid
+
+        // hasOnly, not hasAll. An exact key set is what keeps `pointsAwarded`,
+        // `photoHash`, `screenConfidence`, `reviewedBy` and every other
+        // server-owned field out of a client-authored document. hasAll would
+        // permit extra keys and the whole guarantee would leak.
+        && request.resource.data.keys().hasOnly([
+             'userId', 'binId', 'photoUrl',
+             'capturedLat', 'capturedLng', 'distanceMeters',
+             'declaredItemCount', 'itemType',
+             'status', 'flags', 'createdAt'
+           ])
+        && request.resource.data.keys().hasAll([
+             'userId', 'binId', 'photoUrl',
+             'capturedLat', 'capturedLng', 'distanceMeters',
+             'declaredItemCount', 'itemType',
+             'status', 'flags', 'createdAt'
+           ])
+
+        // A submission is born pending and unflagged. It cannot arrive approved.
+        && request.resource.data.status == 'pending'
+        && request.resource.data.flags.size() == 0
+
+        && request.resource.data.declaredItemCount is int
+        && request.resource.data.declaredItemCount > 0
+        && request.resource.data.declaredItemCount <= 100
+
+        && request.resource.data.capturedLat is number
+        && request.resource.data.capturedLng is number
+        && request.resource.data.distanceMeters is number
+
+        // Server timestamp only. A client-authored createdAt would undermine
+        // the lockout window it is compared against (§7.4).
+        && request.resource.data.createdAt == request.time
+
+        && binIsOpen(request.resource.data.binId)
+        && !lockoutActive(request.auth.uid, request.resource.data.binId);
+
+      // Screening, approval, rejection and the points award are all server
+      // writes. There is no client transition out of pending.
+      allow update, delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // lockouts and claimQuotas — visible to the user, written by the server
+    // -------------------------------------------------------------------------
+
+    match /lockouts/{lockoutId} {
+      // Readable so the app can say "you can submit at this bin again in 4h"
+      // instead of letting the user photograph a bag for nothing.
+      allow read: if isSignedIn();
+      allow create, update, delete: if false;
+    }
+
+    match /claimQuotas/{quotaId} {
+      allow read: if isSignedIn();
+      allow create, update, delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // config — the points policy
+    // -------------------------------------------------------------------------
+
+    match /config/{docId} {
+      // Every client reads the policy: the checkout screen needs the redemption
+      // rate, the submission screen needs the disposal award to show what is
+      // pending. None of it is secret.
+      allow read: if isSignedIn();
+
+      // Written by the server after PointsPolicy.validate() passes. Rules cannot
+      // express the invariant that matters here — that the claim award stays
+      // below the disposal award, so the weaker verification route keeps paying
+      // less — so the write goes where that check can actually run.
+      allow create, update, delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // sellerApplications (M1, unchanged)
+    // -------------------------------------------------------------------------
 
     match /sellerApplications/{appId} {
       allow read: if isSignedIn()
@@ -73,6 +263,10 @@ service cloud.firestore {
 
       allow delete: if false;
     }
+
+    // -------------------------------------------------------------------------
+    // Everything else is denied.
+    // -------------------------------------------------------------------------
 
     match /{document=**} {
       allow read, write: if false;
