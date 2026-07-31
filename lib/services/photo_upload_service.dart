@@ -1,7 +1,9 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../core/api_config.dart';
@@ -46,15 +48,34 @@ class PhotoUploadService {
             body: jsonEncode({'imageBase64': base64Encode(bytes)}),
           )
           .timeout(ApiConfig.coldStartTimeout);
-    } on SocketException {
+    } on TimeoutException catch (error) {
+      // The genuine cold start: the free instance sleeps after ~15 minutes and
+      // the first request back takes 30-60 seconds. Only this clause should
+      // produce the "took too long" message.
+      _log('timed out after ${ApiConfig.coldStartTimeout}', error);
+      throw const PhotoUploadException(
+        'The server took too long to respond. It may be starting up — try '
+        'again in a moment.',
+      );
+    } on SocketException catch (error) {
+      _log('socket failure — no route to the host', error);
       throw const PhotoUploadException(
         'Could not reach the server. Check your connection and try again.',
       );
-    } catch (_) {
-      // The overwhelmingly likely cause is the free-tier instance waking up and
-      // exceeding even the generous timeout.
+    } on http.ClientException catch (error) {
+      // On the web build this is the CORS signature: the browser refuses the
+      // request and `package:http` reports "XMLHttpRequest error" with no
+      // detail. It is not a socket failure, so it used to fall through to the
+      // generic clause and read as a timeout. Check the origin against
+      // ALLOWED_ORIGINS on the server before suspecting the network.
+      _log('client exception — on web, check CORS and the origin', error);
       throw const PhotoUploadException(
-        'The server took too long to respond. Try again in a moment.',
+        'Could not reach the server. Check your connection and try again.',
+      );
+    } catch (error, stackTrace) {
+      _log('unexpected failure sending the photo', error, stackTrace);
+      throw const PhotoUploadException(
+        'Something went wrong sending the photo. Try again.',
       );
     }
 
@@ -78,8 +99,9 @@ class PhotoUploadService {
       if (serverMessage != null && serverMessage.isNotEmpty) {
         message = serverMessage;
       }
-    } catch (_) {
-      // Non-JSON response — keep the generic message.
+    } catch (error) {
+      // Non-JSON response — keep the generic message, but say so in debug.
+      _log('response body was not JSON (${response.statusCode})', error);
     }
 
     if (response.statusCode == 401 || response.statusCode == 403) {
@@ -90,6 +112,14 @@ class PhotoUploadService {
 
     throw PhotoUploadException(message);
   }
+}
+
+/// Writes the underlying failure to the debug console without changing what the
+/// user is told. Stripped from release builds.
+void _log(String context, Object error, [StackTrace? stackTrace]) {
+  if (!kDebugMode) return;
+  debugPrint('[PhotoUploadService] $context: $error');
+  if (stackTrace != null) debugPrint('$stackTrace');
 }
 
 class PhotoUploadException implements Exception {
