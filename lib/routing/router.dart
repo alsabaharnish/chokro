@@ -11,6 +11,7 @@ import '../views/disposal/scan_view.dart';
 import '../views/disposal/photo_view.dart';
 import '../views/disposal/location_view.dart';
 import '../views/disposal/declare_view.dart';
+import '../views/admin/admin_disposals_view.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(firebaseAuthStateProvider);
@@ -97,6 +98,16 @@ final routerProvider = Provider<GoRouter>((ref) {
         redirect: (context, state) {
           final user = currentUser.value;
           if (user == null) return '/login';
+          return null;
+        },
+      ),
+      GoRoute(
+        path: '/admin/disposals',
+        builder: (context, state) => const AdminDisposalsView(),
+        redirect: (context, state) {
+          final user = currentUser.value;
+          if (user == null) return '/login';
+          if (!user.isAdmin) return '/home';
           return null;
         },
       ),
