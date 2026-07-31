@@ -20,6 +20,7 @@ const { requireAuth, requireAdmin } = require('./auth');
 const { uploadImage, MAX_BYTES } = require('./cloudinary');
 const { approveDisposal, rejectDisposal } = require('./award');
 const policyModule = require('./pointsPolicy');
+const binsModule = require('./bins');
 
 const app = express();
 
@@ -180,6 +181,69 @@ app.post('/disposals/:id/review', requireAuth, requireAdmin, async (req, res) =>
     // already-decided submission, a missing wallet, a daily cap reached.
     console.error(`Review of ${id} failed:`, err.message);
     return res.status(409).json({ error: 'review_failed', message: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Bins (F2.1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Registers a bin.
+ *
+ * Bins are server-owned because their coordinates and radius are inputs this
+ * service trusts when deciding a payout. The QR payload is allocated here too:
+ * it has to be unique, and a client cannot guarantee that.
+ */
+app.post('/bins', requireAuth, requireAdmin, async (req, res) => {
+  const { label, lat, lng, radiusMeters } = req.body || {};
+
+  const problems = binsModule.validateBin({ label, lat, lng, radiusMeters });
+  if (problems.length > 0) {
+    return res.status(400).json({ error: 'invalid_bin', problems });
+  }
+
+  try {
+    const bin = await binsModule.createBin({
+      label,
+      lat,
+      lng,
+      radiusMeters,
+      adminUid: req.user.uid,
+    });
+    return res.status(201).json({ ok: true, bin });
+  } catch (err) {
+    console.error('Bin registration failed:', err.message);
+    return res.status(409).json({ error: 'bin_failed', message: err.message });
+  }
+});
+
+/**
+ * Takes a bin in or out of service.
+ *
+ * Never deletes: past disposals reference their bin, and a dangling reference
+ * breaks a user's history and an administrator's ability to review it.
+ */
+app.post('/bins/:id/active', requireAuth, requireAdmin, async (req, res) => {
+  const { active } = req.body || {};
+
+  if (typeof active !== 'boolean') {
+    return res.status(400).json({
+      error: 'bad_request',
+      message: 'active must be true or false.',
+    });
+  }
+
+  try {
+    const result = await binsModule.setBinActive({
+      binId: req.params.id,
+      active,
+      adminUid: req.user.uid,
+    });
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error(`Bin ${req.params.id} update failed:`, err.message);
+    return res.status(409).json({ error: 'bin_failed', message: err.message });
   }
 });
 
