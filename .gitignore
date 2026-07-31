@@ -51,3 +51,6 @@ rules_test/node_modules/
 .agents/
 .claude/skills/
 .firebase/
+*.serviceaccount.json
+server/.env
+server/node_modules/
