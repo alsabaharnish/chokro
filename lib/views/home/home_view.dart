@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import '../../controllers/auth_controller.dart';
 import '../../controllers/wallet_controller.dart';
 import '../shared/app_shell.dart';
@@ -95,19 +96,58 @@ class HomeView extends ConsumerWidget {
                       ),
                     ),
                     const SizedBox(height: 24),
+
+                    // ── Dispose waste (F2.2 entry point) ──────────────────
+                    //
+                    // Disabled for a suspended account. The Firestore rules
+                    // refuse the submission anyway (`isActive()` on disposal
+                    // create), so this is courtesy rather than enforcement —
+                    // it stops a user walking to a bin and photographing a bag
+                    // before finding out.
                     Card(
-                      color: theme.colorScheme.surfaceContainerHighest,
-                      child: const Padding(
-                        padding: EdgeInsets.all(20),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Coming in the next milestone',
-                                style: TextStyle(fontWeight: FontWeight.bold)),
-                            SizedBox(height: 8),
-                            Text('Scan a bin QR code, photograph your disposal, '
-                                'and earn points once an admin approves it.'),
-                          ],
+                      clipBehavior: Clip.antiAlias,
+                      child: InkWell(
+                        onTap: user.isActive
+                            ? () => context.push('/dispose/scan')
+                            : null,
+                        child: Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: Row(
+                            children: [
+                              CircleAvatar(
+                                radius: 24,
+                                backgroundColor:
+                                    theme.colorScheme.primaryContainer,
+                                child: Icon(
+                                  Icons.qr_code_scanner,
+                                  color: theme.colorScheme.onPrimaryContainer,
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Dispose waste',
+                                      style: theme.textTheme.titleMedium
+                                          ?.copyWith(
+                                              fontWeight: FontWeight.bold),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      user.isActive
+                                          ? 'Scan the code on a bin to start.'
+                                          : 'Unavailable while suspended.',
+                                      style: theme.textTheme.bodySmall,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (user.isActive)
+                                const Icon(Icons.chevron_right),
+                            ],
+                          ),
                         ),
                       ),
                     ),
