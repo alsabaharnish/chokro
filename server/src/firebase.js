@@ -10,11 +10,35 @@
  * project. Anyone holding this key can read and rewrite every wallet in the
  * database, and no rule will stop them. The key is therefore read from an
  * environment variable and never from a file in the repository.
+ *
+ * FORMAT: FIREBASE_SERVICE_ACCOUNT accepts either
+ *   (a) base64 of the service account JSON — preferred, and what Render uses, or
+ *   (b) the raw JSON on one line — convenient locally.
+ *
+ * Base64 exists as an option because the raw JSON carries braces, quotes and
+ * backslash-escaped newlines, all of which web forms and shell pipelines find
+ * ways to mangle. Base64 is a single unbroken run of [A-Za-z0-9+/=] with nothing
+ * for anything in the chain to interpret.
  */
 
 const admin = require('firebase-admin');
 
 let app;
+
+/** Parses the credential from either supported encoding. */
+function parseServiceAccount(raw) {
+  const trimmed = raw.trim();
+
+  // Raw JSON: starts with a brace.
+  if (trimmed.startsWith('{')) {
+    return JSON.parse(trimmed);
+  }
+
+  // Otherwise assume base64. Strip any whitespace a form or shell introduced.
+  const cleaned = trimmed.replace(/\s+/g, '');
+  const decoded = Buffer.from(cleaned, 'base64').toString('utf8');
+  return JSON.parse(decoded);
+}
 
 function initFirebase() {
   if (app) return app;
@@ -22,24 +46,38 @@ function initFirebase() {
   const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
   if (!raw) {
     throw new Error(
-      'FIREBASE_SERVICE_ACCOUNT is not set. Paste the full service account ' +
-        'JSON into that environment variable (locally, into server/.env).',
+      'FIREBASE_SERVICE_ACCOUNT is not set. Set it to the base64 of the ' +
+        'service account JSON (locally, in server/.env).',
     );
   }
 
   let serviceAccount;
   try {
-    serviceAccount = JSON.parse(raw);
+    serviceAccount = parseServiceAccount(raw);
   } catch (err) {
+    // Deliberately reports shape, never content. Length and first character are
+    // enough to tell a truncated paste from a wrong-format one, and neither
+    // leaks any part of the key into the logs.
+    const trimmed = raw.trim();
     throw new Error(
-      'FIREBASE_SERVICE_ACCOUNT is not valid JSON. It must be the entire ' +
-        'file contents, including the outer braces.',
+      'FIREBASE_SERVICE_ACCOUNT could not be parsed. ' +
+        `Length: ${trimmed.length}. Starts with: "${trimmed.slice(0, 1)}". ` +
+        'Expected either base64 (a long run of letters and digits) or raw ' +
+        'JSON starting with "{". A length far below 2000 means the value was ' +
+        `truncated. Underlying error: ${err.message}`,
     );
   }
 
-  // Render's dashboard and most .env formats mangle the literal "\n" sequences
-  // inside the private key. Restoring them here is less error-prone than asking
-  // a human to paste a multi-line PEM into a single-line form field.
+  if (!serviceAccount.private_key || !serviceAccount.client_email) {
+    throw new Error(
+      'FIREBASE_SERVICE_ACCOUNT parsed, but is missing private_key or ' +
+        'client_email. This does not look like a service account file.',
+    );
+  }
+
+  // Some .env formats and dashboards turn the literal "\n" sequences inside the
+  // private key into something else. Restoring them here is less error-prone
+  // than asking a human to paste a multi-line PEM into a single-line field.
   if (typeof serviceAccount.private_key === 'string') {
     serviceAccount.private_key = serviceAccount.private_key.replace(
       /\\n/g,
@@ -51,6 +89,8 @@ function initFirebase() {
     credential: admin.credential.cert(serviceAccount),
     storageBucket: process.env.FIREBASE_STORAGE_BUCKET || undefined,
   });
+
+  console.log(`Firebase Admin initialised for ${serviceAccount.project_id}.`);
 
   return app;
 }
