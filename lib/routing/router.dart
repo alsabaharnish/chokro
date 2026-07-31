@@ -8,6 +8,7 @@ import '../views/seller_application/seller_application_view.dart';
 import '../views/admin/admin_applications_view.dart';
 import '../views/wallet/wallet_view.dart';
 import '../views/disposal/scan_view.dart';
+import '../views/disposal/photo_view.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(firebaseAuthStateProvider);
@@ -64,6 +65,15 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/dispose/scan',
         builder: (context, state) => const ScanView(),
+        redirect: (context, state) {
+          final user = currentUser.value;
+          if (user == null) return '/login';
+          return null;
+        },
+      ),
+      GoRoute(
+        path: '/dispose/photo',
+        builder: (context, state) => const DisposalPhotoView(),
         redirect: (context, state) {
           final user = currentUser.value;
           if (user == null) return '/login';

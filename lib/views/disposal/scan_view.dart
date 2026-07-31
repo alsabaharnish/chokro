@@ -1,14 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
+import '../../controllers/disposal_controller.dart';
 import '../../controllers/scan_controller.dart';
 
 /// Step 1 of the disposal flow (F2.2): scan the code on a bin.
 ///
-/// Deliberately does nothing beyond resolving the bin. Photo capture, the
-/// location fix and the submission itself are later steps — keeping them apart
-/// means a failure on a borrowed phone points at one thing rather than four.
+/// Resolves the bin and hands off. Photo capture, the location fix and the
+/// submission itself are later steps — keeping them apart means a failure on a
+/// borrowed phone points at one thing rather than four.
 ///
 /// Camera permission is handled by `mobile_scanner` itself: the plugin requests
 /// it when the controller starts. If the user denies it, [MobileScanner]'s
@@ -61,6 +63,16 @@ class _ScanViewState extends ConsumerState<ScanView> {
     ref.read(scanControllerProvider.notifier).reset();
   }
 
+  void _continueToPhoto() {
+    final bin = ref.read(scanControllerProvider).bin;
+    if (bin == null) return;
+
+    // Opens a fresh draft here rather than on the photo screen: backing out and
+    // scanning a different bin must not leave a photo attached to the old one.
+    ref.read(disposalDraftProvider.notifier).startForBin(bin);
+    context.push('/dispose/photo');
+  }
+
   @override
   Widget build(BuildContext context) {
     final scan = ref.watch(scanControllerProvider);
@@ -107,6 +119,7 @@ class _ScanViewState extends ConsumerState<ScanView> {
             scan: scan,
             theme: theme,
             onScanAgain: _scanAgain,
+            onContinue: _continueToPhoto,
           ),
         ],
       ),
@@ -118,11 +131,13 @@ class _ResultPanel extends StatelessWidget {
   final ScanState scan;
   final ThemeData theme;
   final VoidCallback onScanAgain;
+  final VoidCallback onContinue;
 
   const _ResultPanel({
     required this.scan,
     required this.theme,
     required this.onScanAgain,
+    required this.onContinue,
   });
 
   @override
@@ -182,10 +197,9 @@ class _ResultPanel extends StatelessWidget {
             const SizedBox(height: 16),
             if (scan.canProceed)
               FilledButton.icon(
-                // Step 2 wires this to photo capture.
-                onPressed: null,
+                onPressed: onContinue,
                 icon: const Icon(Icons.photo_camera_outlined),
-                label: const Text('Continue (next step)'),
+                label: const Text('Continue'),
               )
             else if (isProblem)
               OutlinedButton(
