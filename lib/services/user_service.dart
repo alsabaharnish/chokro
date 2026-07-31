@@ -53,16 +53,32 @@ class UserService {
   Future<void> updateUserRole(String uid, String role) =>
       _db.collection('users').doc(uid).update({'role': role});
 
-  Future<void> suspendUser(String uid) =>
+  /// Suspends [uid], indefinitely when [until] is null (F5.2, F5.3).
+  ///
+  /// A timed suspension stores its expiry and nothing further happens. No job
+  /// lifts it later — readers resolve the date themselves, in
+  /// `UserModel.isActiveAt` and in `isActive()` in the rules.
+  ///
+  /// LIMITATION: [until] is computed from the administrator's device clock,
+  /// because Firestore cannot offset a server timestamp within a single write.
+  /// A skewed admin clock produces a skewed expiry. The comparison it is later
+  /// checked against is server-side (`request.time`), so this affects how long
+  /// a suspension lasts — never whether the suspended user can shorten it.
+  Future<void> suspendUser(String uid, {DateTime? until}) =>
       _db.collection('users').doc(uid).update({
         'status': AppConstants.statusSuspended,
         'suspendedAt': FieldValue.serverTimestamp(),
+        'suspendedUntil':
+            until == null ? FieldValue.delete() : Timestamp.fromDate(until),
       });
 
+  /// Lifts a suspension and clears any expiry, so a later indefinite
+  /// suspension cannot inherit a stale date.
   Future<void> reinstateUser(String uid) =>
       _db.collection('users').doc(uid).update({
         'status': AppConstants.statusActive,
         'reinstatedAt': FieldValue.serverTimestamp(),
+        'suspendedUntil': FieldValue.delete(),
       });
 
   // ── seller applications ───────────────────────────────────────────────────

@@ -6,6 +6,7 @@ import '../views/auth/register_view.dart';
 import '../views/home/home_view.dart';
 import '../views/seller_application/seller_application_view.dart';
 import '../views/admin/admin_applications_view.dart';
+import '../views/admin/admin_users_view.dart';
 import '../views/admin/points_policy_view.dart';
 import '../views/history/submission_history_view.dart';
 import '../views/wallet/wallet_ledger_view.dart';
@@ -51,6 +52,16 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/admin/applications',
         builder: (context, state) => const AdminApplicationsView(),
+        redirect: (context, state) {
+          final user = currentUser.value;
+          if (user == null) return '/login';
+          if (!user.isAdmin) return '/home';
+          return null;
+        },
+      ),
+      GoRoute(
+        path: '/admin/users',
+        builder: (context, state) => const AdminUsersView(),
         redirect: (context, state) {
           final user = currentUser.value;
           if (user == null) return '/login';

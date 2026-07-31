@@ -53,8 +53,34 @@ service cloud.firestore {
       return isSignedIn() && (role() == 'seller' || role() == 'admin');
     }
 
+    function userData() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // Whether this account may act (F5.3).
+    //
+    // A suspension is either indefinite or timed. Nothing in this system runs
+    // on a schedule — Cloud Functions need a billing card and the free Render
+    // instance sleeps — so no process exists that could flip `status` back to
+    // 'active' when a timed suspension runs out. The expiry is therefore
+    // resolved here, at request time, exactly as lockoutActive() resolves its
+    // own window a few lines below.
+    //
+    // A missing `suspendedUntil` means the suspension is indefinite, so its
+    // absence must never read as "expired" — hence the explicit key check
+    // rather than a comparison against a null.
+    //
+    // Mirrored by UserModel.isActiveAt, and proven by
+    // rules_test/suspension.rules.test.js.
     function isActive() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.status == 'active';
+      return isSignedIn() && (
+        userData().status == 'active'
+        || (
+          userData().status == 'suspended'
+          && 'suspendedUntil' in userData()
+          && userData().suspendedUntil < request.time
+        )
+      );
     }
 
     // -------------------------------------------------------------------------

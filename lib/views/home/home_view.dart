@@ -227,6 +227,51 @@ class HomeView extends ConsumerWidget {
                       Card(
                         clipBehavior: Clip.antiAlias,
                         child: InkWell(
+                          onTap: () => context.push('/admin/users'),
+                          child: Padding(
+                            padding: const EdgeInsets.all(20),
+                            child: Row(
+                              children: [
+                                CircleAvatar(
+                                  radius: 24,
+                                  backgroundColor:
+                                      theme.colorScheme.secondaryContainer,
+                                  child: Icon(
+                                    Icons.people_outline,
+                                    color:
+                                        theme.colorScheme.onSecondaryContainer,
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Accounts',
+                                        style: theme.textTheme.titleMedium
+                                            ?.copyWith(
+                                                fontWeight: FontWeight.bold),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        'Suspend or reinstate an account.',
+                                        style: theme.textTheme.bodySmall,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const Icon(Icons.chevron_right),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Card(
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
                           onTap: () => context.push('/admin/points'),
                           child: Padding(
                             padding: const EdgeInsets.all(20),
