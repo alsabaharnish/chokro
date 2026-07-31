@@ -9,6 +9,8 @@ import '../views/admin/admin_applications_view.dart';
 import '../views/wallet/wallet_view.dart';
 import '../views/disposal/scan_view.dart';
 import '../views/disposal/photo_view.dart';
+import '../views/disposal/location_view.dart';
+import '../views/disposal/declare_view.dart';
 
 final routerProvider = Provider<GoRouter>((ref) {
   final authState = ref.watch(firebaseAuthStateProvider);
@@ -74,6 +76,24 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/dispose/photo',
         builder: (context, state) => const DisposalPhotoView(),
+        redirect: (context, state) {
+          final user = currentUser.value;
+          if (user == null) return '/login';
+          return null;
+        },
+      ),
+      GoRoute(
+        path: '/dispose/location',
+        builder: (context, state) => const DisposalLocationView(),
+        redirect: (context, state) {
+          final user = currentUser.value;
+          if (user == null) return '/login';
+          return null;
+        },
+      ),
+      GoRoute(
+        path: '/dispose/declare',
+        builder: (context, state) => const DisposalDeclareView(),
         redirect: (context, state) {
           final user = currentUser.value;
           if (user == null) return '/login';

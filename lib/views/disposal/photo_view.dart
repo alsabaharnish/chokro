@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../controllers/disposal_controller.dart';
 
@@ -167,8 +168,7 @@ class DisposalPhotoView extends ConsumerWidget {
                       const SizedBox(width: 12),
                       Expanded(
                         child: FilledButton.icon(
-                          // Step 3 wires this to the location fix.
-                          onPressed: null,
+                          onPressed: () => context.push('/dispose/location'),
                           icon: const Icon(Icons.my_location),
                           label: const Text('Continue'),
                         ),

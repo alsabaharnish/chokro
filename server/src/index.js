@@ -1,17 +1,13 @@
 /**
  * Chokro trusted service — entry point.
  *
- * Milestone 2, step 1: skeleton only. Two endpoints, no disposal logic yet.
- * The point of this step is to prove the deployment path works before any
- * business logic is entangled with it.
+ *   GET  /health              no auth   — is the process alive?
+ *   GET  /whoami              auth      — token verification and Firestore reach
+ *   GET  /admin/ping          admin     — role gating
+ *   POST /photos/disposal     auth      — upload a disposal photograph
  *
- *   GET  /health   no auth   — is the process alive?
- *   GET  /whoami   auth      — can it verify a token and reach Firestore?
- *
- * /whoami is the real smoke test. If it returns your uid and role, then token
- * verification, the service account credentials and Firestore access are all
- * working, which is every piece of infrastructure the verification endpoints
- * will depend on.
+ * Still to come (M2): /disposals/:id/verify, /disposals/:id/review,
+ * /config/points, and award.js — the single wallet-credit path.
  */
 
 require('dotenv').config();
@@ -21,6 +17,7 @@ const cors = require('cors');
 
 const { initFirebase } = require('./firebase');
 const { requireAuth, requireAdmin } = require('./auth');
+const { uploadImage, MAX_BYTES } = require('./cloudinary');
 
 const app = express();
 
@@ -28,17 +25,19 @@ const app = express();
 // protocol are wrong in logs.
 app.set('trust proxy', 1);
 
-app.use(express.json({ limit: '1mb' }));
+// Base64 inflates a payload by about a third, so the ceiling here has to exceed
+// the image ceiling with room to spare.
+app.use(express.json({ limit: '12mb' }));
 
 /**
  * CORS.
  *
  * The Flutter web build calls this service from a browser, so the origin has to
- * be allowed explicitly. Android has no origin and is unaffected.
+ * be allowed explicitly. Android and iOS have no origin and are unaffected.
  *
  * ALLOWED_ORIGINS is a comma-separated list. Keep it to the hosting URL and
- * localhost for development — a wildcard would let any page on the internet
- * make authenticated calls with a token it tricked out of a user.
+ * localhost for development — a wildcard would let any page on the internet make
+ * authenticated calls with a token it tricked out of a user.
  */
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
   .split(',')
@@ -57,7 +56,7 @@ app.use(
 );
 
 // ---------------------------------------------------------------------------
-// Routes
+// Health and diagnostics
 // ---------------------------------------------------------------------------
 
 /**
@@ -68,7 +67,7 @@ app.get('/health', (req, res) => {
   res.json({
     ok: true,
     service: 'chokro-server',
-    version: '0.1.0',
+    version: '0.2.0',
     time: new Date().toISOString(),
   });
 });
@@ -86,6 +85,61 @@ app.get('/whoami', requireAuth, (req, res) => {
 app.get('/admin/ping', requireAuth, requireAdmin, (req, res) => {
   res.json({ ok: true, admin: req.user.uid });
 });
+
+// ---------------------------------------------------------------------------
+// Photo upload
+// ---------------------------------------------------------------------------
+
+/**
+ * Uploads a disposal photograph and returns its URL.
+ *
+ * The client compresses and strips EXIF before sending (§7.4); this endpoint
+ * validates what arrives rather than trusting that it happened.
+ *
+ * Note the uid comes from the verified token, never from the request body. A
+ * caller cannot upload into someone else's folder by asking nicely.
+ */
+app.post('/photos/disposal', requireAuth, async (req, res) => {
+  try {
+    const { imageBase64 } = req.body || {};
+
+    const result = await uploadImage({
+      base64: imageBase64,
+      uid: req.user.uid,
+      kind: 'disposals',
+    });
+
+    res.json({
+      photoUrl: result.url,
+      publicId: result.publicId,
+      bytes: result.bytes,
+    });
+  } catch (err) {
+    // decodeImage throws user-safe messages; anything else is ours to hide.
+    const isValidation =
+      typeof err.message === 'string' &&
+      (err.message.includes('image') || err.message.includes('too large'));
+
+    if (isValidation) {
+      return res.status(400).json({ error: 'bad_image', message: err.message });
+    }
+
+    console.error('Photo upload failed:', err.message);
+    return res.status(502).json({
+      error: 'upload_failed',
+      message: 'The photo could not be stored. Try again.',
+    });
+  }
+});
+
+/** Lets the client show a sensible limit without hard-coding it twice. */
+app.get('/photos/limits', (req, res) => {
+  res.json({ maxBytes: MAX_BYTES });
+});
+
+// ---------------------------------------------------------------------------
+// Fallbacks
+// ---------------------------------------------------------------------------
 
 app.use((req, res) => {
   res.status(404).json({ error: 'not_found', path: req.path });
@@ -112,7 +166,6 @@ const port = process.env.PORT || 8787;
 // account should stop the deploy, not surface later as a mysterious 500.
 try {
   initFirebase();
-  console.log('Firebase Admin initialised.');
 } catch (err) {
   console.error('FATAL:', err.message);
   process.exit(1);
@@ -120,10 +173,18 @@ try {
 
 app.listen(port, () => {
   console.log(`chokro-server listening on ${port}`);
+
   if (allowedOrigins.length === 0) {
     console.warn(
       'ALLOWED_ORIGINS is empty — browser calls will be refused. Set it to ' +
         'your hosting URL before testing the web build.',
+    );
+  }
+
+  if (!process.env.CLOUDINARY_CLOUD_NAME) {
+    console.warn(
+      'Cloudinary is not configured — photo uploads will fail. Set ' +
+        'CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET.',
     );
   }
 });
