@@ -22,6 +22,7 @@ const { approveDisposal, rejectDisposal } = require('./award');
 const policyModule = require('./pointsPolicy');
 const binsModule = require('./bins');
 const { verifyDisposal } = require('./verify');
+const claimsModule = require('./claims');
 
 const app = express();
 
@@ -215,6 +216,72 @@ app.post('/disposals/:id/verify', requireAuth, async (req, res) => {
       error: 'verify_failed',
       message: err.message,
     });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Claims (F6.1-F6.4)
+// ---------------------------------------------------------------------------
+
+/**
+ * A user's remaining claim allowance for the current ISO week.
+ *
+ * Read before composing a claim, so someone at their limit is told before they
+ * photograph something rather than after.
+ */
+app.get('/claims/quota', requireAuth, async (req, res) => {
+  try {
+    const status = await claimsModule.claimQuotaStatus(req.user.uid);
+    return res.json({ ok: true, ...status });
+  } catch (err) {
+    console.error('Claim quota lookup failed:', err.message);
+    return res.status(500).json({
+      error: 'quota_failed',
+      message: 'Could not read your claim allowance.',
+    });
+  }
+});
+
+/**
+ * Approves or rejects a claim.
+ *
+ * There is no automatic lane and no verify endpoint for claims: the
+ * auto-approve path exists only where mechanical checks can pass, and a
+ * self-reported action has none. Every claim is decided by a person.
+ *
+ * The weekly quota is enforced inside the approval transaction rather than at
+ * submission, and it increments on approval rather than submission — otherwise
+ * a user could exhaust their own week with rejected junk (§7.4).
+ */
+app.post('/claims/:id/review', requireAuth, requireAdmin, async (req, res) => {
+  const { decision, reason } = req.body || {};
+
+  if (decision !== 'approve' && decision !== 'reject') {
+    return res.status(400).json({
+      error: 'bad_decision',
+      message: "decision must be 'approve' or 'reject'.",
+    });
+  }
+
+  try {
+    const result =
+      decision === 'approve'
+        ? await claimsModule.approveClaim({
+            claimId: req.params.id,
+            adminUid: req.user.uid,
+          })
+        : await claimsModule.rejectClaim({
+            claimId: req.params.id,
+            adminUid: req.user.uid,
+            reason,
+          });
+
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    // These messages are written for an administrator to read: already
+    // decided, weekly quota reached, no wallet.
+    console.error(`Claim review of ${req.params.id} failed:`, err.message);
+    return res.status(409).json({ error: 'review_failed', message: err.message });
   }
 });
 

@@ -1,0 +1,289 @@
+/// Chokro — self-reported eco-action claims (F6.1–F6.4).
+///
+/// Plain Dart, no Firebase imports (§5.1).
+///
+/// ## Why this is deliberately the weakest route
+///
+/// A disposal is geofenced, time-locked, hash-checked and screened. A claim has
+/// none of that, because there is nothing objective to check a photograph of a
+/// planted tree against — no bin, no radius, no distance. The safeguards that
+/// remain are a fixed action vocabulary, a weekly quota, an administrator's own
+/// eyes, and a smaller award.
+///
+/// That asymmetry is the design, not a gap in it. §7.3 enforces
+/// `claimAward < disposalAward` as a validated invariant precisely so the
+/// weaker route can never pay better than the stronger one — if it did, users
+/// would optimise into it and the verification design would stop meaning
+/// anything.
+///
+/// **Claims are never auto-approved.** The auto-approve lane exists only where
+/// mechanical checks can pass, and here none can.
+library;
+
+/// Where a claim sits in its lifecycle.
+///
+/// Three states, not the disposal's four. There is no `autoApproved` because
+/// there is no automatic lane — every approval is a person's decision, so
+/// `approved` always implies a human looked.
+enum ClaimStatus {
+  pending,
+  approved,
+  rejected;
+
+  /// Falls back to [pending] for anything unrecognised — fail toward no payout,
+  /// the same rule the disposal status uses.
+  static ClaimStatus fromName(String? name) {
+    for (final status in ClaimStatus.values) {
+      if (status.name == name) return status;
+    }
+    return ClaimStatus.pending;
+  }
+
+  bool get isPending => this == ClaimStatus.pending;
+  bool get isApproved => this == ClaimStatus.approved;
+  bool get isRejected => this == ClaimStatus.rejected;
+  bool get isTerminal => this != ClaimStatus.pending;
+}
+
+/// The closed action vocabulary (§7, FR-6).
+///
+/// Fixed rather than free text for three reasons: it keeps an unmoderated text
+/// field out of the system, it makes claims sortable for review, and it gives
+/// an administrator a specific question to answer about the photograph rather
+/// than an open-ended one.
+enum ClaimActionType {
+  treePlanting,
+  composting,
+  refusingSingleUsePlastic,
+  reusableBagOrBottle,
+  communityCleanup;
+
+  static ClaimActionType? fromName(String? name) {
+    for (final type in ClaimActionType.values) {
+      if (type.name == name) return type;
+    }
+    return null;
+  }
+
+  String get label {
+    switch (this) {
+      case ClaimActionType.treePlanting:
+        return 'Tree planting';
+      case ClaimActionType.composting:
+        return 'Composting';
+      case ClaimActionType.refusingSingleUsePlastic:
+        return 'Refusing single-use plastic';
+      case ClaimActionType.reusableBagOrBottle:
+        return 'Reusable bag or bottle';
+      case ClaimActionType.communityCleanup:
+        return 'Community cleanup';
+    }
+  }
+
+  /// What the photograph should show. Shown on the submission screen, so the
+  /// user knows what evidence is expected before they take it.
+  String get evidenceHint {
+    switch (this) {
+      case ClaimActionType.treePlanting:
+        return 'Show the planted sapling in the ground.';
+      case ClaimActionType.composting:
+        return 'Show the compost bin or heap with material in it.';
+      case ClaimActionType.refusingSingleUsePlastic:
+        return 'Show the reusable alternative you used instead.';
+      case ClaimActionType.reusableBagOrBottle:
+        return 'Show the bag or bottle in use.';
+      case ClaimActionType.communityCleanup:
+        return 'Show the collected waste or the cleaned area.';
+    }
+  }
+}
+
+/// One self-reported action.
+class ClaimModel {
+  /// Firestore document ID. Null before the document is written.
+  final String? id;
+
+  final String userId;
+  final ClaimActionType actionType;
+
+  final String photoUrl;
+
+  /// Cloudinary public id, for the server's perceptual hash.
+  final String photoPublicId;
+
+  /// SERVER-WRITTEN ONLY. Null on the document the client creates.
+  ///
+  /// Compared against this user's own previous claims. A recycled photograph is
+  /// the obvious way to abuse a route with no geofence, so the hash matters
+  /// more here than it does for disposals — though cross-user sharing is still
+  /// not detected, which is stated as a limitation (§7.2).
+  final String? photoHash;
+
+  final ClaimStatus status;
+
+  /// Points credited, snapshotted at approval. Never re-derived from the
+  /// current policy (§6.2).
+  final int? pointsAwarded;
+
+  /// Mandatory on rejection, and shown to the user.
+  final String? rejectionReason;
+
+  /// UID of the deciding administrator. Never null on a decided claim — unlike
+  /// a disposal, there is no path here that decides without a person.
+  final String? reviewedBy;
+
+  final DateTime? reviewedAt;
+  final DateTime? createdAt;
+
+  const ClaimModel({
+    this.id,
+    required this.userId,
+    required this.actionType,
+    required this.photoUrl,
+    this.photoPublicId = '',
+    this.photoHash,
+    this.status = ClaimStatus.pending,
+    this.pointsAwarded,
+    this.rejectionReason,
+    this.reviewedBy,
+    this.reviewedAt,
+    this.createdAt,
+  });
+
+  factory ClaimModel.fromJson(Map<String, dynamic> json, {String? id}) {
+    return ClaimModel(
+      id: id ?? json['id'] as String?,
+      userId: (json['userId'] as String?) ?? '',
+      actionType: ClaimActionType.fromName(json['actionType'] as String?) ??
+          ClaimActionType.reusableBagOrBottle,
+      photoUrl: (json['photoUrl'] as String?) ?? '',
+      photoPublicId: (json['photoPublicId'] as String?) ?? '',
+      photoHash: json['photoHash'] as String?,
+      status: ClaimStatus.fromName(json['status'] as String?),
+      pointsAwarded: _toNullableInt(json['pointsAwarded']),
+      rejectionReason: json['rejectionReason'] as String?,
+      reviewedBy: json['reviewedBy'] as String?,
+      reviewedAt: json['reviewedAt'] as DateTime?,
+      createdAt: json['createdAt'] as DateTime?,
+    );
+  }
+
+  /// The map the *client* may write when creating a claim.
+  ///
+  /// Everything that decides a payout is absent by construction, and the rules
+  /// enforce the same shape with `hasOnly`. This method exists so the client
+  /// cannot accidentally send a field the rules would reject — it is not the
+  /// security measure itself.
+  Map<String, dynamic> toCreateJson() => <String, dynamic>{
+        'userId': userId,
+        'actionType': actionType.name,
+        'photoUrl': photoUrl,
+        'photoPublicId': photoPublicId,
+        'status': ClaimStatus.pending.name,
+      };
+
+  ClaimModel copyWith({
+    String? id,
+    String? userId,
+    ClaimActionType? actionType,
+    String? photoUrl,
+    String? photoPublicId,
+    String? photoHash,
+    ClaimStatus? status,
+    int? pointsAwarded,
+    String? rejectionReason,
+    String? reviewedBy,
+    DateTime? reviewedAt,
+    DateTime? createdAt,
+  }) {
+    return ClaimModel(
+      id: id ?? this.id,
+      userId: userId ?? this.userId,
+      actionType: actionType ?? this.actionType,
+      photoUrl: photoUrl ?? this.photoUrl,
+      photoPublicId: photoPublicId ?? this.photoPublicId,
+      photoHash: photoHash ?? this.photoHash,
+      status: status ?? this.status,
+      pointsAwarded: pointsAwarded ?? this.pointsAwarded,
+      rejectionReason: rejectionReason ?? this.rejectionReason,
+      reviewedBy: reviewedBy ?? this.reviewedBy,
+      reviewedAt: reviewedAt ?? this.reviewedAt,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+
+  int get creditedPoints => status.isApproved ? (pointsAwarded ?? 0) : 0;
+
+  String get userFacingStatus {
+    switch (status) {
+      case ClaimStatus.pending:
+        return 'Pending review';
+      case ClaimStatus.approved:
+        return 'Approved';
+      case ClaimStatus.rejected:
+        return 'Rejected';
+    }
+  }
+
+  List<String> validate() {
+    final problems = <String>[];
+    if (userId.trim().isEmpty) problems.add('User is required.');
+    if (photoUrl.trim().isEmpty) problems.add('A photograph is required.');
+    if (status.isRejected &&
+        (rejectionReason == null || rejectionReason!.trim().isEmpty)) {
+      problems.add('A rejection must record a reason.');
+    }
+    if (status.isApproved && (pointsAwarded == null || pointsAwarded! <= 0)) {
+      problems.add('An approved claim must record the points awarded.');
+    }
+    if (status.isTerminal &&
+        (reviewedBy == null || reviewedBy!.trim().isEmpty)) {
+      // Unlike a disposal, every decided claim has a human behind it.
+      problems.add('A decided claim must record the reviewing administrator.');
+    }
+    return problems;
+  }
+
+  bool get isValid => validate().isEmpty;
+
+  @override
+  String toString() =>
+      'ClaimModel(id: $id, ${actionType.name}, ${status.name}, '
+      'points: $pointsAwarded)';
+}
+
+/// ISO-8601 week key, e.g. `2026-W31`.
+///
+/// Duplicated deliberately from `points_policy.dart`'s [IsoWeek] rather than
+/// imported, so this file stays self-contained — but the two must agree, and
+/// both are tested against the same year-boundary cases. The server has a third
+/// copy in `pointsPolicy.js`.
+///
+/// Getting this wrong silently corrupts quota enforcement at year boundaries:
+/// ISO weeks start on Monday, and week 1 is the week containing the first
+/// Thursday, so early January can belong to the previous ISO year.
+class ClaimQuota {
+  const ClaimQuota._();
+
+  /// Document ID for `claimQuotas/{userId}_{isoWeek}`.
+  static String docId(String userId, DateTime date) =>
+      '${userId}_${weekKey(date)}';
+
+  static String weekKey(DateTime date) {
+    final thursday = _thursdayOfWeek(date);
+    final firstOfYear = DateTime.utc(thursday.year, 1, 1);
+    final week = (thursday.difference(firstOfYear).inDays ~/ 7) + 1;
+    return '${thursday.year}-W${week.toString().padLeft(2, '0')}';
+  }
+
+  static DateTime _thursdayOfWeek(DateTime date) {
+    final utc = DateTime.utc(date.year, date.month, date.day);
+    return utc.add(Duration(days: 4 - utc.weekday));
+  }
+}
+
+int? _toNullableInt(Object? value) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  return null;
+}

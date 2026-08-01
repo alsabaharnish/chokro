@@ -78,6 +78,7 @@ function validDisposal(uid, binId = OPEN_BIN) {
     userId: uid,
     binId,
     photoUrl: 'https://storage.example/p.jpg',
+    photoPublicId: 'chokro/disposals/test/abc123',
     capturedLat: 23.7809,
     capturedLng: 90.4074,
     distanceMeters: 11.2,

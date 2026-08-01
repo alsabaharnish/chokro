@@ -72,15 +72,24 @@ service cloud.firestore {
     //
     // Mirrored by UserModel.isActiveAt, and proven by
     // rules_test/suspension.rules.test.js.
-    function isActive() {
-      return isSignedIn() && (
-        userData().status == 'active'
+    function isActiveWith(u) {
+      return u.status == 'active'
         || (
-          userData().status == 'suspended'
-          && 'suspendedUntil' in userData()
-          && userData().suspendedUntil < request.time
-        )
-      );
+          u.status == 'suspended'
+          && 'suspendedUntil' in u
+          && u.suspendedUntil < request.time
+        );
+    }
+
+    // Reads the user document exactly once.
+    //
+    // Firestore does not cache get() across calls within one rule evaluation,
+    // and each counts against a hard per-request budget of 10 document reads.
+    // The previous form called userData() four times, which pushed the disposal
+    // create path over the limit and surfaced as an evaluation error rather
+    // than a clean denial.
+    function isActive() {
+      return isSignedIn() && isActiveWith(userData());
     }
 
     // -------------------------------------------------------------------------
@@ -231,6 +240,63 @@ service cloud.firestore {
 
       // Screening, approval, rejection and the points award are all server
       // writes. There is no client transition out of pending.
+      allow update, delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // claims — the weakest earn route, and shaped accordingly (F6.1-F6.4)
+    // -------------------------------------------------------------------------
+    //
+    // Structurally identical to `disposals`: the client may create one pending
+    // record and may do nothing else. What is missing is the geofence and the
+    // lockout, because a self-reported action has nothing objective to check
+    // against — no bin, no radius, no distance.
+    //
+    // The safeguards that remain are the closed action vocabulary enforced
+    // below, the weekly quota in `claimQuotas` (server-written, so a client
+    // cannot lift its own limit), an administrator's own eyes, and an award
+    // that §7.3 validates as strictly lower than a disposal's.
+    //
+    // There is no auto-approval path here at all. Every decision is a person's.
+
+    match /claims/{claimId} {
+      allow read: if isSignedIn()
+        && (resource.data.userId == request.auth.uid || isAdmin());
+
+      allow create: if isSignedIn()
+        && isActive()
+        && request.resource.data.userId == request.auth.uid
+
+        // hasOnly, not hasAll. An exact key set is what keeps `pointsAwarded`,
+        // `photoHash` and `reviewedBy` out of a client-authored document.
+        && request.resource.data.keys().hasOnly([
+             'userId', 'actionType', 'photoUrl', 'photoPublicId',
+             'status', 'createdAt'
+           ])
+        && request.resource.data.keys().hasAll([
+             'userId', 'actionType', 'photoUrl', 'photoPublicId',
+             'status', 'createdAt'
+           ])
+
+        // Born pending. It cannot arrive approved.
+        && request.resource.data.status == 'pending'
+
+        // The vocabulary is closed here as well as in the client, because the
+        // client's copy is a convenience and this one is the enforcement.
+        && request.resource.data.actionType in [
+             'treePlanting', 'composting', 'refusedSingleUsePlastic',
+             'reusableBagOrBottle', 'communityCleanup'
+           ]
+
+        && request.resource.data.photoUrl is string
+        && request.resource.data.photoUrl.size() > 0
+
+        // A client clock value is rejected outright (§7.4).
+        && request.resource.data.createdAt == request.time;
+
+      // Approval is a payout decision, so it goes to the server like every
+      // other one. This denies an administrator too — proven by the test named
+      // exactly that in rules_test/claims.rules.test.js.
       allow update, delete: if false;
     }
 
