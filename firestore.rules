@@ -198,13 +198,13 @@ service cloud.firestore {
         // server-owned field out of a client-authored document. hasAll would
         // permit extra keys and the whole guarantee would leak.
         && request.resource.data.keys().hasOnly([
-             'userId', 'binId', 'photoUrl',
+             'userId', 'binId', 'photoUrl', 'photoPublicId',
              'capturedLat', 'capturedLng', 'distanceMeters',
              'declaredItemCount', 'itemType',
              'status', 'flags', 'createdAt'
            ])
         && request.resource.data.keys().hasAll([
-             'userId', 'binId', 'photoUrl',
+             'userId', 'binId', 'photoUrl', 'photoPublicId',
              'capturedLat', 'capturedLng', 'distanceMeters',
              'declaredItemCount', 'itemType',
              'status', 'flags', 'createdAt'

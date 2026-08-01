@@ -168,8 +168,17 @@ class DisposalModel {
   final String userId;
   final String binId;
 
-  /// Firebase Storage download URL for the disposal photograph.
+  /// Cloudinary URL for the disposal photograph.
   final String photoUrl;
+
+  /// Cloudinary public_id for the stored image.
+  ///
+  /// Needed server-side: the perceptual hash is computed from an 8x8 grayscale
+  /// transform of this image, and the transform URL is built from the public
+  /// id. Written by the client because only the client sees the upload
+  /// response, and harmless in its hands — it names an image that is already
+  /// public at an unguessable URL.
+  final String photoPublicId;
 
   /// Perceptual hash of the photograph, used for duplicate detection.
   ///
@@ -234,6 +243,7 @@ class DisposalModel {
     required this.userId,
     required this.binId,
     required this.photoUrl,
+    this.photoPublicId = '',
     this.photoHash,
     required this.capturedLat,
     required this.capturedLng,
@@ -267,6 +277,7 @@ class DisposalModel {
       userId: (json['userId'] as String?) ?? '',
       binId: (json['binId'] as String?) ?? '',
       photoUrl: (json['photoUrl'] as String?) ?? '',
+      photoPublicId: (json['photoPublicId'] as String?) ?? '',
       photoHash: json['photoHash'] as String?,
       capturedLat: _toDouble(json['capturedLat']),
       capturedLng: _toDouble(json['capturedLng']),
@@ -323,6 +334,7 @@ class DisposalModel {
         'userId': userId,
         'binId': binId,
         'photoUrl': photoUrl,
+        'photoPublicId': photoPublicId,
         'capturedLat': capturedLat,
         'capturedLng': capturedLng,
         'distanceMeters': distanceMeters,
@@ -337,6 +349,7 @@ class DisposalModel {
     String? userId,
     String? binId,
     String? photoUrl,
+    String? photoPublicId,
     String? photoHash,
     double? capturedLat,
     double? capturedLng,
@@ -359,6 +372,7 @@ class DisposalModel {
       userId: userId ?? this.userId,
       binId: binId ?? this.binId,
       photoUrl: photoUrl ?? this.photoUrl,
+      photoPublicId: photoPublicId ?? this.photoPublicId,
       photoHash: photoHash ?? this.photoHash,
       capturedLat: capturedLat ?? this.capturedLat,
       capturedLng: capturedLng ?? this.capturedLng,

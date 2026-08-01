@@ -21,6 +21,7 @@ const { uploadImage, MAX_BYTES } = require('./cloudinary');
 const { approveDisposal, rejectDisposal } = require('./award');
 const policyModule = require('./pointsPolicy');
 const binsModule = require('./bins');
+const { verifyDisposal } = require('./verify');
 
 const app = express();
 
@@ -181,6 +182,39 @@ app.post('/disposals/:id/review', requireAuth, requireAdmin, async (req, res) =>
     // already-decided submission, a missing wallet, a daily cap reached.
     console.error(`Review of ${id} failed:`, err.message);
     return res.status(409).json({ error: 'review_failed', message: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Disposal verification (F2.5, F2.10, F2.11, F2.12)
+// ---------------------------------------------------------------------------
+
+/**
+ * Verifies a pending submission: recomputes the distance from stored
+ * coordinates, hashes the photograph, checks it against the user's own history,
+ * screens it, and either credits the award or routes it to the review queue.
+ *
+ * Called by the submitting user, not by an administrator. The caller must own
+ * the submission — verified inside verifyDisposal.
+ *
+ * Idempotent: a submission that has already been decided returns its existing
+ * outcome rather than being reconsidered. The client cannot distinguish a lost
+ * response from a lost request, so it will retry, and a retry must not credit
+ * twice.
+ */
+app.post('/disposals/:id/verify', requireAuth, async (req, res) => {
+  try {
+    const result = await verifyDisposal({
+      disposalId: req.params.id,
+      callerUid: req.user.uid,
+    });
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error(`Verification of ${req.params.id} failed:`, err.message);
+    return res.status(409).json({
+      error: 'verify_failed',
+      message: err.message,
+    });
   }
 });
 

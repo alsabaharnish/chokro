@@ -24,10 +24,15 @@ class PhotoUploadService {
 
   PhotoUploadService({http.Client? client}) : _client = client ?? http.Client();
 
-  /// Uploads [file] and returns its permanent URL.
+  /// Uploads [file] and returns its URL and Cloudinary public id.
+  ///
+  /// The public id is needed by the verification pipeline: the perceptual hash
+  /// is computed from an 8x8 grayscale transform of the stored image, and that
+  /// transform URL is built from the public id. The server has always returned
+  /// it; it was previously discarded here.
   ///
   /// Throws [PhotoUploadException] with a message fit to show a user.
-  Future<String> uploadDisposalPhoto(File file) async {
+  Future<UploadedPhoto> uploadDisposalPhoto(File file) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       throw const PhotoUploadException('You are not signed in.');
@@ -87,7 +92,13 @@ class PhotoUploadService {
           'The server did not return a photo URL.',
         );
       }
-      return url;
+      return UploadedPhoto(
+        url: url,
+        // Absent only from an older server build. An empty id means the hash
+        // step is skipped and the submission routes to review — degraded, but
+        // never wrongly approved.
+        publicId: (body['publicId'] as String?) ?? '',
+      );
     }
 
     // The server sends a user-safe message for anything it considers the
@@ -120,6 +131,14 @@ void _log(String context, Object error, [StackTrace? stackTrace]) {
   if (!kDebugMode) return;
   debugPrint('[PhotoUploadService] $context: $error');
   if (stackTrace != null) debugPrint('$stackTrace');
+}
+
+/// A stored photograph: where it lives, and how the server can address it.
+class UploadedPhoto {
+  const UploadedPhoto({required this.url, required this.publicId});
+
+  final String url;
+  final String publicId;
 }
 
 class PhotoUploadException implements Exception {

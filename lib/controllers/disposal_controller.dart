@@ -11,6 +11,7 @@ import '../models/bin_model.dart';
 import '../models/disposal_model.dart';
 import '../services/disposal_service.dart';
 import '../services/photo_upload_service.dart';
+import '../services/verification_service.dart';
 import '../services/location_service.dart';
 
 final locationServiceProvider =
@@ -21,6 +22,9 @@ final disposalServiceProvider =
 
 final photoUploadServiceProvider =
     Provider<PhotoUploadService>((ref) => PhotoUploadService());
+
+final verificationServiceProvider =
+    Provider<VerificationService>((ref) => VerificationService());
 
 /// The submission being composed, held across the steps of the flow.
 ///
@@ -53,6 +57,17 @@ class DisposalDraft {
   final bool isSubmitting;
   final String? submittedId;
 
+  /// What verification decided, once it has been asked.
+  ///
+  /// Null while the submission is still being composed or verified. A non-null
+  /// value with `needsReview` true is the normal outcome, not an error — the
+  /// document exists either way.
+  final VerificationOutcome? verification;
+
+  /// True while the server is deciding. The document already exists at this
+  /// point, so the user is never at risk of losing the submission.
+  final bool isVerifying;
+
   const DisposalDraft({
     this.bin,
     this.photoPath,
@@ -66,6 +81,8 @@ class DisposalDraft {
     this.itemType = DisposalItemType.plasticBottle,
     this.isSubmitting = false,
     this.submittedId,
+    this.verification,
+    this.isVerifying = false,
   });
 
   bool get hasPhoto => photoPath != null;
@@ -125,8 +142,11 @@ class DisposalDraft {
     DisposalItemType? itemType,
     bool? isSubmitting,
     String? submittedId,
+    VerificationOutcome? verification,
+    bool? isVerifying,
     bool clearPhoto = false,
     bool clearError = false,
+    bool clearVerification = false,
   }) {
     return DisposalDraft(
       bin: bin ?? this.bin,
@@ -142,6 +162,9 @@ class DisposalDraft {
       itemType: itemType ?? this.itemType,
       isSubmitting: isSubmitting ?? this.isSubmitting,
       submittedId: submittedId ?? this.submittedId,
+      verification:
+          clearVerification ? null : (verification ?? this.verification),
+      isVerifying: isVerifying ?? this.isVerifying,
     );
   }
 }
@@ -320,14 +343,15 @@ class DisposalDraftController extends Notifier<DisposalDraft> {
 
       // Uploads via the trusted service, not to a bucket. See
       // PhotoUploadService for why, and §4.3 of the brief.
-      final photoUrl = await ref
+      final photo = await ref
           .read(photoUploadServiceProvider)
           .uploadDisposalPhoto(File(photoPath));
 
       final disposal = DisposalModel(
         userId: uid,
         binId: bin.id ?? '',
-        photoUrl: photoUrl,
+        photoUrl: photo.url,
+        photoPublicId: photo.publicId,
         capturedLat: location.latitude!,
         capturedLng: location.longitude!,
         distanceMeters: draft.distanceMeters ?? 0,
@@ -337,7 +361,20 @@ class DisposalDraftController extends Notifier<DisposalDraft> {
 
       final id = await service.createPendingDisposal(disposal);
 
-      state = state.copyWith(isSubmitting: false, submittedId: id);
+      // The submission now exists and is safe. Everything below is about
+      // whether it can be credited immediately.
+      state = state.copyWith(
+        isSubmitting: false,
+        submittedId: id,
+        isVerifying: true,
+      );
+
+      // Never throws: a verification that cannot run reports the pending state,
+      // which is exactly what the document says. A failed verify is not a
+      // failed submission.
+      final outcome = await ref.read(verificationServiceProvider).verify(id);
+
+      state = state.copyWith(isVerifying: false, verification: outcome);
       return id;
     } on PhotoUploadException catch (err) {
       state = state.copyWith(isSubmitting: false, error: err.message);
