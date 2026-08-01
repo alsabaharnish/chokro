@@ -220,9 +220,109 @@ class HomeView extends ConsumerWidget {
                       ),
                     ),
 
+                    // ── Log an eco-action (F6.1 entry point) ──────────
+                    //
+                    // Disabled while suspended for the same reason as disposal:
+                    // the rules refuse the write anyway, and finding that out
+                    // after photographing something is a poor experience.
+                    const SizedBox(height: 16),
+                    Card(
+                      clipBehavior: Clip.antiAlias,
+                      child: InkWell(
+                        onTap: user.isActive
+                            ? () => context.push('/claims/new')
+                            : null,
+                        child: Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: Row(
+                            children: [
+                              CircleAvatar(
+                                radius: 24,
+                                backgroundColor:
+                                    theme.colorScheme.tertiaryContainer,
+                                child: Icon(
+                                  Icons.eco_outlined,
+                                  color: theme.colorScheme.onTertiaryContainer,
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Log an eco-action',
+                                      style: theme.textTheme.titleMedium
+                                          ?.copyWith(
+                                              fontWeight: FontWeight.bold),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      user.isActive
+                                          ? 'Composting, tree planting and '
+                                              'similar. Checked by a reviewer.'
+                                          : 'Unavailable while suspended.',
+                                      style: theme.textTheme.bodySmall,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (user.isActive) const Icon(Icons.chevron_right),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+
                     // ── Admin: review queue ─────────────────────────────
                     if (user.isAdmin) ...[
                       const SizedBox(height: 16),
+                      const SizedBox(height: 16),
+                      Card(
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          onTap: () => context.push('/admin/claims'),
+                          child: Padding(
+                            padding: const EdgeInsets.all(20),
+                            child: Row(
+                              children: [
+                                CircleAvatar(
+                                  radius: 24,
+                                  backgroundColor:
+                                      theme.colorScheme.tertiaryContainer,
+                                  child: Icon(
+                                    Icons.eco_outlined,
+                                    color:
+                                        theme.colorScheme.onTertiaryContainer,
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Claim review',
+                                        style: theme.textTheme.titleMedium
+                                            ?.copyWith(
+                                                fontWeight: FontWeight.bold),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        'Self-reported eco-actions awaiting a '
+                                        'decision.',
+                                        style: theme.textTheme.bodySmall,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const Icon(Icons.chevron_right),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
                       const SizedBox(height: 16),
                       Card(
                         clipBehavior: Clip.antiAlias,

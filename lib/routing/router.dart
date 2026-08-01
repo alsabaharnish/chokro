@@ -6,6 +6,8 @@ import '../views/auth/register_view.dart';
 import '../views/home/home_view.dart';
 import '../views/seller_application/seller_application_view.dart';
 import '../views/admin/admin_applications_view.dart';
+import '../views/admin/admin_claims_view.dart';
+import '../views/claims/claim_submit_view.dart';
 import '../views/admin/admin_bins_view.dart';
 import '../views/admin/admin_users_view.dart';
 import '../views/admin/points_policy_view.dart';
@@ -53,6 +55,25 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/admin/applications',
         builder: (context, state) => const AdminApplicationsView(),
+        redirect: (context, state) {
+          final user = currentUser.value;
+          if (user == null) return '/login';
+          if (!user.isAdmin) return '/home';
+          return null;
+        },
+      ),
+      GoRoute(
+        path: '/claims/new',
+        builder: (context, state) => const ClaimSubmitView(),
+        redirect: (context, state) {
+          final user = currentUser.value;
+          if (user == null) return '/login';
+          return null;
+        },
+      ),
+      GoRoute(
+        path: '/admin/claims',
+        builder: (context, state) => const AdminClaimsView(),
         redirect: (context, state) {
           final user = currentUser.value;
           if (user == null) return '/login';
