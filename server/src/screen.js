@@ -14,13 +14,24 @@
  * NEVER THROWS. Every failure returns null. A screening outage must not turn
  * into a failed submission for the user, and must never turn into an approval.
  *
- * TERM PAPER, LIMITATIONS: on the free tier, submitted data may be used to
- * improve Google's models. Users' disposal photographs are sent under those
- * terms. That is defensible for an academic prototype only if disclosed.
+ * PROVIDER: Groq, via the OpenAI-compatible chat-completions endpoint.
+ *
+ * IMAGE CONSTRAINT: Groq accepts only remote HTTP(S) URLs, not base64 data
+ * URIs. In the Chokro flow, disposal photos are uploaded to Cloudinary before
+ * screening, so the imageUrl parameter is always `https://...`. This constraint
+ * is satisfied by design and needs no workaround.
+ *
+ * MODEL: qwen/qwen3.6-27b, Groq's current multimodal model, with
+ * reasoning_effort="none" to disable thinking mode and get direct JSON output.
+ *
+ * TERM PAPER, LIMITATIONS: Groq serves qwen/qwen3.6-27b as a preview model
+ * for evaluation, and Groq's multimodal lineup has changed multiple times
+ * during this project — both worth disclosing.
  */
 
-const MODEL = 'gemini-2.0-flash';
+const MODEL = 'qwen/qwen3.6-27b';
 const TIMEOUT_MS = 20000;
+const ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
 
 /** The closed item-type vocabulary (§6.1), in words a model will recognise. */
 const ITEM_TYPE_LABELS = Object.freeze({
@@ -34,7 +45,7 @@ const ITEM_TYPE_LABELS = Object.freeze({
 });
 
 function isConfigured() {
-  return Boolean(process.env.GEMINI_API_KEY);
+  return Boolean(process.env.GROQ_API_KEY);
 }
 
 /**
@@ -98,70 +109,77 @@ function parseVerdict(text) {
  *   run or could not be trusted. Null is never an approval.
  */
 async function screenImage({ imageUrl, declaredItemType, declaredItemCount }) {
-  if (!isConfigured()) return null;
-  if (!imageUrl) return null;
+  if (!isConfigured()) {
+    console.log('[screen] GROQ_API_KEY not configured');
+    return null;
+  }
+  if (!imageUrl) {
+    console.log('[screen] no imageUrl provided');
+    return null;
+  }
+
+  console.log('[screen] screening:', { imageUrl: imageUrl.slice(0, 50) + '...', declaredItemType, declaredItemCount });
 
   try {
-    // Fetch the image and inline it. Gemini cannot reach an arbitrary URL.
-    const imageResponse = await fetch(imageUrl);
-    if (!imageResponse.ok) return null;
-
-    const buffer = Buffer.from(await imageResponse.arrayBuffer());
-    const mimeType = imageResponse.headers.get('content-type') || 'image/jpeg';
-
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
     try {
-      const response = await fetch(
-        `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`,
-        {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': process.env.GEMINI_API_KEY,
-          },
-          body: JSON.stringify({
-            contents: [
-              {
-                parts: [
-                  { text: buildPrompt(declaredItemType, declaredItemCount) },
-                  {
-                    inline_data: {
-                      mime_type: mimeType,
-                      data: buffer.toString('base64'),
-                    },
-                  },
-                ],
-              },
-            ],
-            generationConfig: { temperature: 0, maxOutputTokens: 300 },
-          }),
-          signal: controller.signal,
+      const response = await fetch(ENDPOINT, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${process.env.GROQ_API_KEY}`,
         },
-      );
+        body: JSON.stringify({
+          model: MODEL,
+          messages: [
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'text',
+                  text: buildPrompt(declaredItemType, declaredItemCount),
+                },
+                {
+                  type: 'image_url',
+                  image_url: { url: imageUrl },
+                },
+              ],
+            },
+          ],
+          temperature: 0,
+          max_tokens: 300,
+          reasoning_effort: 'none',
+        }),
+        signal: controller.signal,
+      });
+
+      console.log('[screen] Groq response status:', response.status);
 
       if (response.status === 429) {
-        // Rate limited. Treated as "route to review", never as a failure and
-        // never as an approval — the free tier's limits are modest and Google
-        // revises them without notice (§4.3).
-        console.warn('Screening rate limited; routing to review.');
+        console.warn('[screen] Rate limited; routing to review.');
         return null;
       }
 
       if (!response.ok) {
-        console.error(`Screening returned ${response.status}.`);
+        const body = await response.text();
+        console.error(`[screen] Groq returned ${response.status}:`, body.slice(0, 200));
         return null;
       }
 
       const body = await response.json();
-      const text = body?.candidates?.[0]?.content?.parts?.[0]?.text;
-      return parseVerdict(text);
+      const text = body?.choices?.[0]?.message?.content;
+      console.log('[screen] Response text length:', text?.length);
+      
+      const verdict = parseVerdict(text);
+      console.log('[screen] Parsed verdict:', verdict);
+      return verdict;
     } finally {
       clearTimeout(timer);
     }
   } catch (err) {
-    console.error('Screening failed:', err.message);
+    console.error('[screen] Exception:', err.message);
     return null;
   }
 }

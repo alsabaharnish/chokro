@@ -352,12 +352,12 @@ describe('buildPrompt', () => {
 
 describe('isConfigured', () => {
   test('reports whether a key is present', () => {
-    const original = process.env.GEMINI_API_KEY;
-    delete process.env.GEMINI_API_KEY;
+    const original = process.env.GROQ_API_KEY;
+    delete process.env.GROQ_API_KEY;
     expect(isConfigured()).toBe(false);
-    process.env.GEMINI_API_KEY = 'test-key';
+    process.env.GROQ_API_KEY = 'test-key';
     expect(isConfigured()).toBe(true);
-    if (original === undefined) delete process.env.GEMINI_API_KEY;
-    else process.env.GEMINI_API_KEY = original;
+    if (original === undefined) delete process.env.GROQ_API_KEY;
+    else process.env.GROQ_API_KEY = original;
   });
 });
