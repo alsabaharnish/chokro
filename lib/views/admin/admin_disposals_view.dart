@@ -1,10 +1,13 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../controllers/admin_review_controller.dart';
 import '../../core/geo.dart';
+import '../../core/label_format.dart';
 import '../../models/disposal_model.dart';
 import '../shared/app_shell.dart';
+import '../shared/rejection_reason_dialog.dart';
 
 /// Administrator review queue (F2.7, F2.8).
 ///
@@ -105,15 +108,21 @@ class _DisposalCard extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           // ── Photograph ────────────────────────────────────────────────────
+          // `CachedNetworkImage`, not `Image.network`. A reviewer scrolls this
+          // queue repeatedly, and `Image.network` re-fetched every full-size
+          // photograph each time a card scrolled back into view. The rest of the
+          // app already caches; this screen was the one that did not, and it is
+          // the screen that loads the most images.
           AspectRatio(
             aspectRatio: 4 / 3,
-            child: Image.network(
-              disposal.photoUrl,
+            child: CachedNetworkImage(
+              imageUrl: disposal.photoUrl,
               fit: BoxFit.cover,
-              loadingBuilder: (context, child, progress) => progress == null
-                  ? child
-                  : const Center(child: CircularProgressIndicator()),
-              errorBuilder: (context, error, stack) => ColoredBox(
+              placeholder: (_, _) => ColoredBox(
+                color: theme.colorScheme.surfaceContainerHighest,
+                child: const Center(child: CircularProgressIndicator()),
+              ),
+              errorWidget: (_, _, _) => ColoredBox(
                 color: theme.colorScheme.surfaceContainerHighest,
                 child: const Center(child: Icon(Icons.broken_image_outlined)),
               ),
@@ -162,7 +171,11 @@ class _DisposalCard extends ConsumerWidget {
                   _Fact(
                     icon: Icons.schedule,
                     label: 'Submitted',
-                    value: _relative(disposal.createdAt!),
+                    // `formatAge` from core/label_format, rather than the
+                    // private copy that used to live here. Two relative-time
+                    // formatters that disagreed past a week — this one fell back
+                    // to "d ago" forever, the shared one switches to a date.
+                    value: formatAge(disposal.createdAt),
                   ),
 
                 // ── Flags ─────────────────────────────────────────────────
@@ -229,50 +242,22 @@ class _DisposalCard extends ConsumerWidget {
   /// Rejection requires a reason, and the user is shown it. A rejection with no
   /// explanation is indistinguishable from the system being broken, and it makes
   /// an appeal impossible to answer.
+  ///
+  /// The dialog is shared with the claim queue and the applications list. Each
+  /// used to have its own copy, and each leaked the controller behind it.
   Future<void> _askReason(
     BuildContext context,
     AdminReviewController controller,
   ) async {
-    final textController = TextEditingController();
-
-    final reason = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Why are you rejecting this?'),
-        content: TextField(
-          controller: textController,
-          autofocus: true,
-          maxLines: 3,
-          decoration: const InputDecoration(
-            hintText: 'The photo does not show the declared items.',
-            border: OutlineInputBorder(),
-            helperText: 'This is shown to the user.',
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(textController.text),
-            child: const Text('Reject'),
-          ),
-        ],
-      ),
+    final reason = await showRejectionReasonDialog(
+      context,
+      title: 'Why are you rejecting this?',
+      hintText: 'The photo does not show the declared items.',
     );
 
-    if (reason != null && reason.trim().isNotEmpty) {
-      await controller.reject(disposal.id ?? '', reason);
-    }
-  }
-
-  static String _relative(DateTime when) {
-    final diff = DateTime.now().difference(when);
-    if (diff.inMinutes < 1) return 'just now';
-    if (diff.inMinutes < 60) return '${diff.inMinutes} min ago';
-    if (diff.inHours < 24) return '${diff.inHours} h ago';
-    return '${diff.inDays} d ago';
+    // Already trimmed and length-checked by the dialog; null means cancelled.
+    if (reason == null) return;
+    await controller.reject(disposal.id ?? '', reason);
   }
 }
 

@@ -31,7 +31,7 @@ async function seedUser(uid, role, status = 'active') {
 beforeAll(async () => {
   setLogLevel('error');
   testEnv = await initializeTestEnvironment({
-    projectId: 'chokro-rules-test',
+    projectId: 'chokro-rules-test-m2',
     firestore: {
       rules: fs.readFileSync(
         path.resolve(__dirname, '../firestore.rules'),

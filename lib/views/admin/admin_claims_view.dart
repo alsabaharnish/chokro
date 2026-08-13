@@ -6,6 +6,7 @@ import '../../controllers/claim_controller.dart';
 import '../../core/label_format.dart';
 import '../../models/claim_model.dart';
 import '../shared/app_shell.dart';
+import '../shared/rejection_reason_dialog.dart';
 
 /// The claims review queue (F6.3).
 ///
@@ -97,42 +98,10 @@ class _ClaimCard extends ConsumerWidget {
   final bool isBusy;
 
   Future<void> _reject(BuildContext context, WidgetRef ref) async {
-    final controller = TextEditingController();
-    final reason = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text('Reject this claim'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'The user is shown this, so write it for them to read.',
-              style: Theme.of(context).textTheme.bodySmall,
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: controller,
-              autofocus: true,
-              maxLines: 3,
-              decoration: const InputDecoration(
-                hintText: 'The photo does not show the action described.',
-                border: OutlineInputBorder(),
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(controller.text),
-            child: const Text('Reject'),
-          ),
-        ],
-      ),
+    final reason = await showRejectionReasonDialog(
+      context,
+      title: 'Reject this claim',
+      hintText: 'The photo does not show the action described.',
     );
 
     if (reason == null || !context.mounted) return;

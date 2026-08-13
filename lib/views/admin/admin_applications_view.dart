@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../controllers/seller_application_controller.dart';
 import '../../models/seller_application_model.dart';
 import '../shared/app_shell.dart';
+import '../shared/rejection_reason_dialog.dart';
 
 class AdminApplicationsView extends ConsumerWidget {
   const AdminApplicationsView({super.key});
@@ -14,58 +15,51 @@ class AdminApplicationsView extends ConsumerWidget {
         .read(sellerApplicationControllerProvider.notifier)
         .approve(app.id);
     if (!context.mounted) return;
-    final error = ref.read(sellerApplicationControllerProvider).error;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(error?.toString() ??
-            '${app.businessName} approved — applicant is now a seller'),
-        backgroundColor: error != null ? Colors.red : null,
-      ),
+    _report(
+      context,
+      ref,
+      success: '${app.businessName} approved — applicant is now a seller',
     );
   }
 
   Future<void> _reject(
       BuildContext context, WidgetRef ref, SellerApplicationModel app) async {
-    final controller = TextEditingController();
-    final reason = await showDialog<String>(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: Text('Reject ${app.businessName}'),
-        content: TextField(
-          controller: controller,
-          autofocus: true,
-          maxLines: 3,
-          decoration: const InputDecoration(
-            labelText: 'Reason (shown to the applicant)',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(context),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () {
-              final text = controller.text.trim();
-              if (text.isNotEmpty) Navigator.pop(context, text);
-            },
-            child: const Text('Reject'),
-          ),
-        ],
-      ),
+    final reason = await showRejectionReasonDialog(
+      context,
+      title: 'Reject ${app.businessName}',
+      hintText: 'The business description does not explain what you sell.',
     );
-    if (reason == null) return;
+    if (reason == null || !context.mounted) return;
 
     await ref
         .read(sellerApplicationControllerProvider.notifier)
         .reject(app.id, reason);
     if (!context.mounted) return;
+    _report(context, ref, success: 'Application rejected');
+  }
+
+  /// One place that turns the controller's outcome into a snackbar.
+  ///
+  /// Both actions on this screen were duplicating this, and both were passing
+  /// `error.toString()` straight to the user and colouring it with a hardcoded
+  /// `Colors.red` — which is the same red in dark mode, where it glares.
+  static void _report(
+    BuildContext context,
+    WidgetRef ref, {
+    required String success,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
     final error = ref.read(sellerApplicationControllerProvider).error;
+
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        content: Text(error?.toString() ?? 'Application rejected'),
-        backgroundColor: error != null ? Colors.red : null,
+        content: Text(
+          error == null
+              ? success
+              : 'That did not go through. Check your connection and try again.',
+        ),
+        backgroundColor: error != null ? scheme.errorContainer : null,
+        showCloseIcon: error != null,
       ),
     );
   }

@@ -2,9 +2,11 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../controllers/claim_controller.dart';
 import '../../core/label_format.dart';
+import '../../core/theme.dart';
 import '../../models/claim_model.dart';
 import '../shared/app_shell.dart';
 
@@ -154,6 +156,24 @@ class ClaimSubmitView extends ConsumerWidget {
                     : const Icon(Icons.send_outlined),
                 label: Text(draft.isSubmitting ? 'Submitting…' : 'Submit claim'),
               ),
+
+              // ── Earlier claims ───────────────────────────────────────────
+              //
+              // [ClaimHistoryList] existed but was never mounted anywhere, so a
+              // user could log an eco-action and then had no way at all to see
+              // what had become of it — the disposal history screen only lists
+              // disposals. Every claim waits on a person, which makes "where is
+              // mine" the obvious next question, and the answer was unreachable.
+              const SizedBox(height: AppTheme.gapXl),
+              const Divider(),
+              const SizedBox(height: AppTheme.gapMd),
+              Text(
+                'Your eco-actions',
+                style: theme.textTheme.titleMedium
+                    ?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: AppTheme.gapSm),
+              const ClaimHistoryList(),
             ],
           ),
         ),
@@ -189,10 +209,20 @@ class _ClaimSubmitted extends ConsumerWidget {
                 style: theme.textTheme.bodySmall
                     ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
               ),
-              const SizedBox(height: 24),
+              const SizedBox(height: AppTheme.gapLg),
+              // "Log another" was the only way off this screen, so a user who
+              // was finished had to log a second claim they did not want, or use
+              // the system back gesture, to leave.
               FilledButton(
-                onPressed: () =>
-                    ref.read(claimDraftProvider.notifier).reset(),
+                onPressed: () {
+                  ref.read(claimDraftProvider.notifier).reset();
+                  context.go('/home');
+                },
+                child: const Text('Done'),
+              ),
+              const SizedBox(height: AppTheme.gapSm),
+              TextButton(
+                onPressed: () => ref.read(claimDraftProvider.notifier).reset(),
                 child: const Text('Log another'),
               ),
             ],

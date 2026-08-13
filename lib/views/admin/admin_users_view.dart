@@ -172,7 +172,6 @@ class _AdminUsersViewState extends ConsumerState<AdminUsersView> {
                       decoration: const InputDecoration(
                         prefixIcon: Icon(Icons.search),
                         hintText: 'Search by name or email',
-                        border: OutlineInputBorder(),
                         isDense: true,
                       ),
                     ),
