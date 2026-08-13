@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
@@ -205,13 +206,24 @@ class ClaimDraftController extends Notifier<ClaimDraft> {
     } on PhotoUploadException catch (err) {
       state = state.copyWith(isSubmitting: false, error: err.message);
       return null;
+    } on FirebaseException catch (err) {
+      // Only `permission-denied` means the rules refused this. Every failure
+      // used to be reported as a quota or suspension problem, so a user who had
+      // simply lost signal was told they had used up their week — and stopped
+      // trying. A rules rejection carries no reason (rules cannot return one),
+      // so for that case list what the rules actually check.
+      final message = err.code == 'permission-denied'
+          ? 'This claim was refused. You may have used your weekly quota, or '
+              'your account may be suspended.'
+          : 'Could not submit this claim. Check your connection and try again.';
+
+      state = state.copyWith(isSubmitting: false, error: message);
+      return null;
     } catch (err) {
-      // A rules rejection arrives as permission-denied with no reason, so name
-      // what the rules actually check rather than guessing at one cause.
       state = state.copyWith(
         isSubmitting: false,
-        error: 'This claim was refused. You may have used your weekly quota, '
-            'or your account may be suspended.',
+        error: 'Could not submit this claim. Check your connection and try '
+            'again.',
       );
       return null;
     }
@@ -242,6 +254,15 @@ class ClaimReviewController extends Notifier<ClaimReviewUiState> {
   void clearMessages() =>
       state = ClaimReviewUiState(busyClaimId: state.busyClaimId);
 
+  // Both actions below need a bare `catch` as well as the typed one.
+  //
+  // Without it, anything that is not a `ClaimException` — a dropped connection
+  // mid-request, a JSON shape the service did not expect, a timeout — escapes
+  // while `busyClaimId` is still set. The state never leaves "busy", so the row
+  // spins forever with no message and no way back short of leaving the screen.
+  // The disposal queue's controller already guards this; this one did not, and
+  // the two are otherwise the same shape.
+
   Future<void> approve(String claimId) async {
     state = ClaimReviewUiState(busyClaimId: claimId);
     try {
@@ -251,6 +272,11 @@ class ClaimReviewController extends Notifier<ClaimReviewUiState> {
       );
     } on ClaimException catch (err) {
       state = ClaimReviewUiState(error: err.message);
+    } catch (_) {
+      state = const ClaimReviewUiState(
+        error: 'Could not approve this claim. Check your connection and try '
+            'again.',
+      );
     }
   }
 
@@ -270,6 +296,11 @@ class ClaimReviewController extends Notifier<ClaimReviewUiState> {
       );
     } on ClaimException catch (err) {
       state = ClaimReviewUiState(error: err.message);
+    } catch (_) {
+      state = const ClaimReviewUiState(
+        error: 'Could not reject this claim. Check your connection and try '
+            'again.',
+      );
     }
   }
 }

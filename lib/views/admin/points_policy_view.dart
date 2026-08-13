@@ -315,7 +315,6 @@ class _PolicyInput extends StatelessWidget {
           decoration: InputDecoration(
             labelText: field.label,
             suffixText: field.suffix,
-            border: const OutlineInputBorder(),
             isDense: true,
           ),
         ),

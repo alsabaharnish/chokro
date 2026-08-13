@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../controllers/seller_application_controller.dart';
 import '../../core/constants.dart';
+import '../../core/theme.dart';
+import '../../core/validators.dart';
 import '../shared/app_shell.dart';
 
 class SellerApplicationView extends ConsumerStatefulWidget {
@@ -26,19 +28,36 @@ class _SellerApplicationViewState
   }
 
   Future<void> _submit() async {
+    FocusScope.of(context).unfocus();
     if (!_formKey.currentState!.validate()) return;
+
     await ref.read(sellerApplicationControllerProvider.notifier).submit(
           businessName: _businessNameController.text.trim(),
           description: _descriptionController.text.trim(),
         );
     if (!mounted) return;
+
     final error = ref.read(sellerApplicationControllerProvider).error;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(error?.toString() ?? 'Application submitted for review'),
-        backgroundColor: error != null ? Colors.red : null,
-      ),
-    );
+    final scheme = Theme.of(context).colorScheme;
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            // `error.toString()` used to go straight to the applicant, which
+            // meant a Firestore permission-denied stack prefix was the feedback
+            // on their business application.
+            error == null
+                ? 'Application submitted for review'
+                : 'Your application could not be sent. Check your connection '
+                    'and try again.',
+          ),
+          backgroundColor: error != null ? scheme.errorContainer : null,
+          showCloseIcon: error != null,
+        ),
+      );
+
     if (error == null) {
       _businessNameController.clear();
       _descriptionController.clear();
@@ -88,7 +107,7 @@ class _SellerApplicationViewState
                                           ? Icons.hourglass_empty
                                           : Icons.cancel,
                                   color: a.isApproved
-                                      ? Colors.green
+                                      ? theme.colorScheme.success
                                       : a.isPending
                                           ? theme.colorScheme.outline
                                           : theme.colorScheme.error,
@@ -110,29 +129,34 @@ class _SellerApplicationViewState
                       const SizedBox(height: 16),
                       TextFormField(
                         controller: _businessNameController,
+                        textCapitalization: TextCapitalization.words,
+                        textInputAction: TextInputAction.next,
+                        enabled: !isLoading,
+                        // `border` is no longer repeated at every field — the
+                        // shared input theme owns it.
                         decoration: const InputDecoration(
                           labelText: 'Business name',
                           prefixIcon: Icon(Icons.storefront_outlined),
-                          border: OutlineInputBorder(),
                         ),
-                        validator: (v) => v == null || v.trim().isEmpty
-                            ? 'Enter a business name'
-                            : null,
+                        validator: (v) => validateMinLength(v, 2, 'a business name'),
                       ),
-                      const SizedBox(height: 16),
+                      const SizedBox(height: AppTheme.gapMd),
                       TextFormField(
                         controller: _descriptionController,
                         maxLines: 4,
+                        minLines: 4,
+                        textCapitalization: TextCapitalization.sentences,
+                        enabled: !isLoading,
                         decoration: const InputDecoration(
                           labelText: 'What do you make or sell?',
                           alignLabelWithHint: true,
-                          border: OutlineInputBorder(),
+                          helperText:
+                              'An administrator reads this. At least 20 characters.',
                         ),
-                        validator: (v) => v == null || v.trim().length < 20
-                            ? 'Give at least 20 characters'
-                            : null,
+                        validator: (v) =>
+                            validateMinLength(v, 20, 'a description'),
                       ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: AppTheme.gapLg),
                       FilledButton(
                         onPressed: isLoading ? null : _submit,
                         child: isLoading

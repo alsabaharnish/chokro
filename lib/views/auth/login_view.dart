@@ -2,6 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../controllers/auth_controller.dart';
+import '../../core/auth_errors.dart';
+import '../../core/theme.dart';
+import '../../core/validators.dart';
 
 class LoginView extends ConsumerStatefulWidget {
   const LoginView({super.key});
@@ -14,115 +17,169 @@ class _LoginViewState extends ConsumerState<LoginView> {
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
+
+  /// Lets the email field's keyboard "next" key move focus to the password
+  /// rather than dismissing itself, which is what it did before.
+  final _passwordFocus = FocusNode();
+
   bool _obscurePassword = true;
 
   @override
   void dispose() {
     _emailController.dispose();
     _passwordController.dispose();
+    _passwordFocus.dispose();
     super.dispose();
   }
 
   Future<void> _submit() async {
+    // Dismiss the keyboard first: the error snackbar appears at the bottom of
+    // the screen, and an open keyboard covered it entirely on a small phone.
+    FocusScope.of(context).unfocus();
+
     if (!_formKey.currentState!.validate()) return;
+
     await ref.read(authControllerProvider.notifier).signIn(
           email: _emailController.text.trim(),
           password: _passwordController.text,
         );
-    if (mounted) {
-      final error = ref.read(authControllerProvider).error;
-      if (error != null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(error.toString()), backgroundColor: Colors.red),
-        );
-      }
-    }
+
+    if (!mounted) return;
+    final error = ref.read(authControllerProvider).error;
+    if (error == null) return;
+
+    final scheme = Theme.of(context).colorScheme;
+    ScaffoldMessenger.of(context)
+      // One message at a time. Tapping Sign In twice used to stack snackbars,
+      // so the second attempt's result queued behind the first.
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            // The controller has already converted the vendor exception into
+            // something readable. `error.toString()` used to land here, which
+            // put "[firebase_auth/invalid-credential] The supplied auth
+            // credential is incorrect, malformed or has expired." in front of
+            // someone who had mistyped their password.
+            error is AuthFailure ? error.message : authErrorMessage(null),
+          ),
+          backgroundColor: scheme.errorContainer,
+          showCloseIcon: true,
+        ),
+      );
   }
 
   @override
   Widget build(BuildContext context) {
-    final authState = ref.watch(authControllerProvider);
-    final isLoading = authState.isLoading;
+    final isLoading = ref.watch(authControllerProvider).isLoading;
     final theme = Theme.of(context);
 
     return Scaffold(
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
+            padding: const EdgeInsets.all(AppTheme.gapLg),
             child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 400),
-              child: Form(
-                key: _formKey,
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Icon(Icons.eco, size: 64, color: theme.colorScheme.primary),
-                    const SizedBox(height: 16),
-                    Text(
-                      'Chokro',
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.headlineMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                        color: theme.colorScheme.primary,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Sign in to continue',
-                      textAlign: TextAlign.center,
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                    const SizedBox(height: 32),
-                    TextFormField(
-                      controller: _emailController,
-                      keyboardType: TextInputType.emailAddress,
-                      decoration: const InputDecoration(
-                        labelText: 'Email',
-                        prefixIcon: Icon(Icons.email_outlined),
-                        border: OutlineInputBorder(),
-                      ),
-                      validator: (v) =>
-                          v == null || !v.contains('@') ? 'Enter a valid email' : null,
-                    ),
-                    const SizedBox(height: 16),
-                    TextFormField(
-                      controller: _passwordController,
-                      obscureText: _obscurePassword,
-                      decoration: InputDecoration(
-                        labelText: 'Password',
-                        prefixIcon: const Icon(Icons.lock_outlined),
-                        border: const OutlineInputBorder(),
-                        suffixIcon: IconButton(
-                          icon: Icon(_obscurePassword
-                              ? Icons.visibility_outlined
-                              : Icons.visibility_off_outlined),
-                          onPressed: () =>
-                              setState(() => _obscurePassword = !_obscurePassword),
+              constraints:
+                  const BoxConstraints(maxWidth: AppTheme.maxFormWidth),
+              // AutofillGroup lets the platform password manager see the email
+              // and password as one credential and offer to save it.
+              child: AutofillGroup(
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Icon(Icons.eco,
+                          size: 64, color: theme.colorScheme.primary),
+                      const SizedBox(height: AppTheme.gapMd),
+                      Text(
+                        'Chokro',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.headlineMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: theme.colorScheme.primary,
                         ),
                       ),
-                      validator: (v) =>
-                          v == null || v.length < 6 ? 'Minimum 6 characters' : null,
-                    ),
-                    const SizedBox(height: 24),
-                    FilledButton(
-                      onPressed: isLoading ? null : _submit,
-                      child: isLoading
-                          ? const SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Text('Sign In'),
-                    ),
-                    const SizedBox(height: 16),
-                    TextButton(
-                      onPressed: () => context.go('/register'),
-                      child: const Text("Don't have an account? Register"),
-                    ),
-                  ],
+                      const SizedBox(height: AppTheme.gapSm),
+                      Text(
+                        'Sign in to continue',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: AppTheme.gapXl),
+                      TextFormField(
+                        controller: _emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        textInputAction: TextInputAction.next,
+                        autofillHints: const [AutofillHints.email],
+                        autocorrect: false,
+                        // Email addresses are case-insensitive and never
+                        // capitalised; the default sentence-case keyboard made
+                        // every address start with a capital on iOS.
+                        textCapitalization: TextCapitalization.none,
+                        enabled: !isLoading,
+                        decoration: const InputDecoration(
+                          labelText: 'Email',
+                          prefixIcon: Icon(Icons.email_outlined),
+                        ),
+                        validator: validateEmail,
+                        onFieldSubmitted: (_) => _passwordFocus.requestFocus(),
+                      ),
+                      const SizedBox(height: AppTheme.gapMd),
+                      TextFormField(
+                        controller: _passwordController,
+                        focusNode: _passwordFocus,
+                        obscureText: _obscurePassword,
+                        textInputAction: TextInputAction.done,
+                        autofillHints: const [AutofillHints.password],
+                        enabled: !isLoading,
+                        decoration: InputDecoration(
+                          labelText: 'Password',
+                          prefixIcon: const Icon(Icons.lock_outlined),
+                          suffixIcon: IconButton(
+                            tooltip:
+                                _obscurePassword ? 'Show password' : 'Hide password',
+                            icon: Icon(_obscurePassword
+                                ? Icons.visibility_outlined
+                                : Icons.visibility_off_outlined),
+                            onPressed: () => setState(
+                                () => _obscurePassword = !_obscurePassword),
+                          ),
+                        ),
+                        // Only "required" on sign-in. A minimum length here was
+                        // wrong: it is a check on the password being *created*,
+                        // and applying it at sign-in refuses to even try an
+                        // older short password, showing a validation error where
+                        // the truthful answer is "that is not your password".
+                        validator: (v) => (v == null || v.isEmpty)
+                            ? 'Enter your password'
+                            : null,
+                        // The keyboard's done key submits, so the user never has
+                        // to dismiss it to reach the button.
+                        onFieldSubmitted: (_) => isLoading ? null : _submit(),
+                      ),
+                      const SizedBox(height: AppTheme.gapLg),
+                      FilledButton(
+                        onPressed: isLoading ? null : _submit,
+                        child: isLoading
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Text('Sign In'),
+                      ),
+                      const SizedBox(height: AppTheme.gapSm),
+                      TextButton(
+                        onPressed: isLoading ? null : () => context.go('/register'),
+                        child: const Text("Don't have an account? Register"),
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ),

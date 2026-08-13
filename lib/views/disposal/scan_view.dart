@@ -5,6 +5,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../controllers/disposal_controller.dart';
 import '../../controllers/scan_controller.dart';
+import '../../core/theme.dart';
 
 /// Step 1 of the disposal flow (F2.2): scan the code on a bin.
 ///
@@ -82,10 +83,26 @@ class _ScanViewState extends ConsumerState<ScanView> {
       appBar: AppBar(
         title: const Text('Scan bin code'),
         actions: [
-          IconButton(
-            tooltip: 'Toggle torch',
-            icon: const Icon(Icons.flashlight_on_outlined),
-            onPressed: () => _controller.toggleTorch(),
+          // The icon used to be a fixed `flashlight_on_outlined` regardless of
+          // the actual torch state, so after tapping it there was no way to tell
+          // from the button whether the torch was on — and bin codes are often
+          // scanned after dark, which is when it matters.
+          ValueListenableBuilder<MobileScannerState>(
+            valueListenable: _controller,
+            builder: (context, state, _) {
+              final isOn = state.torchState == TorchState.on;
+              return IconButton(
+                tooltip: isOn ? 'Turn off torch' : 'Turn on torch',
+                isSelected: isOn,
+                icon: const Icon(Icons.flashlight_off_outlined),
+                selectedIcon: const Icon(Icons.flashlight_on),
+                // Unavailable means no torch on this camera — a front-facing
+                // one, or a desktop webcam. Disabled beats a no-op tap.
+                onPressed: state.torchState == TorchState.unavailable
+                    ? null
+                    : () => _controller.toggleTorch(),
+              );
+            },
           ),
         ],
       ),
@@ -169,8 +186,11 @@ class _ResultPanel extends StatelessWidget {
                         : isProblem
                             ? Icons.error_outline
                             : Icons.qr_code_scanner,
+                    // `colorScheme.success`, not `Colors.green`: the literal
+                    // was the same mid-green in dark mode, where it glared
+                    // against the dark surface.
                     color: scan.canProceed
-                        ? Colors.green
+                        ? theme.colorScheme.success
                         : isProblem
                             ? theme.colorScheme.error
                             : theme.colorScheme.onSurfaceVariant,

@@ -3,6 +3,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import '../services/auth_service.dart';
 import '../services/user_service.dart';
 import '../models/user_model.dart';
+import '../core/auth_errors.dart';
 import '../core/constants.dart';
 
 final authServiceProvider = Provider<AuthService>((ref) => AuthService());
@@ -31,13 +32,30 @@ class AuthController extends AsyncNotifier<void> {
   @override
   Future<void> build() async {}
 
+  /// Runs [action], converting any Firebase auth failure into an [AuthFailure]
+  /// whose message is already fit to display.
+  ///
+  /// The views read `state.error` and render it directly, so the conversion has
+  /// to happen here — on the far side of that boundary there is no longer
+  /// enough information to say anything useful, and `toString()` on the vendor
+  /// exception is what used to reach the user.
+  Future<void> _guard(Future<void> Function() action) async {
+    state = const AsyncLoading();
+    state = await AsyncValue.guard(() async {
+      try {
+        await action();
+      } on FirebaseAuthException catch (err) {
+        throw AuthFailure(authErrorMessage(err.code), code: err.code);
+      }
+    });
+  }
+
   Future<void> signUp({
     required String name,
     required String email,
     required String password,
   }) async {
-    state = const AsyncLoading();
-    state = await AsyncValue.guard(() async {
+    await _guard(() async {
       final authService = ref.read(authServiceProvider);
       final userService = ref.read(userServiceProvider);
 
@@ -64,8 +82,7 @@ class AuthController extends AsyncNotifier<void> {
     required String email,
     required String password,
   }) async {
-    state = const AsyncLoading();
-    state = await AsyncValue.guard(() async {
+    await _guard(() async {
       await ref.read(authServiceProvider).signIn(
             email: email,
             password: password,
@@ -74,8 +91,7 @@ class AuthController extends AsyncNotifier<void> {
   }
 
   Future<void> signOut() async {
-    state = const AsyncLoading();
-    state = await AsyncValue.guard(() async {
+    await _guard(() async {
       await ref.read(authServiceProvider).signOut();
     });
   }

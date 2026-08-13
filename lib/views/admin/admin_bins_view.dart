@@ -152,7 +152,6 @@ class _AdminBinsViewState extends ConsumerState<AdminBinsView> {
                 decoration: const InputDecoration(
                   labelText: 'Label',
                   hintText: 'Merul Badda — Block C gate',
-                  border: OutlineInputBorder(),
                   isDense: true,
                 ),
               ),
@@ -170,7 +169,6 @@ class _AdminBinsViewState extends ConsumerState<AdminBinsView> {
                       decoration: const InputDecoration(
                         labelText: 'Latitude',
                         hintText: '23.7808',
-                        border: OutlineInputBorder(),
                         isDense: true,
                       ),
                     ),
@@ -187,7 +185,6 @@ class _AdminBinsViewState extends ConsumerState<AdminBinsView> {
                       decoration: const InputDecoration(
                         labelText: 'Longitude',
                         hintText: '90.4074',
-                        border: OutlineInputBorder(),
                         isDense: true,
                       ),
                     ),
@@ -204,7 +201,6 @@ class _AdminBinsViewState extends ConsumerState<AdminBinsView> {
                       decoration: const InputDecoration(
                         labelText: 'Radius',
                         suffixText: 'm',
-                        border: OutlineInputBorder(),
                         isDense: true,
                       ),
                     ),
