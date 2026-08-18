@@ -5,30 +5,65 @@ import '../models/seller_application_model.dart';
 import '../core/constants.dart';
 
 class UserService {
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  /// Resolved on use rather than in a field initializer.
+  ///
+  /// As a `final` field this ran at construction, so `UserService()` threw
+  /// unless Firebase had already been initialised — which made the class
+  /// impossible to subclass in a unit test even to replace a single method that
+  /// never touches Firestore. `FirebaseFirestore.instance` returns the same
+  /// object every call, so deferring it costs nothing.
+  FirebaseFirestore get _db => FirebaseFirestore.instance;
 
   // ── registration ──────────────────────────────────────────────────────────
 
-  /// Creates user doc + wallet doc atomically at registration.
+  /// Creates user doc + wallet doc atomically at registration (F1.1).
+  ///
+  /// Both timestamps come from `FieldValue.serverTimestamp()` rather than the
+  /// device, per §6 of the brief. They used to be `DateTime.now()`, which meant
+  /// a phone with a skewed clock wrote a join date and a wallet date that the
+  /// server never agreed to — and unlike a disposal, nothing downstream ever
+  /// re-checks these, so a wrong value would have stayed wrong forever.
+  ///
+  /// The batch is what makes this safe to run from the client: the rules allow
+  /// creating a wallet only at a zero balance, and a user document only for
+  /// yourself at role `buyer` and status `active`, so neither half can be abused
+  /// and both land together or not at all.
   Future<void> createUserWithWallet(UserModel user) async {
     final batch = _db.batch();
 
-    batch.set(
-      _db.collection('users').doc(user.uid),
-      user.toFirestore(),
-    );
+    batch.set(_db.collection('users').doc(user.uid), {
+      ...user.toFirestore(),
+      'createdAt': FieldValue.serverTimestamp(),
+    });
 
-    batch.set(
-      _db.collection('wallets').doc(user.uid),
-      WalletModel(
-        userId: user.uid,
-        balance: 0,
-        updatedAt: DateTime.now(),
-      ).toFirestore(),
-    );
+    batch.set(_db.collection('wallets').doc(user.uid), {
+      ...WalletModel(userId: user.uid, balance: 0).toFirestore(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
 
     await batch.commit();
   }
+
+  // ── profile management (F1.1) ─────────────────────────────────────────────
+
+  /// Renames the signed-in user's own account.
+  ///
+  /// The write carries **only** `name`, and that is a hard requirement rather
+  /// than tidiness. The rule is:
+  ///
+  ///     allow update: if isSelf(uid)
+  ///       && request.resource.data.diff(resource.data)
+  ///            .affectedKeys().hasOnly(['name'])
+  ///
+  /// `hasOnly` means the diff may contain nothing else. Adding a companion
+  /// `updatedAt` — the reflex on a write like this — would make every rename
+  /// fail with permission-denied, and the failure would look like a rules
+  /// misconfiguration rather than an extra field.
+  ///
+  /// Role and status are absent for the same reason they are absent from the
+  /// rule: a user must not be able to promote or un-suspend themselves.
+  Future<void> updateName({required String uid, required String name}) =>
+      _db.collection('users').doc(uid).update({'name': name});
 
   // ── user reads ────────────────────────────────────────────────────────────
 

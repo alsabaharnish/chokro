@@ -56,6 +56,17 @@ String formatDateTime(DateTime? value) {
   return '${local.day} $month ${local.year}, $hh:$mm';
 }
 
+/// `2 Aug 2026`. Local time, no clock.
+///
+/// For dates where the time of day is noise rather than information: a join
+/// date, a suspension expiry. The home screen and the profile screen had each
+/// grown a private copy of this, complete with its own duplicate month list.
+String formatDate(DateTime? value) {
+  if (value == null) return '';
+  final local = value.toLocal();
+  return '${local.day} ${_months[local.month - 1]} ${local.year}';
+}
+
 /// Short relative age for list rows: `just now`, `14m ago`, `3h ago`, `5d ago`.
 /// Falls back to the absolute date beyond a week.
 ///

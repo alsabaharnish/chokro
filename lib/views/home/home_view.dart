@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../controllers/auth_controller.dart';
 import '../../controllers/wallet_controller.dart';
 import '../../controllers/submission_history_controller.dart';
+import '../../core/label_format.dart';
 import '../../core/theme.dart';
 import '../../models/wallet_model.dart';
 import '../shared/action_card.dart';
@@ -360,7 +361,7 @@ class _SuspendedNotice extends StatelessWidget {
     final detail = indefinite || until == null
         ? 'Submitting and claiming are unavailable. Contact an administrator.'
         : 'Submitting and claiming are unavailable until '
-            '${_date(until!)}. You can still read your history.';
+            '${formatDate(until)}. You can still read your history.';
 
     return Card(
       color: scheme.errorContainer,
@@ -397,14 +398,6 @@ class _SuspendedNotice extends StatelessWidget {
     );
   }
 
-  static String _date(DateTime value) {
-    const months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-    ];
-    final local = value.toLocal();
-    return '${local.day} ${months[local.month - 1]} ${local.year}';
-  }
 }
 
 class _HomeError extends StatelessWidget {

@@ -16,6 +16,7 @@ import '../views/admin/admin_bins_view.dart';
 import '../views/admin/admin_users_view.dart';
 import '../views/admin/points_policy_view.dart';
 import '../views/history/submission_history_view.dart';
+import '../views/profile/profile_view.dart';
 import '../views/wallet/wallet_ledger_view.dart';
 import '../views/disposal/scan_view.dart';
 import '../views/disposal/photo_view.dart';
@@ -273,6 +274,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/claims/new',
         builder: (context, state) => const ClaimSubmitView(),
+        redirect: requireSignedIn,
+      ),
+      GoRoute(
+        path: '/profile',
+        builder: (context, state) => const ProfileView(),
         redirect: requireSignedIn,
       ),
       GoRoute(

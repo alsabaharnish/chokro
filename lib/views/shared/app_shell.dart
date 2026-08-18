@@ -68,6 +68,16 @@ class AppShell extends ConsumerWidget {
           appBar: AppBar(
             title: Text(title),
             actions: [
+              // Not a navigation destination: the bar is already carrying four
+              // on an admin account, and the profile is somewhere you visit and
+              // come back from rather than a peer of Home. `push` gives the back
+              // button that makes that true.
+              if (location != '/profile')
+                IconButton(
+                  tooltip: 'Your profile',
+                  icon: const Icon(Icons.person_outline),
+                  onPressed: () => context.push('/profile'),
+                ),
               IconButton(
                 tooltip: 'Sign out',
                 icon: const Icon(Icons.logout),

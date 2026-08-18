@@ -64,17 +64,51 @@ class AuthController extends AsyncNotifier<void> {
         password: password,
       );
 
+      final created = credential.user;
+      if (created == null) {
+        // Should not happen after a successful signUp, but the alternative was
+        // `credential.user!`, and a null there would have surfaced as a bare
+        // type error instead of anything a user could act on.
+        throw const AuthFailure(
+          'The account was created but could not be opened. Try signing in.',
+          code: 'missing-credential-user',
+        );
+      }
+
       final user = UserModel(
-        uid: credential.user!.uid,
+        uid: created.uid,
         name: name,
         email: email,
         role: AppConstants.roleBuyer,
         status: AppConstants.statusActive,
-        createdAt: DateTime.now(),
+        // createdAt comes from the server — see UserModel.toFirestore.
       );
 
-      // atomic: user doc + wallet doc in one batch
-      await userService.createUserWithWallet(user);
+      try {
+        // atomic: user doc + wallet doc in one batch
+        await userService.createUserWithWallet(user);
+      } catch (error) {
+        // Registration is two steps against two different systems: an Auth
+        // account, then a Firestore profile. Failing the second used to leave
+        // an account that could authenticate and do nothing else — no role, no
+        // wallet, no name — and the only way out was the recovery screen.
+        //
+        // Rolling the Auth account back turns that dead end into a plain retry,
+        // and frees the email address so the second attempt is not refused as
+        // already-in-use.
+        //
+        // Best effort: if the delete also fails the account survives and the
+        // recovery screen is still there to catch it. Either way the original
+        // failure is what gets reported, because that is the one that explains
+        // what went wrong.
+        try {
+          await created.delete();
+        } catch (_) {
+          // Swallowed on purpose. Reporting a cleanup failure instead of the
+          // real cause would send the user chasing the wrong problem.
+        }
+        rethrow;
+      }
     });
   }
 

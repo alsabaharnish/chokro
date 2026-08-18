@@ -1,3 +1,12 @@
+// Firestore security rules, exercised against the emulator.
+//
+// Run serially. Jest defaults to one worker per test file, and all four suites
+// here share a single emulator and a single projectId — so one file's
+// `clearFirestore()` in `beforeEach` wipes the documents another file has just
+// seeded, mid-test. That produced failures that moved between runs and between
+// files, including in suites nobody had touched. `npm test` now passes
+// `--runInBand`; isolating them properly would mean a projectId per file.
+
 const fs = require('fs');
 const path = require('path');
 const {
@@ -116,6 +125,69 @@ describe('users', () => {
     const db = testEnv.authenticatedContext(ADMIN).firestore();
     await assertSucceeds(
       updateDoc(doc(db, 'users', ALICE), { role: 'seller' }),
+    );
+  });
+
+  // ── profile management (F1.1) ──────────────────────────────────────────────
+  //
+  // The rename permission these cover was deployed long before anything in the
+  // app could reach it. The suite tested every way a self-update must fail and
+  // never the one way it must succeed, so nothing would have caught the rule
+  // being tightened out from under the feature.
+
+  test('a user can change their own name', async () => {
+    await seedUser(ALICE, 'buyer');
+    const db = testEnv.authenticatedContext(ALICE).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, 'users', ALICE), { name: 'Alice Rahman' }),
+    );
+  });
+
+  test('a user cannot rename someone else', async () => {
+    await seedUser(ALICE, 'buyer');
+    await seedUser(BOB, 'buyer');
+    const db = testEnv.authenticatedContext(BOB).firestore();
+    await assertFails(
+      updateDoc(doc(db, 'users', ALICE), { name: 'Not Alice' }),
+    );
+  });
+
+  test('a rename carrying any companion field is refused', async () => {
+    // `hasOnly(['name'])` means the diff may contain nothing else, so the
+    // reflexive `updatedAt` alongside a write like this would fail every rename
+    // — and the failure reads as permission-denied, which looks like a broken
+    // rule rather than an extra field. `UserService.updateName` writes the one
+    // key on purpose; this is what keeps that honest.
+    await seedUser(ALICE, 'buyer');
+    const db = testEnv.authenticatedContext(ALICE).firestore();
+    await assertFails(
+      updateDoc(doc(db, 'users', ALICE), {
+        name: 'Alice Rahman',
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  test('a rename smuggling a role change is refused', async () => {
+    await seedUser(ALICE, 'buyer');
+    const db = testEnv.authenticatedContext(ALICE).firestore();
+    await assertFails(
+      updateDoc(doc(db, 'users', ALICE), {
+        name: 'Alice Rahman',
+        role: 'admin',
+      }),
+    );
+  });
+
+  test('a suspended user may still change their own name', async () => {
+    // Deliberately asserting the rule as written: the self-update branch checks
+    // `isSelf` and the affected keys, and does *not* call `isActive()`. A
+    // suspension withholds submitting and claiming, not the spelling of a name.
+    // Pinned here because the app tells the user which of those is true.
+    await seedUser(ALICE, 'buyer', 'suspended');
+    const db = testEnv.authenticatedContext(ALICE).firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, 'users', ALICE), { name: 'Alice Rahman' }),
     );
   });
 });

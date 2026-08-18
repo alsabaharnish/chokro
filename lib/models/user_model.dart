@@ -27,7 +27,16 @@ class UserModel {
   final String email;
   final String role;
   final String status;
-  final DateTime createdAt;
+
+  /// When the account was opened, as the *server* saw it.
+  ///
+  /// Nullable, and honestly so. It is written with
+  /// `FieldValue.serverTimestamp()`, which Firestore resolves on the server —
+  /// so the locally cached snapshot Firestore hands back immediately after
+  /// registration carries null here until the round trip completes. That window
+  /// is brief, but it is real, and it is on the signup path where every account
+  /// passes exactly once.
+  final DateTime? createdAt;
 
   /// When a temporary suspension lapses.
   ///
@@ -42,7 +51,7 @@ class UserModel {
     required this.email,
     required this.role,
     required this.status,
-    required this.createdAt,
+    this.createdAt,
     this.suspendedUntil,
   });
 
@@ -83,28 +92,70 @@ class UserModel {
       suspendedUntil != null &&
       isActive;
 
-  factory UserModel.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
+  /// Reads a user document, tolerating a field that is missing or the wrong
+  /// shape.
+  ///
+  /// Every cast here used to be unchecked — `data['name'] as String`,
+  /// `(data['createdAt'] as Timestamp).toDate()`, and the whole payload as a
+  /// `Map`. Any one of them throwing takes far more with it than
+  /// a single screen, because this factory sits under `watchUser`, which feeds
+  /// `currentUserProvider`, which the router's gate reads to decide where the
+  /// user is allowed to be. A throw there surfaces as an `AsyncError` with no
+  /// value, the gate reads "signed in with no profile", and a perfectly valid
+  /// account is redirected to the account-recovery screen — a dead end reached
+  /// because one field was the wrong type.
+  ///
+  /// `createdAt` is the case that actually happens: it is written with
+  /// `FieldValue.serverTimestamp()`, so the local echo of the registration write
+  /// has it as null for one round trip. The old cast crashed on precisely the
+  /// document it had just created.
+  ///
+  /// A missing role or status falls back to the least privileged value, never a
+  /// permissive one: an unreadable account gets buyer rights and an inactive
+  /// status, and the rules refuse anything more regardless of what this says.
+  factory UserModel.fromFirestore(DocumentSnapshot doc) =>
+      UserModel.fromMap(doc.data(), uid: doc.id);
+
+  /// The parsing itself, over a plain map.
+  ///
+  /// Split out so it can be tested without a `DocumentSnapshot` — that type is
+  /// sealed, so faking one means implementing a sealed class, and the analyzer
+  /// is right to object. This mirrors [BinModel.fromJson], which the rest of the
+  /// codebase already shapes this way.
+  factory UserModel.fromMap(Object? raw, {required String uid}) {
+    final data = raw is Map<String, dynamic> ? raw : const <String, dynamic>{};
+
     return UserModel(
-      uid: doc.id,
-      name: data['name'] as String,
-      email: data['email'] as String,
-      role: data['role'] as String,
-      status: data['status'] as String,
-      createdAt: (data['createdAt'] as Timestamp).toDate(),
-      suspendedUntil: (data['suspendedUntil'] as Timestamp?)?.toDate(),
+      uid: uid,
+      name: _string(data['name']),
+      email: _string(data['email']),
+      // Fail closed. `isAdmin`/`isSeller` compare against these, so guessing
+      // upward here would hand out privileges on malformed data.
+      role: _string(data['role'], fallback: AppConstants.roleBuyer),
+      status: _string(data['status'], fallback: AppConstants.statusSuspended),
+      createdAt: _date(data['createdAt']),
+      suspendedUntil: _date(data['suspendedUntil']),
     );
   }
 
+  /// Field map for a Firestore write.
+  ///
   /// Omits `suspendedUntil` when null rather than writing an explicit null.
-  /// Registration writes this map, and an absent key is cleaner than a null
-  /// one for a field that only an administrator ever sets.
+  /// Registration writes this map, and an absent key is cleaner than a null one
+  /// for a field that only an administrator ever sets.
+  ///
+  /// `createdAt` is deliberately omitted, exactly as [BinModel.toJson] omits
+  /// its own: §6 of the brief requires every `createdAt` to be written with
+  /// `FieldValue.serverTimestamp()`, and this used to write
+  /// `Timestamp.fromDate(DateTime.now())` from the device instead. A phone with
+  /// a wrong clock — or one deliberately set back — recorded a join date the
+  /// server never agreed to. The service layer supplies it; the rules require
+  /// the key to be present on create, and a server timestamp satisfies that.
   Map<String, dynamic> toFirestore() => {
         'name': name,
         'email': email,
         'role': role,
         'status': status,
-        'createdAt': Timestamp.fromDate(createdAt),
         if (suspendedUntil != null)
           'suspendedUntil': Timestamp.fromDate(suspendedUntil!),
       };
@@ -128,4 +179,20 @@ class UserModel {
         suspendedUntil:
             clearSuspendedUntil ? null : (suspendedUntil ?? this.suspendedUntil),
       );
+}
+
+/// A string field, whatever Firestore actually returned.
+String _string(Object? value, {String fallback = ''}) =>
+    value is String ? value : fallback;
+
+/// A date field, tolerating both a resolved `Timestamp` and an unresolved
+/// `FieldValue.serverTimestamp()` that has not come back from the server yet.
+DateTime? _date(Object? value) {
+  if (value is Timestamp) return value.toDate();
+  // Firestore normally hands back Timestamp, but a document written by another
+  // client or a migration script can carry an ISO string or epoch millis.
+  if (value is DateTime) return value;
+  if (value is String) return DateTime.tryParse(value);
+  if (value is int) return DateTime.fromMillisecondsSinceEpoch(value);
+  return null;
 }
