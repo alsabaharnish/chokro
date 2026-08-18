@@ -59,12 +59,22 @@ function initFirebase() {
     // enough to tell a truncated paste from a wrong-format one, and neither
     // leaks any part of the key into the logs.
     const trimmed = raw.trim();
+
+    // `err.message` is deliberately NOT interpolated, and the comment above used
+    // to claim this already. `JSON.parse` embeds a fragment of the offending
+    // input in its own message — and on the base64 branch the text being parsed
+    // is the *decoded service-account JSON*, so the private key could appear
+    // verbatim in a log line. `index.js` prints this at boot behind `FATAL:`,
+    // which on Render means it lands in a log aggregator.
+    //
+    // Only the error's class is safe to report, and it is enough to tell a
+    // malformed paste from a truncated one when combined with the length below.
     throw new Error(
       'FIREBASE_SERVICE_ACCOUNT could not be parsed. ' +
         `Length: ${trimmed.length}. Starts with: "${trimmed.slice(0, 1)}". ` +
         'Expected either base64 (a long run of letters and digits) or raw ' +
         'JSON starting with "{". A length far below 2000 means the value was ' +
-        `truncated. Underlying error: ${err.message}`,
+        `truncated. Failure type: ${err.name || 'Error'}.`,
     );
   }
 

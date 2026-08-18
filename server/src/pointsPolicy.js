@@ -50,6 +50,45 @@ function defaults() {
 }
 
 /**
+ * Builds a policy from a client request, STRICTLY.
+ *
+ * The counterpart to `fromDoc`, and the distinction is the whole point. This
+ * module's own comment says "reads are forgiving, writes are strict" — but the
+ * write path called `fromDoc`, the forgiving reader, whose contract is that a
+ * missing or wrongly-typed field silently becomes its default.
+ *
+ * The consequence: `POST /config/points` with a body of `{}` produced a complete
+ * policy of pure defaults, passed `validate()` cleanly because defaults are
+ * valid, and overwrote the entire live economy. An empty request, a truncated
+ * one, or a client that sent strings instead of numbers would silently reset
+ * every award and quota an administrator had tuned.
+ *
+ * Every field must be present and numeric. Defaults are still filled in for the
+ * offending keys so `validate()` has a complete object to reason about, but the
+ * problems are reported and the caller must refuse the write.
+ *
+ * @returns {{policy: object, problems: string[]}}
+ */
+function fromRequest(body) {
+  const source = body && typeof body === 'object' ? body : {};
+  const problems = [];
+  const policy = {};
+
+  for (const key of Object.keys(DEFAULTS)) {
+    const value = source[key];
+
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      problems.push(`${key} is required and must be a number.`);
+      policy[key] = DEFAULTS[key];
+    } else {
+      policy[key] = Math.trunc(value);
+    }
+  }
+
+  return { policy, problems };
+}
+
+/**
  * Human-readable problems with a policy. Empty array means it is safe to save.
  *
  * The load-bearing rule is the last one: award value must track verification
@@ -138,6 +177,7 @@ function isoWeekKey(date) {
 }
 
 module.exports = {
+  fromRequest,
   DEFAULTS,
   defaults,
   fromDoc,

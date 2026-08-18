@@ -104,6 +104,23 @@ async function verifyDisposal({ disposalId, callerUid }) {
   if (!binSnap.exists) throw new Error('That bin is no longer registered.');
   const bin = binSnap.data();
 
+  // `active` is checked here, not only in the rules.
+  //
+  // Bins are never deleted — past disposals reference them, so `setBinActive`
+  // is the soft-delete substitute and `admin_bins_view` presents Close/Reopen as
+  // taking a bin out of service. Nothing on the server read the field, so a
+  // submission at a closed bin still auto-approved against its stale
+  // coordinates: the administrator's control changed a boolean the payout path
+  // ignored.
+  //
+  // `binIsOpen()` in the rules refuses the *create*, so this is the second line
+  // rather than the only one — but a submission created while the bin was open
+  // and verified after it closed reaches exactly here, and that is the case the
+  // rules cannot see.
+  if (bin.active === false) {
+    throw new Error('That bin is no longer in service.');
+  }
+
   const configSnap = await firestore.collection('config').doc('points').get();
   const policy = policyModule.fromDoc(
     configSnap.exists ? configSnap.data() : null,
@@ -122,21 +139,36 @@ async function verifyDisposal({ disposalId, callerUid }) {
   );
 
   // ---- 2. Perceptual hash and duplicate check ----
+  //
+  // `duplicateChecked` is tracked separately from `duplicate.isDuplicate`,
+  // because "no match found" and "could not look" are different answers and
+  // treating them alike is what let this pipeline pay out on an unchecked
+  // photograph.
   let photoHash = null;
   let duplicate = { isDuplicate: false, distance: null };
+  let duplicateChecked = false;
 
   if (disposal.photoPublicId) {
     try {
       photoHash = await hashImage(disposal.photoPublicId);
       const history = await previousHashes(disposal.userId, disposalId);
       duplicate = findDuplicate(photoHash, history);
+
+      // Set last, and only here. `hashImage` can succeed and `previousHashes`
+      // still throw, which would leave a hash in hand and no comparison behind
+      // it — so `photoHash !== null` is not the same question.
+      duplicateChecked = true;
     } catch (err) {
-      // A hash that could not be computed is not a duplicate and not a pass.
-      // Screening below will still run; the absent hash simply means this
-      // particular check found nothing, which is recorded honestly.
+      // Left false on purpose. `hashImage` throws on a missing cloud name, a
+      // non-200 from Cloudinary, an unexpected bit depth, an unknown scanline
+      // filter and any zlib failure; before `hashUnavailable` existed, every one
+      // of those produced a flagless submission that went straight down the
+      // auto-approve lane with the duplicate defence never having run.
       console.error(`Hashing ${disposalId} failed:`, err.message);
     }
   }
+  // An empty `photoPublicId` skips the block entirely and lands here the same
+  // way: not checked, so flagged rather than assumed clean.
 
   // ---- 3. Screening ----
   const screening = await screenImage({
@@ -153,6 +185,7 @@ async function verifyDisposal({ disposalId, callerUid }) {
     distanceMeters,
     radiusMeters: bin.radiusMeters,
     isDuplicate: duplicate.isDuplicate,
+    duplicateChecked,
     declaredItemCount: disposal.declaredItemCount,
     screening,
     approvedToday,

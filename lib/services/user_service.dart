@@ -118,8 +118,17 @@ class UserService {
 
   // ── seller applications ───────────────────────────────────────────────────
 
+  /// Files a seller application (F1.2).
+  ///
+  /// `createdAt` is supplied here with `FieldValue.serverTimestamp()`. The model
+  /// used to stamp `Timestamp.fromDate(DateTime.now())` from the device — it was
+  /// the last model still doing so — which let a phone with a skewed clock date
+  /// its own application, and an administrator sorts the queue by that field.
   Future<void> submitSellerApplication(SellerApplicationModel app) =>
-      _db.collection('sellerApplications').add(app.toFirestore());
+      _db.collection('sellerApplications').add({
+        ...app.toFirestore(),
+        'createdAt': FieldValue.serverTimestamp(),
+      });
 
   Stream<List<SellerApplicationModel>> watchPendingApplications() =>
       _db
@@ -159,7 +168,19 @@ class UserService {
       // find the userId from the application first
       final appDoc =
           await _db.collection('sellerApplications').doc(appId).get();
-      final userId = appDoc.data()!['userId'] as String;
+
+      // Checked rather than force-unwrapped. `appDoc.data()!['userId'] as String`
+      // threw a raw type error on a deleted application or a document missing the
+      // field, in the middle of a batch that also flips a role — so an
+      // administrator pressing Approve got an unhandled exception instead of a
+      // message, with no indication whether anything had been written.
+      final userId = appDoc.data()?['userId'];
+      if (userId is! String || userId.isEmpty) {
+        throw StateError(
+          'That application no longer names a user, so no role was changed.',
+        );
+      }
+
       batch.update(
         _db.collection('users').doc(userId),
         {'role': AppConstants.roleSeller},

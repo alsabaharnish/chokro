@@ -128,6 +128,22 @@ class AuthController extends AsyncNotifier<void> {
     });
   }
 
+  /// Sends a password-reset email (F1.1).
+  ///
+  /// Succeeds silently whether or not the address is registered. Firebase does
+  /// not say, and the view must not imply it either: a form that answered "no
+  /// such account" would let anyone test which email addresses hold accounts,
+  /// which is the same leak `authErrorMessage` avoids by keeping the three
+  /// credential failures indistinguishable at sign-in.
+  ///
+  /// `invalid-email` is still reported, because that is about the text typed
+  /// rather than about who exists.
+  Future<void> sendPasswordReset(String email) async {
+    await _guard(() async {
+      await ref.read(authServiceProvider).sendPasswordReset(email);
+    });
+  }
+
   /// Signs out, retiring this device's push registration first (F7.1).
   ///
   /// The order is the whole point, and getting it wrong fails silently.

@@ -114,7 +114,9 @@ class AdminApplicationsView extends ConsumerWidget {
                               style: theme.textTheme.titleLarge),
                           const SizedBox(height: 4),
                           Text(
-                            'Submitted ${dateFormat.format(app.createdAt)}',
+                            // Null for one round trip after the write, now that
+                            // `createdAt` comes from the server per §6.
+                            'Submitted ${app.createdAt == null ? 'just now' : dateFormat.format(app.createdAt!)}',
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: theme.colorScheme.onSurfaceVariant,
                             ),

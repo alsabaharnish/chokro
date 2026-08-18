@@ -344,3 +344,84 @@ function flipBits(hash, count) {
   }
   return bits.toString(16).padStart(hash.length, '0');
 }
+
+// ---------------------------------------------------------------------------
+// The fail-open hole this module sat behind (F2.11).
+// ---------------------------------------------------------------------------
+
+describe('an uncomputable hash must not auto-approve', () => {
+  const { decide, FLAGS, isApprovable } = require('../src/decide');
+
+  /** A submission with nothing else wrong with it. */
+  const clean = {
+    distanceMeters: 12,
+    radiusMeters: 50,
+    declaredItemCount: 3,
+    screening: {
+      confidence: 0.9,
+      itemCount: 3,
+      itemTypeMatches: true,
+      notes: 'Bottles beside a bin.',
+    },
+    approvedToday: 0,
+    dailyCap: 3,
+  };
+
+  test('a checked, unmatched photo auto-approves', () => {
+    const result = decide({ ...clean, duplicateChecked: true, isDuplicate: false });
+    expect(result.decision).toBe('autoApprove');
+    expect(result.flags).toEqual([]);
+  });
+
+  test('an unchecked photo routes to review instead', () => {
+    // THE HOLE. `hashImage` throws on a missing cloud name, a non-200 from
+    // Cloudinary, an unexpected bit depth, an unknown scanline filter or any
+    // zlib failure — and an empty `photoPublicId` skips the step outright.
+    // Every one of those used to leave `isDuplicate: false` with no flag, so
+    // `flags.length === 0` and the submission paid out with the duplicate
+    // defence never having run.
+    const result = decide({ ...clean, duplicateChecked: false });
+    expect(result.decision).toBe('review');
+    expect(result.flags).toContain(FLAGS.HASH_UNAVAILABLE);
+  });
+
+  test('omitting duplicateChecked entirely fails closed', () => {
+    // The default is "did not run", so a caller that forgets the field gets a
+    // review rather than a payout. This is the property that makes the fix hold
+    // for code written later.
+    const result = decide(clean);
+    expect(result.decision).toBe('review');
+    expect(result.flags).toContain(FLAGS.HASH_UNAVAILABLE);
+  });
+
+  test('an unchecked hash is not confused with a duplicate', () => {
+    // Different flags, because they mean different things to the reviewer: one
+    // says "this looks like a resubmission", the other says "nobody could tell".
+    const unchecked = decide({ ...clean, duplicateChecked: false });
+    const duplicate = decide({
+      ...clean,
+      duplicateChecked: true,
+      isDuplicate: true,
+    });
+
+    expect(unchecked.flags).not.toContain(FLAGS.DUPLICATE_PHOTO);
+    expect(duplicate.flags).not.toContain(FLAGS.HASH_UNAVAILABLE);
+  });
+
+  test('an administrator may still approve an unchecked photo', () => {
+    // Advisory, not blocking — exactly like screeningUnavailable. A person can
+    // look at the picture and decide. Only the daily cap blocks outright.
+    expect(isApprovable([FLAGS.HASH_UNAVAILABLE])).toBe(true);
+  });
+
+  test('the flag carries an explanation for the queue', () => {
+    const result = decide({ ...clean, duplicateChecked: false });
+    expect(result.reasons.join(' ')).toMatch(/fingerprint/i);
+  });
+
+  test('it reads as unavailable, not as a clean comparison', () => {
+    // A reviewer must not be able to read this as "compared, no match".
+    const result = decide({ ...clean, duplicateChecked: false });
+    expect(result.reasons.join(' ')).not.toMatch(/matches/i);
+  });
+});

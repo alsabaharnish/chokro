@@ -130,7 +130,18 @@ enum DisposalFlag {
 
   /// The AI service could not be reached or errored. Fail toward review, never
   /// toward payout.
-  screeningUnavailable;
+  screeningUnavailable,
+
+  /// The photograph's perceptual hash could not be computed, so it was never
+  /// compared against this user's earlier submissions (F2.11).
+  ///
+  /// Distinct from [duplicatePhoto] and from its absence. "No match found" and
+  /// "could not look" are different answers, and treating them alike is what let
+  /// a submission take the auto-approve lane with the duplicate defence never
+  /// having run — the hash step threw, nothing was flagged, `flags.length == 0`,
+  /// and it paid out. Fail toward review, exactly like
+  /// [screeningUnavailable].
+  hashUnavailable;
 
   static DisposalFlag? fromName(String? name) {
     for (final flag in DisposalFlag.values) {
@@ -154,6 +165,9 @@ enum DisposalFlag {
         return 'Declared material was not detected in the photo.';
       case DisposalFlag.dailyCapReached:
         return 'User has reached the daily approved-disposal cap.';
+      case DisposalFlag.hashUnavailable:
+        return 'The photo could not be fingerprinted, so it was not compared '
+            'against earlier submissions.';
       case DisposalFlag.screeningUnavailable:
         return 'Automated screening was unavailable; not yet checked.';
     }
@@ -304,6 +318,14 @@ class DisposalModel {
   /// `FieldValue.serverTimestamp()` (§7.4). [photoHash], [screenConfidence],
   /// [screenItemCount], [screenNotes], [pointsAwarded] and [status] transitions
   /// are written by the trusted server, not by this map from the client.
+  /// Full serialisation, INCLUDING server-owned fields.
+  ///
+  /// Not the write path, and must never become one. `createPendingDisposal` uses
+  /// [toCreateJson], which omits `pointsAwarded`, `photoHash`, `screenConfidence`
+  /// and the rest by construction — the create rule uses `hasOnly`, so a document
+  /// carrying any of them is refused outright.
+  ///
+  /// This exists for the round-trip test that proves [fromJson] and this agree.
   Map<String, dynamic> toJson() => <String, dynamic>{
         'userId': userId,
         'binId': binId,

@@ -34,7 +34,7 @@ class SellerApplicationController extends AsyncNotifier<void> {
         businessName: businessName,
         description: description,
         status: AppConstants.statusPending,
-        createdAt: DateTime.now(),
+        // createdAt omitted: the service supplies a server timestamp (§6).
       );
 
       await ref.read(userServiceProvider).submitSellerApplication(app);

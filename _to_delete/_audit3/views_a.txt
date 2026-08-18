@@ -1,0 +1,3449 @@
+=========== FILE: lib/views/admin/admin_applications_view.dart ===========
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
+import '../../controllers/seller_application_controller.dart';
+import '../../models/seller_application_model.dart';
+import '../shared/app_shell.dart';
+import '../shared/rejection_reason_dialog.dart';
+
+class AdminApplicationsView extends ConsumerWidget {
+  const AdminApplicationsView({super.key});
+
+  Future<void> _approve(
+      BuildContext context, WidgetRef ref, SellerApplicationModel app) async {
+    await ref
+        .read(sellerApplicationControllerProvider.notifier)
+        .approve(app.id);
+    if (!context.mounted) return;
+    _report(
+      context,
+      ref,
+      success: '${app.businessName} approved — applicant is now a seller',
+    );
+  }
+
+  Future<void> _reject(
+      BuildContext context, WidgetRef ref, SellerApplicationModel app) async {
+    final reason = await showRejectionReasonDialog(
+      context,
+      title: 'Reject ${app.businessName}',
+      hintText: 'The business description does not explain what you sell.',
+    );
+    if (reason == null || !context.mounted) return;
+
+    await ref
+        .read(sellerApplicationControllerProvider.notifier)
+        .reject(app.id, reason);
+    if (!context.mounted) return;
+    _report(context, ref, success: 'Application rejected');
+  }
+
+  /// One place that turns the controller's outcome into a snackbar.
+  ///
+  /// Both actions on this screen were duplicating this, and both were passing
+  /// `error.toString()` straight to the user and colouring it with a hardcoded
+  /// `Colors.red` — which is the same red in dark mode, where it glares.
+  static void _report(
+    BuildContext context,
+    WidgetRef ref, {
+    required String success,
+  }) {
+    final scheme = Theme.of(context).colorScheme;
+    final error = ref.read(sellerApplicationControllerProvider).error;
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          error == null
+              ? success
+              : 'That did not go through. Check your connection and try again.',
+        ),
+        backgroundColor: error != null ? scheme.errorContainer : null,
+        showCloseIcon: error != null,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final pendingAsync = ref.watch(pendingApplicationsProvider);
+    final theme = Theme.of(context);
+    final dateFormat = DateFormat('d MMM y, h:mm a');
+
+    return AppShell(
+      title: 'Seller applications',
+      child: pendingAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text('Could not load the queue: $e'),
+          ),
+        ),
+        data: (apps) {
+          if (apps.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.inbox_outlined,
+                      size: 48, color: theme.colorScheme.outline),
+                  const SizedBox(height: 12),
+                  const Text('Nothing pending review'),
+                ],
+              ),
+            );
+          }
+
+          return ListView.builder(
+            padding: const EdgeInsets.all(24),
+            itemCount: apps.length,
+            itemBuilder: (context, i) {
+              final app = apps[i];
+              return Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 720),
+                  child: Card(
+                    margin: const EdgeInsets.only(bottom: 16),
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(app.businessName,
+                              style: theme.textTheme.titleLarge),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Submitted ${dateFormat.format(app.createdAt)}',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(app.description),
+                          const SizedBox(height: 20),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              TextButton(
+                                onPressed: () => _reject(context, ref, app),
+                                child: const Text('Reject'),
+                              ),
+                              const SizedBox(width: 8),
+                              FilledButton(
+                                onPressed: () => _approve(context, ref, app),
+                                child: const Text('Approve'),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+=========== FILE: lib/views/admin/admin_bins_view.dart ===========
+import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:printing/printing.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+
+import '../../controllers/admin_bins_controller.dart';
+import '../../core/bin_label_pdf.dart';
+import '../../core/geo.dart';
+import '../../core/label_format.dart';
+import '../../core/pdf_fonts.dart';
+import '../../core/theme.dart';
+import '../../models/bin_model.dart';
+import '../../services/bin_admin_service.dart';
+import '../../services/location_service.dart';
+import '../shared/app_shell.dart';
+
+/// Bin registration and printable QR generation (F2.1).
+///
+/// Two things make a registered bin usable, and both are here:
+///
+/// **The coordinates are captured on site.** The brief calls this feature
+/// mobile-first for that reason — an administrator standing at the bin taps
+/// "Use my location" rather than reading numbers off a map afterwards. Typed
+/// entry stays available, because the web build has no useful GPS and because a
+/// bin sometimes has to be corrected from a desk.
+///
+/// **The code goes onto paper.** See [buildBinLabelPdf]; printing the app's own
+/// screen does not work on the web canvas and never produced a usable label.
+class AdminBinsView extends ConsumerStatefulWidget {
+  const AdminBinsView({super.key});
+
+  @override
+  ConsumerState<AdminBinsView> createState() => _AdminBinsViewState();
+}
+
+class _AdminBinsViewState extends ConsumerState<AdminBinsView> {
+  final _label = TextEditingController();
+  final _lat = TextEditingController();
+  final _lng = TextEditingController();
+  final _radius = TextEditingController(text: '50');
+
+  bool _saving = false;
+  bool _locating = false;
+  bool _printingAll = false;
+  List<String> _problems = const [];
+
+  /// The last GPS fix, kept so its accuracy can be judged against the radius.
+  LocationResult? _fix;
+
+  /// What the fix wrote into the coordinate fields. Once an administrator edits
+  /// either field by hand the fix no longer describes what is in the form, and
+  /// continuing to show "accurate to ±8 m" beside typed numbers would be a lie.
+  String? _fixLatText;
+  String? _fixLngText;
+
+  /// True while this class is writing the coordinate fields itself.
+  ///
+  /// [_onCoordinateEdited] must react only to a *person* typing. A programmatic
+  /// write sets latitude and longitude one after the other, so there is an
+  /// instant when latitude holds the new value and longitude still holds the old
+  /// one — and a listener firing then sees a mismatch and throws away the very
+  /// fix being recorded.
+  bool _writingCoordinates = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _lat.addListener(_onCoordinateEdited);
+    _lng.addListener(_onCoordinateEdited);
+    // The accuracy verdict is relative to the radius, so it has to be
+    // re-rendered when the radius changes. Without this, an administrator told
+    // their fix was too rough for 50 m would widen the radius to 200 m and still
+    // be looking at the warning.
+    _radius.addListener(_onRadiusEdited);
+  }
+
+  void _onRadiusEdited() {
+    // Only the fix note depends on the radius; with no fix there is nothing on
+    // screen that would change.
+    if (_fix == null) return;
+    setState(() {});
+  }
+
+  /// Writes the coordinate fields without the edit listener misreading it.
+  void _writeCoordinates(void Function() write) {
+    _writingCoordinates = true;
+    try {
+      write();
+    } finally {
+      _writingCoordinates = false;
+    }
+  }
+
+  @override
+  void dispose() {
+    _lat.removeListener(_onCoordinateEdited);
+    _lng.removeListener(_onCoordinateEdited);
+    _radius.removeListener(_onRadiusEdited);
+    _label.dispose();
+    _lat.dispose();
+    _lng.dispose();
+    _radius.dispose();
+    super.dispose();
+  }
+
+  void _onCoordinateEdited() {
+    if (_writingCoordinates) return;
+    if (_fix == null) return;
+    if (_lat.text == _fixLatText && _lng.text == _fixLngText) return;
+    setState(() {
+      _fix = null;
+      _fixLatText = null;
+      _fixLngText = null;
+    });
+  }
+
+  double? get _radiusValue => double.tryParse(_radius.text.trim());
+
+  /// Whether the fix is too imprecise for the radius it will be the centre of.
+  /// The rule itself is domain logic — see [isFixTooRoughForRadius].
+  bool get _fixTooRoughForRadius => isFixTooRoughForRadius(
+    accuracyMeters: _fix?.accuracyMeters,
+    radiusMeters: _radiusValue,
+  );
+
+  Future<void> _useMyLocation() async {
+    setState(() {
+      _locating = true;
+      _problems = const [];
+    });
+
+    final result = await ref.read(adminBinActionsProvider).captureLocation();
+    if (!mounted) return;
+
+    setState(() {
+      _locating = false;
+      _fix = result;
+
+      if (result.hasFix) {
+        // Five decimal places is about a metre — more than the fix itself is
+        // worth, and less would throw away real precision.
+        _fixLatText = result.latitude!.toStringAsFixed(5);
+        _fixLngText = result.longitude!.toStringAsFixed(5);
+        _writeCoordinates(() {
+          _lat.text = _fixLatText!;
+          _lng.text = _fixLngText!;
+        });
+      } else {
+        _fixLatText = null;
+        _fixLngText = null;
+      }
+    });
+  }
+
+  Future<void> _register() async {
+    final lat = double.tryParse(_lat.text.trim());
+    final lng = double.tryParse(_lng.text.trim());
+    final radius = _radiusValue;
+
+    final local = <String>[
+      if (_label.text.trim().isEmpty) 'Bin label is required.',
+      if (lat == null) 'Latitude must be a number.',
+      if (lng == null) 'Longitude must be a number.',
+      if (radius == null) 'Radius must be a number.',
+    ];
+
+    if (local.isNotEmpty) {
+      setState(() => _problems = local);
+      return;
+    }
+
+    setState(() {
+      _saving = true;
+      _problems = const [];
+    });
+
+    try {
+      final bin = await ref
+          .read(adminBinActionsProvider)
+          .register(
+            label: _label.text.trim(),
+            lat: lat!,
+            lng: lng!,
+            radiusMeters: radius!,
+          );
+
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _label.clear();
+        _radius.text = '50';
+        _fix = null;
+        _fixLatText = null;
+        _fixLngText = null;
+        // Guarded for the same reason as the capture: clearing the two fields in
+        // turn would otherwise re-enter the listener mid-reset.
+        _writeCoordinates(() {
+          _lat.clear();
+          _lng.clear();
+        });
+      });
+
+      await _showQr(bin);
+    } on BinAdminException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _problems = error.problems.isEmpty ? [error.message] : error.problems;
+      });
+    }
+  }
+
+  Future<void> _showQr(BinModel bin) async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => _QrDialog(bin: bin),
+    );
+  }
+
+  Future<void> _toggle(BinModel bin) async {
+    final id = bin.id;
+    if (id == null) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref
+          .read(adminBinActionsProvider)
+          .setActive(binId: id, active: !bin.active);
+      if (!mounted) return;
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            bin.active ? '${bin.label} closed.' : '${bin.label} reopened.',
+          ),
+        ),
+      );
+    } on BinAdminException catch (error) {
+      if (!mounted) return;
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(SnackBar(content: Text(error.message)));
+    }
+  }
+
+  /// Prints every open bin's label, four to a sheet.
+  ///
+  /// Closed bins are left out on purpose: a label on the street for a bin that
+  /// refuses submissions produces a scan, a walk and a refusal.
+  Future<void> _printAll(List<BinModel> bins) async {
+    final open = [...bins.where((b) => b.active)]
+      ..sort((a, b) => a.label.compareTo(b.label));
+
+    final messenger = ScaffoldMessenger.of(context);
+    if (open.isEmpty) {
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        const SnackBar(content: Text('No open bins to print.')),
+      );
+      return;
+    }
+
+    setState(() => _printingAll = true);
+    try {
+      // Fetching fonts before the dialog opens is what makes this slow enough
+      // to need a spinner at all.
+      final theme = await labelTheme();
+      await Printing.layoutPdf(
+        onLayout: (_) => buildBinLabelSheetPdf(open, theme: theme),
+        name: 'chokro-bin-labels',
+      );
+    } catch (error) {
+      if (!mounted) return;
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        const SnackBar(content: Text('The labels could not be printed.')),
+      );
+    } finally {
+      if (mounted) setState(() => _printingAll = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final async = ref.watch(allBinsProvider);
+    final bins = async.value;
+    final theme = Theme.of(context);
+
+    return AppShell(
+      title: 'Bins',
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: AppTheme.maxContentWidth),
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(
+              AppTheme.gapMd,
+              AppTheme.gapMd,
+              AppTheme.gapMd,
+              AppTheme.gapXl,
+            ),
+            children: [
+              Text(
+                'Register a bin',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: AppTheme.gapXs),
+              Text(
+                'Stand at the bin and capture its position. The QR payload is '
+                'generated by the server, so it is unique across every bin.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: AppTheme.gapMd),
+              TextField(
+                controller: _label,
+                textCapitalization: TextCapitalization.words,
+                decoration: const InputDecoration(
+                  labelText: 'Label',
+                  hintText: 'Merul Badda — Block C gate',
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: AppTheme.gapMd),
+
+              _LocationField(
+                lat: _lat,
+                lng: _lng,
+                radius: _radius,
+                locating: _locating,
+                onUseMyLocation: _useMyLocation,
+              ),
+
+              if (_fix != null) ...[
+                const SizedBox(height: AppTheme.gapSm),
+                _FixNote(
+                  fix: _fix!,
+                  tooRoughForRadius: _fixTooRoughForRadius,
+                  radius: _radiusValue,
+                  onOpenLocationSettings: ref
+                      .read(adminBinActionsProvider)
+                      .openLocationSettings,
+                  onOpenAppSettings: ref
+                      .read(adminBinActionsProvider)
+                      .openAppSettings,
+                ),
+              ],
+
+              const SizedBox(height: AppTheme.gapSm),
+              Text(
+                'A tight radius is a stronger proof of presence. 50 m suits a '
+                'street bin; an open compound may need more.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+
+              if (_problems.isNotEmpty) ...[
+                const SizedBox(height: AppTheme.gapMd),
+                for (final problem in _problems)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: AppTheme.gapXs),
+                    child: Text(
+                      '• $problem',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.error,
+                      ),
+                    ),
+                  ),
+              ],
+
+              const SizedBox(height: AppTheme.gapMd),
+              FilledButton.icon(
+                onPressed: _saving ? null : _register,
+                icon: _saving
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.add_location_alt_outlined),
+                label: Text(_saving ? 'Registering…' : 'Register bin'),
+              ),
+
+              const SizedBox(height: AppTheme.gapXl),
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      'Registered bins',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  if (bins != null && bins.any((b) => b.active))
+                    TextButton.icon(
+                      onPressed: _printingAll ? null : () => _printAll(bins),
+                      icon: _printingAll
+                          ? const SizedBox(
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.print_outlined, size: 18),
+                      label: Text(
+                        _printingAll ? 'Preparing…' : 'Print all labels',
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: AppTheme.gapSm),
+              async.when(
+                loading: () => const Padding(
+                  padding: EdgeInsets.all(AppTheme.gapLg),
+                  child: Center(child: CircularProgressIndicator()),
+                ),
+                error: (error, _) => Text(
+                  'Bins did not load. Check your connection and try again.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.error,
+                  ),
+                ),
+                data: (bins) {
+                  if (bins.isEmpty) {
+                    return Text(
+                      'No bins yet. Nothing can be scanned until one exists.',
+                      style: theme.textTheme.bodySmall,
+                    );
+                  }
+                  final sorted = [...bins]
+                    ..sort((a, b) => a.label.compareTo(b.label));
+                  return Column(
+                    children: [
+                      for (final bin in sorted)
+                        _BinCard(
+                          bin: bin,
+                          onShowQr: () => _showQr(bin),
+                          onToggle: () => _toggle(bin),
+                        ),
+                    ],
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// Coordinates and radius, with the on-site capture button.
+class _LocationField extends StatelessWidget {
+  const _LocationField({
+    required this.lat,
+    required this.lng,
+    required this.radius,
+    required this.locating,
+    required this.onUseMyLocation,
+  });
+
+  final TextEditingController lat;
+  final TextEditingController lng;
+  final TextEditingController radius;
+  final bool locating;
+  final VoidCallback onUseMyLocation;
+
+  @override
+  Widget build(BuildContext context) {
+    const coordinateKeyboard = TextInputType.numberWithOptions(
+      decimal: true,
+      signed: true,
+    );
+    final coordinateFilter = [
+      FilteringTextInputFormatter.allow(RegExp(r'[0-9.\-]')),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: lat,
+                keyboardType: coordinateKeyboard,
+                inputFormatters: coordinateFilter,
+                decoration: const InputDecoration(
+                  labelText: 'Latitude',
+                  hintText: '23.7808',
+                  isDense: true,
+                ),
+              ),
+            ),
+            const SizedBox(width: AppTheme.gapMd),
+            Expanded(
+              child: TextField(
+                controller: lng,
+                keyboardType: coordinateKeyboard,
+                inputFormatters: coordinateFilter,
+                decoration: const InputDecoration(
+                  labelText: 'Longitude',
+                  hintText: '90.4074',
+                  isDense: true,
+                ),
+              ),
+            ),
+            const SizedBox(width: AppTheme.gapMd),
+            SizedBox(
+              width: 110,
+              child: TextField(
+                controller: radius,
+                keyboardType: TextInputType.number,
+                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+                decoration: const InputDecoration(
+                  labelText: 'Radius',
+                  suffixText: 'm',
+                  isDense: true,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: AppTheme.gapSm),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton.icon(
+            onPressed: locating ? null : onUseMyLocation,
+            icon: locating
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.my_location, size: 18),
+            label: Text(locating ? 'Locating…' : 'Use my location'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// What came back from the GPS, and whether it is good enough to build a
+/// geofence on.
+class _FixNote extends StatelessWidget {
+  const _FixNote({
+    required this.fix,
+    required this.tooRoughForRadius,
+    required this.radius,
+    required this.onOpenLocationSettings,
+    required this.onOpenAppSettings,
+  });
+
+  final LocationResult fix;
+  final bool tooRoughForRadius;
+  final double? radius;
+  final VoidCallback onOpenLocationSettings;
+  final VoidCallback onOpenAppSettings;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
+    if (!fix.hasFix) {
+      final needsAppSettings = fix.outcome == LocationOutcome.deniedForever;
+      final needsLocationSettings =
+          fix.outcome == LocationOutcome.serviceDisabled;
+
+      return _Notice(
+        icon: Icons.location_off_outlined,
+        background: scheme.errorContainer,
+        foreground: scheme.onErrorContainer,
+        title: fix.displayMessage,
+        body: 'You can still type the coordinates in by hand.',
+        action: needsAppSettings || needsLocationSettings
+            ? _NoticeAction(
+                label: 'Open settings',
+                onPressed: needsAppSettings
+                    ? onOpenAppSettings
+                    : onOpenLocationSettings,
+              )
+            : null,
+      );
+    }
+
+    final accuracy = fix.accuracyMeters;
+    final accuracyText = accuracy == null
+        ? 'accuracy unknown'
+        : 'accurate to ±${accuracy.round()} m';
+
+    if (tooRoughForRadius) {
+      return _Notice(
+        icon: Icons.gps_not_fixed,
+        background: scheme.errorContainer,
+        foreground: scheme.onErrorContainer,
+        title: 'This fix is too rough for a ${radius?.round()} m radius',
+        body:
+            'The fix is $accuracyText, so the recorded centre could sit '
+            'further from the bin than half the geofence. Residents standing '
+            'at the bin would be refused, and nothing in their submission '
+            'would show that the bin was the thing in the wrong place. Move '
+            'into the open and capture again, or widen the radius.',
+      );
+    }
+
+    return _Notice(
+      icon: Icons.gps_fixed,
+      background: scheme.successContainer,
+      foreground: scheme.onSuccessContainer,
+      title: 'Position captured, $accuracyText',
+      body: 'Check the label names this bin, then register it.',
+    );
+  }
+}
+
+class _NoticeAction {
+  const _NoticeAction({required this.label, required this.onPressed});
+  final String label;
+  final VoidCallback onPressed;
+}
+
+class _Notice extends StatelessWidget {
+  const _Notice({
+    required this.icon,
+    required this.background,
+    required this.foreground,
+    required this.title,
+    required this.body,
+    this.action,
+  });
+
+  final IconData icon;
+  final Color background;
+  final Color foreground;
+  final String title;
+  final String body;
+  final _NoticeAction? action;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(AppTheme.gapMd),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, color: foreground, size: 20),
+          const SizedBox(width: AppTheme.gapSm),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                    color: foreground,
+                  ),
+                ),
+                const SizedBox(height: AppTheme.gapXs),
+                Text(
+                  body,
+                  style: theme.textTheme.bodySmall?.copyWith(color: foreground),
+                ),
+                if (action != null) ...[
+                  const SizedBox(height: AppTheme.gapSm),
+                  OutlinedButton(
+                    onPressed: action!.onPressed,
+                    child: Text(action!.label),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _BinCard extends StatelessWidget {
+  const _BinCard({
+    required this.bin,
+    required this.onShowQr,
+    required this.onToggle,
+  });
+
+  final BinModel bin;
+  final VoidCallback onShowQr;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      margin: const EdgeInsets.only(bottom: AppTheme.gapSm),
+      child: Padding(
+        padding: const EdgeInsets.all(AppTheme.gapMd),
+        child: Row(
+          children: [
+            Icon(
+              bin.active ? Icons.delete_outline : Icons.block,
+              color: bin.active
+                  ? theme.colorScheme.primary
+                  : theme.colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: AppTheme.gapMd),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    bin.label,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${bin.lat.toStringAsFixed(5)}, '
+                    '${bin.lng.toStringAsFixed(5)} · '
+                    '${bin.radiusMeters.round()} m'
+                    '${bin.active ? '' : ' · closed'}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  if (bin.createdAt != null)
+                    Text(
+                      'Registered ${formatAge(bin.createdAt)}',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: 'Show and print QR code',
+              onPressed: onShowQr,
+              icon: const Icon(Icons.qr_code_2),
+            ),
+            TextButton(
+              onPressed: onToggle,
+              child: Text(bin.active ? 'Close' : 'Reopen'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The code on screen, with the paths that get it onto paper.
+class _QrDialog extends StatefulWidget {
+  const _QrDialog({required this.bin});
+
+  final BinModel bin;
+
+  @override
+  State<_QrDialog> createState() => _QrDialogState();
+}
+
+class _QrDialogState extends State<_QrDialog> {
+  bool _busy = false;
+
+  /// A filename an administrator can recognise in a downloads folder.
+  String get _filename {
+    final slug = widget.bin.label
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]+'), '-')
+        .replaceAll(RegExp(r'^-+|-+$'), '');
+    return 'chokro-bin-${slug.isEmpty ? 'label' : slug}';
+  }
+
+  /// Runs a print or share action, reporting failure rather than dropping it.
+  ///
+  /// A cancelled print dialog is not a failure and returns normally, so only a
+  /// thrown error is worth a message.
+  Future<void> _run(Future<void> Function() action, String failure) async {
+    setState(() => _busy = true);
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await action();
+    } catch (error) {
+      if (!mounted) return;
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(SnackBar(content: Text(failure)));
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  Future<void> _print() => _run(() async {
+    final theme = await labelTheme();
+    await Printing.layoutPdf(
+      onLayout: (_) => buildBinLabelPdf(widget.bin, theme: theme),
+      name: _filename,
+    );
+  }, 'The label could not be printed.');
+
+  Future<void> _share() => _run(
+    () async => Printing.sharePdf(
+      bytes: await buildBinLabelPdf(widget.bin, theme: await labelTheme()),
+      filename: '$_filename.pdf',
+    ),
+    'The label could not be shared.',
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final bin = widget.bin;
+
+    return AlertDialog(
+      title: Text(bin.label),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            // White plate regardless of theme. An inverted QR photographs badly
+            // and some scanners refuse it outright, so the on-screen code keeps
+            // the same polarity as the printed one.
+            Container(
+              padding: const EdgeInsets.all(AppTheme.gapMd),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: QrImageView(
+                data: bin.qrPayload,
+                version: QrVersions.auto,
+                size: 200,
+                backgroundColor: Colors.white,
+              ),
+            ),
+            const SizedBox(height: AppTheme.gapMd),
+            SelectableText(
+              bin.qrPayload,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                fontFamily: 'monospace',
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: AppTheme.gapSm),
+            Text(
+              kIsWeb
+                  ? 'Print the label and attach it to the bin.'
+                  : 'Print the label, or share it to print from another '
+                        'device.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _busy
+              ? null
+              : () {
+                  final messenger = ScaffoldMessenger.of(context);
+                  Clipboard.setData(ClipboardData(text: bin.qrPayload));
+                  messenger.hideCurrentSnackBar();
+                  messenger.showSnackBar(
+                    const SnackBar(content: Text('Payload copied.')),
+                  );
+                },
+          child: const Text('Copy payload'),
+        ),
+        TextButton(
+          onPressed: _busy ? null : _share,
+          // On the web `sharePdf` hands the file to the browser, which saves
+          // it; there is no share sheet to open.
+          child: Text(kIsWeb ? 'Download PDF' : 'Share'),
+        ),
+        FilledButton.icon(
+          onPressed: _busy ? null : _print,
+          icon: _busy
+              ? const SizedBox(
+                  width: 16,
+                  height: 16,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.print_outlined, size: 18),
+          label: const Text('Print'),
+        ),
+      ],
+    );
+  }
+}
+
+=========== FILE: lib/views/admin/admin_claims_view.dart ===========
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../controllers/claim_controller.dart';
+import '../../core/label_format.dart';
+import '../../models/claim_model.dart';
+import '../shared/app_shell.dart';
+import '../shared/rejection_reason_dialog.dart';
+
+/// The claims review queue (F6.3).
+///
+/// Every card shows the submitter's **earlier claims** alongside the pending
+/// one. That is not a convenience: with no geofence, no distance check and no
+/// cross-user hash index, an administrator noticing "this is the same compost
+/// heap as last week" is one of the few real defences this route has (§7.4).
+class AdminClaimsView extends ConsumerWidget {
+  const AdminClaimsView({super.key});
+
+  static const double _maxContentWidth = 820;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final pending = ref.watch(pendingClaimsProvider);
+    final ui = ref.watch(claimReviewControllerProvider);
+    final theme = Theme.of(context);
+
+    ref.listen(claimReviewControllerProvider, (previous, next) {
+      final message = next.error ?? next.lastMessage;
+      if (message == null) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
+      ref.read(claimReviewControllerProvider.notifier).clearMessages();
+    });
+
+    return AppShell(
+      title: 'Claim review',
+      child: Center(
+        child: ConstrainedBox(
+          constraints:
+              const BoxConstraints(maxWidth: AdminClaimsView._maxContentWidth),
+          child: pending.when(
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (error, _) => Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Text('The queue did not load: $error'),
+              ),
+            ),
+            data: (claims) {
+              if (claims.isEmpty) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.done_all,
+                            size: 44,
+                            color: theme.colorScheme.onSurfaceVariant),
+                        const SizedBox(height: 14),
+                        Text('Nothing waiting',
+                            style: theme.textTheme.titleMedium),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Self-reported eco-actions appear here for review.',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+
+              return ListView.separated(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+                itemCount: claims.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 12),
+                itemBuilder: (context, index) => _ClaimCard(
+                  claim: claims[index],
+                  isBusy: ui.isBusy(claims[index].id ?? ''),
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ClaimCard extends ConsumerWidget {
+  const _ClaimCard({required this.claim, required this.isBusy});
+
+  final ClaimModel claim;
+  final bool isBusy;
+
+  Future<void> _reject(BuildContext context, WidgetRef ref) async {
+    final reason = await showRejectionReasonDialog(
+      context,
+      title: 'Reject this claim',
+      hintText: 'The photo does not show the action described.',
+    );
+
+    if (reason == null || !context.mounted) return;
+    await ref
+        .read(claimReviewControllerProvider.notifier)
+        .reject(claim.id ?? '', reason);
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final submitter = ref.watch(claimSubmitterProvider(claim.userId));
+
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: CachedNetworkImage(
+                    imageUrl: claim.photoUrl,
+                    width: 110,
+                    height: 110,
+                    fit: BoxFit.cover,
+                    placeholder: (_, _) => Container(
+                      width: 110,
+                      height: 110,
+                      color: theme.colorScheme.surfaceContainerHighest,
+                    ),
+                    errorWidget: (_, _, _) => Container(
+                      width: 110,
+                      height: 110,
+                      color: theme.colorScheme.surfaceContainerHighest,
+                      child: const Icon(Icons.broken_image_outlined),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        claim.actionType.label,
+                        style: theme.textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        claim.actionType.evidenceHint,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      submitter.when(
+                        loading: () => const SizedBox(height: 14),
+                        error: (_, _) => const SizedBox.shrink(),
+                        data: (user) => Text(
+                          user == null
+                              ? 'Unknown submitter'
+                              : '${user.name} · ${user.email}',
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ),
+                      Text(
+                        'Submitted ${formatAge(claim.createdAt)}',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _PreviousClaims(userId: claim.userId, currentId: claim.id),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                if (isBusy)
+                  const Padding(
+                    padding: EdgeInsets.only(right: 12),
+                    child: SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                TextButton(
+                  onPressed: isBusy ? null : () => _reject(context, ref),
+                  style: TextButton.styleFrom(
+                      foregroundColor: theme.colorScheme.error),
+                  child: const Text('Reject'),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  onPressed: isBusy
+                      ? null
+                      : () => ref
+                          .read(claimReviewControllerProvider.notifier)
+                          .approve(claim.id ?? ''),
+                  child: const Text('Approve'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// This user's earlier claims, so a recycled photograph is visible.
+class _PreviousClaims extends ConsumerWidget {
+  const _PreviousClaims({required this.userId, required this.currentId});
+
+  final String userId;
+  final String? currentId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final history = ref.watch(claimHistoryForReviewProvider(userId));
+
+    return history.when(
+      loading: () => const SizedBox(height: 20),
+      error: (_, _) => const SizedBox.shrink(),
+      data: (claims) {
+        final previous =
+            claims.where((c) => c.id != currentId).take(6).toList();
+
+        if (previous.isEmpty) {
+          return Text(
+            'First claim from this user.',
+            style: theme.textTheme.labelSmall
+                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Earlier claims from this user',
+              style: theme.textTheme.labelMedium
+                  ?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 6),
+            SizedBox(
+              height: 58,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: previous.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  final claim = previous[index];
+                  return Tooltip(
+                    message: '${claim.actionType.label}\n'
+                        '${claim.userFacingStatus} · '
+                        '${formatAge(claim.createdAt)}',
+                    child: Stack(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: CachedNetworkImage(
+                            imageUrl: claim.photoUrl,
+                            width: 58,
+                            height: 58,
+                            fit: BoxFit.cover,
+                            placeholder: (_, _) => Container(
+                              width: 58,
+                              height: 58,
+                              color: theme.colorScheme.surfaceContainerHighest,
+                            ),
+                            errorWidget: (_, _, _) => Container(
+                              width: 58,
+                              height: 58,
+                              color: theme.colorScheme.surfaceContainerHighest,
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          right: 2,
+                          bottom: 2,
+                          child: Icon(
+                            claim.status.isApproved
+                                ? Icons.check_circle
+                                : claim.status.isRejected
+                                    ? Icons.cancel
+                                    : Icons.hourglass_empty,
+                            size: 13,
+                            color: claim.status.isApproved
+                                ? theme.colorScheme.primary
+                                : theme.colorScheme.error,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+=========== FILE: lib/views/admin/admin_disposals_view.dart ===========
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../controllers/admin_review_controller.dart';
+import '../../core/geo.dart';
+import '../../core/label_format.dart';
+import '../../core/submitter_record.dart';
+import '../../core/theme.dart';
+import '../../models/disposal_model.dart';
+import '../shared/app_shell.dart';
+import '../shared/rejection_reason_dialog.dart';
+
+/// Administrator review queue (F2.7, F2.8).
+///
+/// Shows every pending submission with the evidence needed to decide: the
+/// photograph, what the user declared, how far from the bin they were, and any
+/// flags the server raised. A queue that shows a photo and nothing else forces
+/// the administrator to guess, which is how rubber-stamping starts.
+///
+/// Both buttons call the trusted service. Nothing on this screen writes
+/// Firestore — an administrator cannot credit a wallet from a client, and there
+/// is a rules test asserting exactly that.
+class AdminDisposalsView extends ConsumerWidget {
+  const AdminDisposalsView({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final pending = ref.watch(pendingDisposalsProvider);
+    final ui = ref.watch(adminReviewControllerProvider);
+    final theme = Theme.of(context);
+
+    ref.listen(adminReviewControllerProvider, (previous, next) {
+      final messenger = ScaffoldMessenger.of(context);
+      if (next.error != null) {
+        messenger.showSnackBar(SnackBar(
+          content: Text(next.error!),
+          backgroundColor: theme.colorScheme.error,
+        ));
+      } else if (next.lastMessage != null) {
+        messenger.showSnackBar(SnackBar(content: Text(next.lastMessage!)));
+      }
+    });
+
+    return AppShell(
+      title: 'Review queue',
+      child: pending.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (err, _) => _QueueError(error: err, theme: theme),
+        data: (disposals) {
+          if (disposals.isEmpty) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.inbox_outlined,
+                        size: 56, color: theme.colorScheme.onSurfaceVariant),
+                    const SizedBox(height: 16),
+                    Text('Nothing waiting', style: theme.textTheme.titleMedium),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Submissions needing a human decision appear here.',
+                      style: theme.textTheme.bodySmall,
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+
+          return ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: disposals.length,
+            itemBuilder: (context, index) => Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 720),
+                child: _DisposalCard(
+                  disposal: disposals[index],
+                  isBusy: ui.isBusy(disposals[index].id ?? ''),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _DisposalCard extends ConsumerWidget {
+  final DisposalModel disposal;
+  final bool isBusy;
+
+  const _DisposalCard({required this.disposal, required this.isBusy});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final controller = ref.read(adminReviewControllerProvider.notifier);
+    final submitter = ref.watch(submitterProvider(disposal.userId));
+    final bin = ref.watch(binForReviewProvider(disposal.binId));
+
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      margin: const EdgeInsets.only(bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // ── Photograph ────────────────────────────────────────────────────
+          // `CachedNetworkImage`, not `Image.network`. A reviewer scrolls this
+          // queue repeatedly, and `Image.network` re-fetched every full-size
+          // photograph each time a card scrolled back into view. The rest of the
+          // app already caches; this screen was the one that did not, and it is
+          // the screen that loads the most images.
+          AspectRatio(
+            aspectRatio: 4 / 3,
+            child: CachedNetworkImage(
+              imageUrl: disposal.photoUrl,
+              fit: BoxFit.cover,
+              placeholder: (_, _) => ColoredBox(
+                color: theme.colorScheme.surfaceContainerHighest,
+                child: const Center(child: CircularProgressIndicator()),
+              ),
+              errorWidget: (_, _, _) => ColoredBox(
+                color: theme.colorScheme.surfaceContainerHighest,
+                child: const Center(child: Icon(Icons.broken_image_outlined)),
+              ),
+            ),
+          ),
+
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  submitter.maybeWhen(
+                    data: (user) => user?.name ?? disposal.userId,
+                    orElse: () => disposal.userId,
+                  ),
+                  style: theme.textTheme.titleMedium
+                      ?.copyWith(fontWeight: FontWeight.bold),
+                ),
+
+                // The submitter's prior record (F2.7).
+                //
+                // The queue showed the photograph, the distance and the flags,
+                // and left the reviewer to judge every borderline case in
+                // isolation. An ambiguous photo from an account with thirty
+                // clean approvals is almost certainly a bad angle; the same
+                // photo from one with four rejections in its last ten is not.
+                // Nothing on this screen could tell those apart.
+                _SubmitterRecordLine(
+                  record: ref.watch(submitterRecordProvider(disposal.userId)),
+                ),
+
+                const SizedBox(height: 12),
+
+                // ── Evidence ──────────────────────────────────────────────
+                _Fact(
+                  icon: Icons.category_outlined,
+                  label: 'Declared',
+                  value: '${disposal.declaredItemCount} × '
+                      '${disposal.itemType.label}',
+                ),
+                _Fact(
+                  icon: Icons.delete_outline,
+                  label: 'Bin',
+                  value: bin.maybeWhen(
+                    data: (b) => b?.label ?? disposal.binId,
+                    orElse: () => disposal.binId,
+                  ),
+                ),
+                _Fact(
+                  icon: Icons.straighten,
+                  label: 'Distance',
+                  // The client's figure. The server recomputed it from the
+                  // stored coordinates before this row appeared — a discrepancy
+                  // between the two is itself a signal.
+                  value: '${formatDistance(disposal.distanceMeters)} (reported)',
+                ),
+                if (disposal.createdAt != null)
+                  _Fact(
+                    icon: Icons.schedule,
+                    label: 'Submitted',
+                    // `formatAge` from core/label_format, rather than the
+                    // private copy that used to live here. Two relative-time
+                    // formatters that disagreed past a week — this one fell back
+                    // to "d ago" forever, the shared one switches to a date.
+                    value: formatAge(disposal.createdAt),
+                  ),
+
+                // ── Flags ─────────────────────────────────────────────────
+                if (disposal.hasFlags) ...[
+                  const SizedBox(height: 12),
+                  ...disposal.flags.map(
+                    (flag) => Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(Icons.flag_outlined,
+                              size: 18, color: theme.colorScheme.error),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              flag.explanation,
+                              style: theme.textTheme.bodySmall
+                                  ?.copyWith(color: theme.colorScheme.error),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+
+                const SizedBox(height: 16),
+
+                if (isBusy)
+                  const Center(child: CircularProgressIndicator())
+                else
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => _askReason(context, controller),
+                          icon: const Icon(Icons.close),
+                          label: const Text('Reject'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: theme.colorScheme.error,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: () =>
+                              controller.approve(disposal.id ?? ''),
+                          icon: const Icon(Icons.check),
+                          label: const Text('Approve'),
+                        ),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Rejection requires a reason, and the user is shown it. A rejection with no
+  /// explanation is indistinguishable from the system being broken, and it makes
+  /// an appeal impossible to answer.
+  ///
+  /// The dialog is shared with the claim queue and the applications list. Each
+  /// used to have its own copy, and each leaked the controller behind it.
+  Future<void> _askReason(
+    BuildContext context,
+    AdminReviewController controller,
+  ) async {
+    final reason = await showRejectionReasonDialog(
+      context,
+      title: 'Why are you rejecting this?',
+      hintText: 'The photo does not show the declared items.',
+    );
+
+    // Already trimmed and length-checked by the dialog; null means cancelled.
+    if (reason == null) return;
+    await controller.reject(disposal.id ?? '', reason);
+  }
+}
+
+class _Fact extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+
+  const _Fact({required this.icon, required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 78,
+            child: Text(label, style: theme.textTheme.bodySmall),
+          ),
+          Expanded(
+            child: Text(value, style: theme.textTheme.bodyMedium),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _QueueError extends StatelessWidget {
+  final Object error;
+  final ThemeData theme;
+
+  const _QueueError({required this.error, required this.theme});
+
+  @override
+  Widget build(BuildContext context) {
+    // A missing composite index is the overwhelmingly likely cause the first
+    // time this screen runs: the query filters on status and orders by
+    // createdAt, which Firestore cannot serve from single-field indexes.
+    final text = error.toString();
+    final needsIndex = text.contains('index');
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.error_outline, size: 48, color: theme.colorScheme.error),
+            const SizedBox(height: 16),
+            Text(
+              needsIndex
+                  ? 'This query needs a Firestore composite index. Open the '
+                      'console link in the debug output to create it — it takes '
+                      'about a minute to build.'
+                  : 'Could not load the queue.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              text,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// One line describing how this submitter has fared before (F2.7).
+class _SubmitterRecordLine extends StatelessWidget {
+  const _SubmitterRecordLine({required this.record});
+
+  final AsyncValue<SubmitterRecord> record;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    // A record that has not arrived, or failed to, says nothing rather than
+    // guessing. "First submission" would be a claim, and on a screen that
+    // decides payouts a wrong claim is worse than a blank.
+    final value = record.value;
+    if (value == null) return const SizedBox.shrink();
+
+    final flagged = value.hasRejections;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(
+        children: [
+          Icon(
+            flagged ? Icons.history_toggle_off : Icons.history,
+            size: 14,
+            color: flagged
+                ? theme.colorScheme.warning
+                : theme.colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              value.summary,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: flagged
+                    ? theme.colorScheme.warning
+                    : theme.colorScheme.onSurfaceVariant,
+                fontWeight: flagged ? FontWeight.w600 : null,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+=========== FILE: lib/views/admin/admin_users_view.dart ===========
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../controllers/admin_users_controller.dart';
+import '../../controllers/current_user_provider.dart';
+import '../../core/label_format.dart';
+import '../../models/user_model.dart';
+import '../shared/app_shell.dart';
+
+/// Administrator account management (F5.2) with temporary suspension (F5.3).
+///
+/// The list distinguishes four states, not two. "Suspended" and "suspension
+/// lapsed" look identical in the `status` field — both read `suspended` — and
+/// telling them apart is the whole point of the screen: it explains why an
+/// account marked suspended is submitting again.
+class AdminUsersView extends ConsumerStatefulWidget {
+  const AdminUsersView({super.key});
+
+  static const double _maxContentWidth = 820;
+
+  @override
+  ConsumerState<AdminUsersView> createState() => _AdminUsersViewState();
+}
+
+enum _Filter { all, active, suspended }
+
+class _AdminUsersViewState extends ConsumerState<AdminUsersView> {
+  final TextEditingController _search = TextEditingController();
+  _Filter _filter = _Filter.all;
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  List<UserModel> _visible(List<UserModel> users) {
+    final query = _search.text.trim().toLowerCase();
+    final now = DateTime.now();
+
+    final filtered = users.where((user) {
+      final matchesQuery = query.isEmpty ||
+          user.name.toLowerCase().contains(query) ||
+          user.email.toLowerCase().contains(query);
+      if (!matchesQuery) return false;
+
+      return switch (_filter) {
+        _Filter.all => true,
+        _Filter.active => user.isActiveAt(now),
+        _Filter.suspended => !user.isActiveAt(now),
+      };
+    }).toList();
+
+    // Blocked accounts first — the reason to open this screen is usually one of
+    // them — then lapsed suspensions, then everyone else by name.
+    filtered.sort((a, b) {
+      int rank(UserModel u) {
+        if (!u.isActiveAt(now)) return 0;
+        if (u.hasLapsedSuspension) return 1;
+        return 2;
+      }
+
+      final byRank = rank(a).compareTo(rank(b));
+      if (byRank != 0) return byRank;
+      return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    });
+
+    return filtered;
+  }
+
+  Future<void> _suspend(UserModel user) async {
+    final choice = await showDialog<Duration?>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: Text('Suspend ${user.name}'),
+        children: [
+          for (final option in const [
+            (label: '24 hours', duration: Duration(hours: 24)),
+            (label: '7 days', duration: Duration(days: 7)),
+            (label: '30 days', duration: Duration(days: 30)),
+          ])
+            SimpleDialogOption(
+              onPressed: () => Navigator.of(context).pop(option.duration),
+              child: Text(option.label),
+            ),
+          const Divider(),
+          SimpleDialogOption(
+            onPressed: () => Navigator.of(context).pop(const Duration()),
+            child: Text(
+              'Indefinitely',
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 12, 24, 8),
+            child: Text(
+              'A timed suspension lifts itself when the date passes. Nothing '
+              'has to run for that to happen — the expiry is checked whenever '
+              'the account tries to act.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (choice == null || !mounted) return;
+
+    // Duration.zero is the sentinel for "indefinitely" — SimpleDialogOption
+    // cannot return null and be distinguished from a dismissal.
+    final until =
+        choice == const Duration() ? null : DateTime.now().add(choice);
+
+    await _run(
+      () => ref.read(adminUserActionsProvider).suspend(user.uid, until: until),
+      success: until == null
+          ? '${user.name} suspended indefinitely.'
+          : '${user.name} suspended until ${formatDateTime(until)}.',
+    );
+  }
+
+  Future<void> _reinstate(UserModel user) async {
+    await _run(
+      () => ref.read(adminUserActionsProvider).reinstate(user.uid),
+      success: '${user.name} reinstated.',
+    );
+  }
+
+  Future<void> _run(Future<void> Function() action,
+      {required String success}) async {
+    try {
+      await action();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(success)));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('That did not work: $error')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final async = ref.watch(allUsersProvider);
+    final currentUid = ref.watch(currentUidProvider);
+
+    return AppShell(
+      title: 'Accounts',
+      child: Center(
+        child: ConstrainedBox(
+          constraints:
+              const BoxConstraints(maxWidth: AdminUsersView._maxContentWidth),
+          child: async.when(
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (error, _) => Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Text('Accounts did not load: $error'),
+              ),
+            ),
+            data: (users) {
+              final visible = _visible(users);
+              return Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    child: TextField(
+                      controller: _search,
+                      onChanged: (_) => setState(() {}),
+                      decoration: const InputDecoration(
+                        prefixIcon: Icon(Icons.search),
+                        hintText: 'Search by name or email',
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(
+                      children: [
+                        for (final filter in _Filter.values)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ChoiceChip(
+                              label: Text(humanise(filter.name)),
+                              selected: _filter == filter,
+                              onSelected: (_) =>
+                                  setState(() => _filter = filter),
+                            ),
+                          ),
+                        const Spacer(),
+                        Text('${visible.length} of ${users.length}',
+                            style: Theme.of(context).textTheme.labelSmall),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: visible.isEmpty
+                        ? const Center(child: Text('No accounts match.'))
+                        : ListView.separated(
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                            itemCount: visible.length,
+                            separatorBuilder: (_, _) =>
+                                const SizedBox(height: 8),
+                            itemBuilder: (context, index) => _UserCard(
+                              user: visible[index],
+                              isSelf: visible[index].uid == currentUid,
+                              onSuspend: () => _suspend(visible[index]),
+                              onReinstate: () => _reinstate(visible[index]),
+                            ),
+                          ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _UserCard extends StatelessWidget {
+  const _UserCard({
+    required this.user,
+    required this.isSelf,
+    required this.onSuspend,
+    required this.onReinstate,
+  });
+
+  final UserModel user;
+  final bool isSelf;
+  final VoidCallback onSuspend;
+  final VoidCallback onReinstate;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final blocked = !user.isActive;
+
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CircleAvatar(
+              backgroundColor: blocked
+                  ? theme.colorScheme.errorContainer
+                  : theme.colorScheme.surfaceContainerHighest,
+              child: Text(
+                user.name.isEmpty ? '?' : user.name[0].toUpperCase(),
+                style: TextStyle(
+                  color: blocked
+                      ? theme.colorScheme.onErrorContainer
+                      : theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          user.name,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                      if (isSelf) ...[
+                        const SizedBox(width: 6),
+                        Text('(you)', style: theme.textTheme.labelSmall),
+                      ],
+                    ],
+                  ),
+                  Text(
+                    user.email,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      _Pill(
+                        label: humanise(user.role),
+                        background: theme.colorScheme.surfaceContainerHighest,
+                        foreground: theme.colorScheme.onSurfaceVariant,
+                      ),
+                      _StateChip(user: user),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            if (isSelf)
+              Tooltip(
+                message: 'You cannot suspend your own account',
+                child: Icon(Icons.block,
+                    size: 18, color: theme.colorScheme.onSurfaceVariant),
+              )
+            else if (blocked)
+              TextButton(onPressed: onReinstate, child: const Text('Reinstate'))
+            else
+              TextButton(
+                onPressed: onSuspend,
+                style: TextButton.styleFrom(
+                    foregroundColor: theme.colorScheme.error),
+                child: const Text('Suspend'),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StateChip extends StatelessWidget {
+  const _StateChip({required this.user});
+
+  final UserModel user;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    if (user.isSuspendedIndefinitely) {
+      return _Pill(
+        label: 'Suspended indefinitely',
+        background: scheme.errorContainer,
+        foreground: scheme.onErrorContainer,
+      );
+    }
+
+    if (user.isSuspendedTemporarily) {
+      return _Pill(
+        label: 'Suspended until ${formatDateTime(user.suspendedUntil)}',
+        background: scheme.errorContainer,
+        foreground: scheme.onErrorContainer,
+      );
+    }
+
+    if (user.hasLapsedSuspension) {
+      // Status still reads 'suspended' in Firestore. Saying so prevents an
+      // administrator re-suspending someone whose time is already served.
+      return _Pill(
+        label: 'Suspension lapsed ${formatAge(user.suspendedUntil)}',
+        background: scheme.tertiaryContainer,
+        foreground: scheme.onTertiaryContainer,
+      );
+    }
+
+    return _Pill(
+      label: 'Active',
+      background: scheme.secondaryContainer,
+      foreground: scheme.onSecondaryContainer,
+    );
+  }
+}
+
+class _Pill extends StatelessWidget {
+  const _Pill({
+    required this.label,
+    required this.background,
+    required this.foreground,
+  });
+
+  final String label;
+  final Color background;
+  final Color foreground;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context)
+            .textTheme
+            .labelSmall
+            ?.copyWith(color: foreground, fontWeight: FontWeight.w600),
+      ),
+    );
+  }
+}
+
+=========== FILE: lib/views/admin/points_policy_view.dart ===========
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../controllers/points_policy_controller.dart';
+import '../../core/label_format.dart';
+import '../../core/points_policy.dart';
+import '../../core/policy_fields.dart';
+import '../../services/points_policy_service.dart';
+import '../shared/app_shell.dart';
+
+/// Administrator editor for the points policy (F3.3).
+///
+/// Three things this screen is careful about:
+///
+/// 1. **It validates live, but the server decides.** `PointsPolicy.validate()`
+///    runs on every keystroke so an administrator sees a broken invariant
+///    immediately, and the same check runs again server-side before the write.
+///    The client check is a courtesy, not the enforcement.
+/// 2. **It shows the change before committing it.** Editing this document
+///    changes the economy, so a save presents a from → to summary first.
+/// 3. **It says what a change does not do.** Past awards are snapshotted and
+///    are not rewritten — the most likely misunderstanding an administrator
+///    could have here.
+class PointsPolicyView extends ConsumerStatefulWidget {
+  const PointsPolicyView({super.key});
+
+  static const double _maxContentWidth = 720;
+
+  @override
+  ConsumerState<PointsPolicyView> createState() => _PointsPolicyViewState();
+}
+
+class _PointsPolicyViewState extends ConsumerState<PointsPolicyView> {
+  final Map<String, TextEditingController> _controllers = {};
+
+  /// The policy as the server last gave it to us. The baseline for the diff.
+  PointsPolicy? _loaded;
+
+  bool _saving = false;
+  List<String> _serverProblems = const [];
+
+  @override
+  void dispose() {
+    for (final controller in _controllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  void _adoptLoaded(PointsPolicy policy) {
+    _loaded = policy;
+    for (final field in policyFields) {
+      final text = '${field.read(policy)}';
+      final existing = _controllers[field.key];
+      if (existing == null) {
+        _controllers[field.key] = TextEditingController(text: text);
+      } else {
+        existing.text = text;
+      }
+    }
+  }
+
+  /// Builds a policy from the current text, or null if any field is not a
+  /// whole number. Parse failures are reported separately from invariant
+  /// failures — "abc" and "claim pays more than disposal" are different
+  /// mistakes and deserve different messages.
+  ({PointsPolicy? policy, List<String> parseErrors}) _readForm() {
+    final base = _loaded;
+    if (base == null) return (policy: null, parseErrors: const []);
+
+    var draft = base;
+    final errors = <String>[];
+
+    for (final field in policyFields) {
+      final raw = _controllers[field.key]?.text.trim() ?? '';
+      final value = int.tryParse(raw);
+      if (value == null) {
+        errors.add('${field.label} must be a whole number.');
+        continue;
+      }
+      draft = field.write(draft, value);
+    }
+
+    return (policy: errors.isEmpty ? draft : null, parseErrors: errors);
+  }
+
+  Future<void> _save(PointsPolicy policy, List<PolicyChange> changes) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Apply these changes?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final change in changes)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text(change.summary),
+              ),
+            const SizedBox(height: 12),
+            Text(
+              'Applies to decisions made from now on. Points already awarded '
+              'keep the value they were given.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Apply'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() {
+      _saving = true;
+      _serverProblems = const [];
+    });
+
+    try {
+      final stored = await ref.read(pointsPolicyEditorProvider).save(policy);
+      if (!mounted) return;
+      setState(() {
+        _adoptLoaded(stored);
+        _saving = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Points policy updated.')),
+      );
+    } on PolicyException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _serverProblems = error.problems;
+      });
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error.message)));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final async = ref.watch(policySnapshotProvider);
+
+    return AppShell(
+      title: 'Points policy',
+      child: Center(
+        child: ConstrainedBox(
+          constraints:
+              const BoxConstraints(maxWidth: PointsPolicyView._maxContentWidth),
+          child: async.when(
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (error, _) => _PolicyError(
+              error: error,
+              onRetry: () => ref.invalidate(policySnapshotProvider),
+            ),
+            data: (snapshot) {
+              if (_loaded == null) _adoptLoaded(snapshot.policy);
+              return _buildForm(context, snapshot.provenance);
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildForm(BuildContext context, PolicyProvenance provenance) {
+    final theme = Theme.of(context);
+    final base = _loaded!;
+    final (policy: draft, parseErrors: parseErrors) = _readForm();
+
+    final invariantProblems = draft?.validate() ?? const <String>[];
+    final changes = draft == null ? <PolicyChange>[] : diffPolicies(base, draft);
+    final canSave = !_saving &&
+        draft != null &&
+        invariantProblems.isEmpty &&
+        changes.isNotEmpty;
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+      children: [
+        Card(
+          color: theme.colorScheme.surfaceContainerHighest,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.history_toggle_off,
+                    size: 18, color: theme.colorScheme.onSurfaceVariant),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Changes here affect future decisions only. Every award is '
+                    'snapshotted onto the submission that earned it, so past '
+                    'points keep the value they were given.',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        _ProvenanceLine(provenance: provenance),
+        const SizedBox(height: 20),
+        for (final field in policyFields) ...[
+          _PolicyInput(
+            field: field,
+            controller: _controllers[field.key]!,
+            onChanged: () => setState(() {}),
+          ),
+          const SizedBox(height: 18),
+        ],
+        if (parseErrors.isNotEmpty)
+          _ProblemList(
+            title: 'Fix these entries',
+            problems: parseErrors,
+            tone: theme.colorScheme.error,
+          ),
+        if (invariantProblems.isNotEmpty)
+          _ProblemList(
+            title: 'These values are not allowed',
+            problems: invariantProblems,
+            tone: theme.colorScheme.error,
+          ),
+        if (_serverProblems.isNotEmpty)
+          _ProblemList(
+            title: 'The server refused the write',
+            problems: _serverProblems,
+            tone: theme.colorScheme.error,
+          ),
+        if (changes.isNotEmpty && invariantProblems.isEmpty) ...[
+          const SizedBox(height: 4),
+          _ProblemList(
+            title: 'Pending changes',
+            problems: changes.map((c) => c.summary).toList(growable: false),
+            tone: theme.colorScheme.primary,
+          ),
+        ],
+        const SizedBox(height: 20),
+        Row(
+          children: [
+            Expanded(
+              child: FilledButton.icon(
+                onPressed:
+                    canSave ? () => _save(draft, changes) : null,
+                icon: _saving
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.save_outlined),
+                label: Text(_saving ? 'Saving…' : 'Save policy'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            OutlinedButton(
+              onPressed: _saving
+                  ? null
+                  : () => setState(() => _adoptLoaded(base)),
+              child: const Text('Revert'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Center(
+          child: TextButton(
+            onPressed: _saving
+                ? null
+                : () => setState(() {
+                      for (final field in policyFields) {
+                        _controllers[field.key]!.text =
+                            '${field.read(PointsPolicy.defaults)}';
+                      }
+                    }),
+            child: const Text('Load section 7.3 defaults'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PolicyInput extends StatelessWidget {
+  const _PolicyInput({
+    required this.field,
+    required this.controller,
+    required this.onChanged,
+  });
+
+  final PolicyField field;
+  final TextEditingController controller;
+  final VoidCallback onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          onChanged: (_) => onChanged(),
+          decoration: InputDecoration(
+            labelText: field.label,
+            suffixText: field.suffix,
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          field.help,
+          style: theme.textTheme.bodySmall
+              ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+        ),
+      ],
+    );
+  }
+}
+
+class _ProblemList extends StatelessWidget {
+  const _ProblemList({
+    required this.title,
+    required this.problems,
+    required this.tone,
+  });
+
+  final String title;
+  final List<String> problems;
+  final Color tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: theme.textTheme.labelLarge
+                ?.copyWith(color: tone, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 6),
+          for (final problem in problems)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('• ', style: theme.textTheme.bodySmall),
+                  Expanded(
+                    child: Text(problem, style: theme.textTheme.bodySmall),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PolicyError extends StatelessWidget {
+  const _PolicyError({required this.error, required this.onRetry});
+
+  final Object error;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.cloud_off_outlined,
+                size: 40, color: theme.colorScheme.error),
+            const SizedBox(height: 14),
+            Text('The policy did not load', style: theme.textTheme.titleMedium),
+            const SizedBox(height: 6),
+            Text(
+              '$error',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 16),
+            FilledButton.tonal(
+                onPressed: onRetry, child: const Text('Try again')),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Who last changed the policy, and when (F3.3).
+///
+/// The server has recorded this on every write since the endpoint existed and
+/// nothing ever showed it. On a screen where any administrator can change the
+/// economy, the values give no hint of their own history: a disposal award of 50
+/// reads the same whether it is the untouched default from §7.3 or something a
+/// colleague set an hour ago.
+class _ProvenanceLine extends StatelessWidget {
+  const _ProvenanceLine({required this.provenance});
+
+  final PolicyProvenance provenance;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    // "Nobody has changed this" is different information from "somebody set it
+    // to exactly the defaults", and only the first can be stated with certainty
+    // from an absent document.
+    final text = provenance.isUntouched
+        ? 'Never changed. These are the defaults.'
+        : 'Last changed by ${provenance.editor}, '
+            '${formatDateTime(provenance.updatedAt)}.';
+
+    return Row(
+      children: [
+        Icon(
+          provenance.isUntouched ? Icons.settings_suggest_outlined : Icons.person_outline,
+          size: 16,
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            text,
+            style: theme.textTheme.bodySmall
+                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+=========== FILE: lib/views/shared/account_incomplete_view.dart ===========
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../controllers/auth_controller.dart';
+import '../../core/theme.dart';
+
+/// Firebase has a session, but Firestore has no `users/{uid}` for it.
+///
+/// Registration creates the auth account first and the profile document second
+/// (`AuthController.signUp`). If the second step fails — rules, connection, a
+/// half-applied batch — the result is an account that can authenticate and do
+/// nothing else: no role to gate routes on, no name to greet, no wallet.
+///
+/// Both the original code and the first version of this router's gate left such
+/// a user watching a spinner that would never stop, because there was no state
+/// that said "this will not resolve". This screen is that state. It cannot repair
+/// the account from the client — writing a profile for an arbitrary uid is
+/// exactly what the security rules refuse — so it does the two things it can:
+/// retry, in case the read simply failed, and sign out, so the user is not
+/// trapped.
+class AccountIncompleteView extends ConsumerWidget {
+  const AccountIncompleteView({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final isSigningOut = ref.watch(authControllerProvider).isLoading;
+
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(AppTheme.gapXl),
+            child: ConstrainedBox(
+              constraints:
+                  const BoxConstraints(maxWidth: AppTheme.maxFormWidth),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(
+                    Icons.person_off_outlined,
+                    size: 56,
+                    color: theme.colorScheme.error,
+                  ),
+                  const SizedBox(height: AppTheme.gapMd),
+                  Text(
+                    'Your profile is missing',
+                    style: theme.textTheme.titleLarge
+                        ?.copyWith(fontWeight: FontWeight.bold),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: AppTheme.gapSm),
+                  Text(
+                    'You are signed in, but the account details that go with '
+                    'this sign-in could not be found. This usually means '
+                    'registration was interrupted part-way through.',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: AppTheme.gapLg),
+                  FilledButton.icon(
+                    // The profile stream may simply have failed to read.
+                    // Invalidating re-subscribes, and if the document is there
+                    // after all the router's gate moves on by itself.
+                    onPressed: isSigningOut
+                        ? null
+                        : () => ref.invalidate(currentUserProvider),
+                    icon: const Icon(Icons.refresh),
+                    label: const Text('Try again'),
+                  ),
+                  const SizedBox(height: AppTheme.gapSm),
+                  OutlinedButton.icon(
+                    onPressed: isSigningOut
+                        ? null
+                        : () => ref
+                            .read(authControllerProvider.notifier)
+                            .signOut(),
+                    icon: const Icon(Icons.logout),
+                    label: const Text('Sign out'),
+                  ),
+                  const SizedBox(height: AppTheme.gapMd),
+                  Text(
+                    'If this keeps happening, register again with a different '
+                    'email or ask an administrator to check the account.',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+=========== FILE: lib/views/shared/action_card.dart ===========
+import 'package:flutter/material.dart';
+
+import '../../core/theme.dart';
+
+/// Which container colour an [ActionCard]'s icon sits on.
+///
+/// A small fixed set rather than a free `Color`, so the home screen cannot drift
+/// into eight subtly different greens. The tone carries meaning: [primary] is
+/// the thing we want the user to do, [neutral] is somewhere to look at their own
+/// records, [admin] marks a privileged action.
+enum ActionTone { primary, neutral, admin }
+
+/// A tappable row: icon, title, one line of explanation, chevron.
+///
+/// ## Why this exists
+///
+/// The home screen had **eight** hand-written copies of this widget — around 300
+/// lines of `Card > InkWell > Padding > Row > CircleAvatar + Column + Icon` that
+/// differed only in their icon, strings and colour. They had already drifted:
+/// one was missing its `SizedBox` separator so it butted against the card above,
+/// another had two stacked, and the disabled-state handling was inconsistent
+/// between them.
+///
+/// One widget also means the accessibility work is done once. Each card is a
+/// single semantic button with a merged label, rather than the four unrelated
+/// nodes a screen reader used to walk through.
+class ActionCard extends StatelessWidget {
+  const ActionCard({
+    super.key,
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.onTap,
+    this.tone = ActionTone.neutral,
+    this.badgeCount = 0,
+    this.disabledSubtitle,
+  });
+
+  final IconData icon;
+  final String title;
+
+  /// Shown when the card is enabled.
+  final String subtitle;
+
+  /// Shown instead of [subtitle] when [onTap] is null. Saying *why* something is
+  /// unavailable is the difference between a disabled control and a broken one.
+  final String? disabledSubtitle;
+
+  /// Null disables the card.
+  final VoidCallback? onTap;
+
+  final ActionTone tone;
+
+  /// A count worth interrupting for — pending reviews, say. Zero hides it.
+  final int badgeCount;
+
+  bool get _enabled => onTap != null;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
+    final (Color iconBackground, Color iconColour) = switch (tone) {
+      ActionTone.primary => (scheme.primaryContainer, scheme.onPrimaryContainer),
+      ActionTone.neutral => (
+          scheme.tertiaryContainer,
+          scheme.onTertiaryContainer,
+        ),
+      ActionTone.admin => (
+          scheme.secondaryContainer,
+          scheme.onSecondaryContainer,
+        ),
+    };
+
+    final body = subtitle;
+    final shownSubtitle = _enabled ? body : (disabledSubtitle ?? body);
+
+    return Card(
+      // Dim the whole card rather than only greying the text: a disabled card
+      // that looks enabled invites the tap that does nothing.
+      child: Opacity(
+        opacity: _enabled ? 1 : 0.55,
+        child: InkWell(
+          onTap: onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(AppTheme.gapMd),
+            child: Row(
+              children: [
+                Container(
+                  width: 48,
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: iconBackground,
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(icon, color: iconColour, size: 22),
+                ),
+                const SizedBox(width: AppTheme.gapMd),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        title,
+                        style: theme.textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        shownSubtitle,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                          height: 1.35,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                if (badgeCount > 0) ...[
+                  const SizedBox(width: AppTheme.gapSm),
+                  _CountBadge(count: badgeCount),
+                ],
+                // The chevron is a hint that tapping goes somewhere. On a
+                // disabled card it would be a lie, so it is dropped rather than
+                // dimmed — which is what the original code did in three places
+                // and forgot in the other five.
+                if (_enabled)
+                  Icon(
+                    Icons.chevron_right,
+                    color: scheme.onSurfaceVariant,
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The count of outstanding items.
+///
+/// Material's [Badge] is built to sit on top of another widget; used inline it
+/// needed a dummy `SizedBox` child, which is what the home screen did. This is
+/// just the pill.
+class _CountBadge extends StatelessWidget {
+  const _CountBadge({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    return Container(
+      constraints: const BoxConstraints(minWidth: 22),
+      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+      decoration: BoxDecoration(
+        color: scheme.error,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        // A three-digit badge stretches the row and nobody reads the exact
+        // number past a point.
+        count > 99 ? '99+' : '$count',
+        textAlign: TextAlign.center,
+        style: TextStyle(
+          color: scheme.onError,
+          fontSize: 11,
+          fontWeight: FontWeight.w700,
+        ),
+      ),
+    );
+  }
+}
+
+/// A small caps label separating groups of cards.
+///
+/// The admin cards used to run straight on from the user's own, so the home
+/// screen read as one undifferentiated list of eight things and an administrator
+/// had to know by memory which four were theirs.
+class SectionHeading extends StatelessWidget {
+  const SectionHeading(this.label, {super.key, this.icon});
+
+  final String label;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppTheme.gapSm, top: AppTheme.gapXs),
+      child: Row(
+        children: [
+          if (icon != null) ...[
+            Icon(icon, size: 15, color: theme.colorScheme.onSurfaceVariant),
+            const SizedBox(width: 6),
+          ],
+          Text(
+            label.toUpperCase(),
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.8,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+=========== FILE: lib/views/shared/app_shell.dart ===========
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import '../../controllers/auth_controller.dart';
+import '../../core/constants.dart';
+
+class ShellDestination {
+  const ShellDestination(this.path, this.icon, this.selectedIcon, this.label);
+
+  final String path;
+  final IconData icon;
+
+  /// The filled variant, shown when this destination is the current one.
+  /// Material 3 uses the outline/fill pair to mark selection; without it the
+  /// only cue was the indicator pill.
+  final IconData selectedIcon;
+
+  final String label;
+}
+
+/// The app frame: title bar, navigation, sign-out.
+class AppShell extends ConsumerWidget {
+  const AppShell({super.key, required this.title, required this.child});
+
+  final String title;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final user = ref.watch(currentUserProvider).value;
+
+    final destinations = <ShellDestination>[
+      const ShellDestination(
+          '/home', Icons.home_outlined, Icons.home, 'Home'),
+      const ShellDestination('/wallet', Icons.account_balance_wallet_outlined,
+          Icons.account_balance_wallet, 'Wallet'),
+      const ShellDestination('/history', Icons.receipt_long_outlined,
+          Icons.receipt_long, 'History'),
+      if (user != null && user.isAdmin)
+        const ShellDestination('/admin/disposals', Icons.fact_check_outlined,
+            Icons.fact_check, 'Review'),
+    ];
+
+    final location = GoRouterState.of(context).matchedLocation;
+    final index = destinations.indexWhere((d) => d.path == location);
+
+    // -1 means the current screen is not one of the destinations — a bin
+    // scanner, a claim form, an admin sub-screen. Previously this fell back to
+    // 0, so the shell claimed the user was on Home while they were somewhere
+    // else entirely. `NavigationBar` has no "nothing selected" state, so the
+    // whole bar is hidden instead: on those screens the app bar's back button is
+    // the way out, and a nav bar highlighting the wrong tab is worse than none.
+    final isDestination = index >= 0;
+
+    void onSelect(int i) {
+      final target = destinations[i].path;
+      if (target == location) return;
+      // `go`, not `push`: these are peers, and pushing would grow a stack of
+      // Home → Wallet → Home the back button then has to unwind.
+      context.go(target);
+    }
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide = constraints.maxWidth >= AppConstants.webBreakpoint;
+
+        return Scaffold(
+          appBar: AppBar(
+            title: Text(title),
+            actions: [
+              // Not a navigation destination: the bar is already carrying four
+              // on an admin account, and the profile is somewhere you visit and
+              // come back from rather than a peer of Home. `push` gives the back
+              // button that makes that true.
+              if (location != '/profile')
+                IconButton(
+                  tooltip: 'Your profile',
+                  icon: const Icon(Icons.person_outline),
+                  onPressed: () => context.push('/profile'),
+                ),
+              IconButton(
+                tooltip: 'Sign out',
+                icon: const Icon(Icons.logout),
+                onPressed: () => _confirmSignOut(context, ref),
+              ),
+            ],
+          ),
+          body: isWide && isDestination
+              ? Row(
+                  children: [
+                    NavigationRail(
+                      selectedIndex: index,
+                      onDestinationSelected: onSelect,
+                      labelType: NavigationRailLabelType.all,
+                      destinations: destinations
+                          .map((d) => NavigationRailDestination(
+                                icon: Icon(d.icon),
+                                selectedIcon: Icon(d.selectedIcon),
+                                label: Text(d.label),
+                              ))
+                          .toList(),
+                    ),
+                    const VerticalDivider(width: 1),
+                    Expanded(child: child),
+                  ],
+                )
+              : child,
+          bottomNavigationBar: isWide || !isDestination
+              ? null
+              : NavigationBar(
+                  selectedIndex: index,
+                  onDestinationSelected: onSelect,
+                  destinations: destinations
+                      .map((d) => NavigationDestination(
+                            icon: Icon(d.icon),
+                            selectedIcon: Icon(d.selectedIcon),
+                            label: d.label,
+                          ))
+                      .toList(),
+                ),
+        );
+      },
+    );
+  }
+
+  /// Signing out was a single unguarded tap on an icon in the app bar, sitting
+  /// where a "more" or "profile" button usually lives. Easy to hit by accident,
+  /// and the cost is re-entering a password.
+  Future<void> _confirmSignOut(BuildContext context, WidgetRef ref) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Sign out?'),
+        content: const Text(
+          'You will need your email and password to sign back in. Nothing you '
+          'have submitted is lost.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Stay signed in'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Sign out'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+    await ref.read(authControllerProvider.notifier).signOut();
+  }
+}
+
+=========== FILE: lib/views/shared/rejection_reason_dialog.dart ===========
+import 'package:flutter/material.dart';
+
+import '../../core/theme.dart';
+
+/// Asks an administrator why they are rejecting something.
+///
+/// ## Why this is shared
+///
+/// Three screens — the disposal queue, the claim queue and the seller
+/// applications list — each had their own near-identical copy of this dialog,
+/// and **all three leaked** a `TextEditingController` created inside a helper
+/// method and never disposed. Every rejection dialog opened left one behind.
+/// Making it a `StatefulWidget` gives the controller a lifecycle to be disposed
+/// against, which a local in an `async` helper never had.
+///
+/// The three copies also disagreed. Two allowed an empty reason through to the
+/// controller, which then rejected it with an error snackbar; one blocked the
+/// button silently with no explanation. Now the Reject button is simply disabled
+/// until there is something to send, and says why.
+///
+/// Returns the trimmed reason, or null if the administrator cancelled. Never
+/// returns an empty string, so callers do not need to re-check.
+Future<String?> showRejectionReasonDialog(
+  BuildContext context, {
+  required String title,
+  required String hintText,
+}) {
+  return showDialog<String>(
+    context: context,
+    builder: (context) => _RejectionReasonDialog(
+      title: title,
+      hintText: hintText,
+    ),
+  );
+}
+
+class _RejectionReasonDialog extends StatefulWidget {
+  const _RejectionReasonDialog({required this.title, required this.hintText});
+
+  final String title;
+  final String hintText;
+
+  @override
+  State<_RejectionReasonDialog> createState() => _RejectionReasonDialogState();
+}
+
+class _RejectionReasonDialogState extends State<_RejectionReasonDialog> {
+  final _controller = TextEditingController();
+
+  /// A reason this short is not a reason. The user reads it and has to be able
+  /// to act on it — "no" tells them nothing and makes an appeal unanswerable.
+  static const int _minLength = 10;
+
+  @override
+  void initState() {
+    super.initState();
+    // Drives the Reject button's enabled state as the administrator types.
+    _controller.addListener(_onChanged);
+  }
+
+  @override
+  void dispose() {
+    _controller.removeListener(_onChanged);
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onChanged() => setState(() {});
+
+  String get _reason => _controller.text.trim();
+  bool get _isValid => _reason.length >= _minLength;
+
+  void _submit() {
+    if (!_isValid) return;
+    Navigator.of(context).pop(_reason);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final remaining = _minLength - _reason.length;
+
+    return AlertDialog(
+      title: Text(widget.title),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'The person who submitted this is shown your reason, so write it '
+            'for them to read.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(height: AppTheme.gapMd),
+          TextField(
+            controller: _controller,
+            autofocus: true,
+            maxLines: 3,
+            minLines: 3,
+            textCapitalization: TextCapitalization.sentences,
+            // Enter inserts a newline in a multiline field, so submission is the
+            // button's job. Keeps the keyboard's action key honest.
+            textInputAction: TextInputAction.newline,
+            decoration: InputDecoration(
+              hintText: widget.hintText,
+              helperText: _isValid
+                  ? 'This is shown to the user.'
+                  : '$remaining more character${remaining == 1 ? '' : 's'}',
+            ),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        FilledButton(
+          onPressed: _isValid ? _submit : null,
+          style: FilledButton.styleFrom(
+            backgroundColor: theme.colorScheme.error,
+            foregroundColor: theme.colorScheme.onError,
+          ),
+          child: const Text('Reject'),
+        ),
+      ],
+    );
+  }
+}
+
+=========== FILE: lib/views/shared/route_error_view.dart ===========
+import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../core/theme.dart';
+
+/// Shown when a navigation lands on a path with no route.
+///
+/// The router had no `errorBuilder`, which meant go_router's own bare-bones
+/// error page — an unstyled exception dump with no way back. Reachable in
+/// practice from a stale deep link, a mistyped URL on the web build, or a route
+/// removed between app versions.
+class RouteErrorView extends StatelessWidget {
+  const RouteErrorView({super.key, required this.location});
+
+  /// The path that failed to resolve. Shown because it is the one useful fact
+  /// here, and it is the user's own input rather than internal detail.
+  final String location;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Page not found')),
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(AppTheme.gapXl),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: AppTheme.maxFormWidth),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.explore_off_outlined,
+                  size: 56,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+                const SizedBox(height: AppTheme.gapMd),
+                Text(
+                  'There is nothing here',
+                  style: theme.textTheme.titleLarge,
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: AppTheme.gapSm),
+                Text(
+                  'The link you followed points at "$location", which this '
+                  'version of the app does not have.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: AppTheme.gapLg),
+                FilledButton.icon(
+                  onPressed: () => context.go('/home'),
+                  icon: const Icon(Icons.home_outlined),
+                  label: const Text('Go to home'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+=========== FILE: lib/views/shared/splash_view.dart ===========
+import 'package:flutter/material.dart';
+
+import '../../core/theme.dart';
+
+/// Held while Firebase Auth resolves who is signed in.
+///
+/// This screen is the fix for a visible startup flaw: the router's redirect used
+/// to read an unresolved auth state as "signed out", so every cold start showed
+/// a signed-in user the login screen for a frame or two before replacing it with
+/// their home screen. Waiting on a branded screen is honest — we genuinely do
+/// not know yet — and it is what a user expects an app to do while it starts.
+class SplashView extends StatelessWidget {
+  const SplashView({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.eco, size: 72, color: theme.colorScheme.primary),
+            const SizedBox(height: AppTheme.gapMd),
+            Text(
+              'Chokro',
+              style: theme.textTheme.headlineSmall?.copyWith(
+                fontWeight: FontWeight.bold,
+                color: theme.colorScheme.primary,
+              ),
+            ),
+            const SizedBox(height: AppTheme.gapXl),
+            SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.5,
+                color: theme.colorScheme.primary,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+=========== FILE: lib/views/shared/status_chip.dart ===========
+import 'package:flutter/material.dart';
+
+import '../../models/disposal_model.dart';
+
+/// The four-state disposal status, rendered for the person who submitted it.
+///
+/// `autoApproved` and `manualApproved` stay visibly distinct. Collapsing them
+/// would lose the answer to "was this checked by a person?", which is exactly
+/// what a user needs to know before appealing and what an examiner asks about
+/// any auto-credited award.
+///
+/// The switch below is exhaustive over the enum, so there is no fallback here
+/// and there should not be one: an unrecognised wire value is already resolved
+/// to [DisposalStatus.pending] by `DisposalStatus.fromName` at the parse
+/// boundary. One fallback, in one place.
+class StatusChip extends StatelessWidget {
+  const StatusChip({super.key, required this.status, this.dense = false});
+
+  final DisposalStatus status;
+  final bool dense;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    final (Color foreground, Color background, IconData icon, String label) =
+        switch (status) {
+      DisposalStatus.pending => (
+          scheme.onSurfaceVariant,
+          scheme.surfaceContainerHighest,
+          Icons.hourglass_empty_outlined,
+          'Waiting for review',
+        ),
+      DisposalStatus.autoApproved => (
+          scheme.onTertiaryContainer,
+          scheme.tertiaryContainer,
+          Icons.bolt_outlined,
+          'Approved automatically',
+        ),
+      DisposalStatus.manualApproved => (
+          scheme.onSecondaryContainer,
+          scheme.secondaryContainer,
+          Icons.verified_outlined,
+          'Verified by a reviewer',
+        ),
+      DisposalStatus.rejected => (
+          scheme.onErrorContainer,
+          scheme.errorContainer,
+          Icons.cancel_outlined,
+          'Rejected',
+        ),
+    };
+
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: dense ? 8 : 10,
+        vertical: dense ? 3 : 5,
+      ),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: dense ? 13 : 15, color: foreground),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: (dense
+                    ? Theme.of(context).textTheme.labelSmall
+                    : Theme.of(context).textTheme.labelMedium)
+                ?.copyWith(color: foreground, fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+    );
+  }
+}
+

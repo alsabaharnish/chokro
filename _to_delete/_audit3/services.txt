@@ -1,0 +1,1954 @@
+=========== FILE: lib/services/auth_service.dart ===========
+import 'package:firebase_auth/firebase_auth.dart';
+
+class AuthService {
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+
+  Stream<User?> get authStateChanges => _auth.authStateChanges();
+
+  User? get currentUser => _auth.currentUser;
+
+  Future<UserCredential> signUp({
+    required String email,
+    required String password,
+  }) =>
+      _auth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+
+  Future<UserCredential> signIn({
+    required String email,
+    required String password,
+  }) =>
+      _auth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+
+  Future<void> signOut() => _auth.signOut();
+}
+
+=========== FILE: lib/services/bin_admin_service.dart ===========
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+
+import '../core/api_config.dart';
+import '../models/bin_model.dart';
+
+import '../core/network_errors.dart';
+
+/// Bin registration through the trusted service (F2.1).
+///
+/// Separate from [BinService], which reads bins from Firestore directly. The
+/// split follows the trust boundary: reading a bin is a plain query the rules
+/// allow, while creating one writes coordinates this service later trusts when
+/// deciding a payout, so it goes through the server like every other write that
+/// feeds a decision.
+class BinAdminService {
+  final http.Client _client;
+
+  BinAdminService({http.Client? client}) : _client = client ?? http.Client();
+
+  /// Registers a bin and returns it, including the server-generated id and QR
+  /// payload.
+  ///
+  /// Throws [BinAdminException], carrying `problems` when the server's
+  /// validation refused the values.
+  Future<BinModel> createBin({
+    required String label,
+    required double lat,
+    required double lng,
+    required double radiusMeters,
+  }) async {
+    final response = await _send(
+      () async => _client
+          .post(
+            ApiConfig.path('/bins'),
+            headers: await _headers(),
+            body: jsonEncode({
+              'label': label,
+              'lat': lat,
+              'lng': lng,
+              'radiusMeters': radiusMeters,
+            }),
+          )
+          .timeout(ApiConfig.coldStartTimeout),
+      action: 'registering the bin',
+    );
+
+    final body = _decode(response.body);
+
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      final bin = body['bin'];
+      if (bin is Map<String, dynamic>) {
+        return BinModel.fromJson(bin, id: bin['id'] as String?);
+      }
+      throw const BinAdminException('The server did not return the new bin.');
+    }
+
+    if (response.statusCode == 400 && body['error'] == 'invalid_bin') {
+      final raw = body['problems'];
+      final problems = raw is List
+          ? raw.map((p) => '$p').toList(growable: false)
+          : const <String>[];
+      throw BinAdminException(
+        'The server rejected these values.',
+        problems: problems,
+      );
+    }
+
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw const BinAdminException(
+        'Only an administrator can register a bin.',
+      );
+    }
+
+    throw BinAdminException(
+      (body['message'] as String?) ??
+          'The bin could not be registered (${response.statusCode}).',
+    );
+  }
+
+  /// Takes a bin in or out of service. Bins are never deleted — past disposals
+  /// reference them.
+  Future<void> setActive({required String binId, required bool active}) async {
+    final response = await _send(
+      () async => _client
+          .post(
+            ApiConfig.path('/bins/$binId/active'),
+            headers: await _headers(),
+            body: jsonEncode({'active': active}),
+          )
+          .timeout(ApiConfig.coldStartTimeout),
+      action: active ? 'reopening the bin' : 'closing the bin',
+    );
+
+    if (response.statusCode == 200) return;
+
+    final body = _decode(response.body);
+    throw BinAdminException(
+      (body['message'] as String?) ??
+          'The change could not be saved (${response.statusCode}).',
+    );
+  }
+
+  Future<Map<String, String>> _headers() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      throw const BinAdminException('You are not signed in.');
+    }
+    final token = await user.getIdToken();
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer $token',
+    };
+  }
+
+  Future<http.Response> _send(
+    Future<http.Response> Function() request, {
+    required String action,
+  }) async {
+    try {
+      return await request();
+    } on TimeoutException catch (error) {
+      _log('timed out $action', error);
+      throw BinAdminException(slowServerMessage);
+    } on SocketException catch (error) {
+      _log('socket failure $action', error);
+      throw BinAdminException(unreachableServerMessage);
+    } on http.ClientException catch (error) {
+      _log('client exception $action — on web, check CORS', error);
+      throw BinAdminException(unreachableServerMessage);
+    } on BinAdminException {
+      rethrow;
+    } catch (error, stackTrace) {
+      _log('unexpected failure $action', error, stackTrace);
+      throw BinAdminException('Something went wrong $action. Try again.');
+    }
+  }
+
+  Map<String, dynamic> _decode(String body) {
+    try {
+      final decoded = jsonDecode(body);
+      return decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
+    } catch (error) {
+      _log('response body was not JSON', error);
+      return <String, dynamic>{};
+    }
+  }
+}
+
+void _log(String context, Object error, [StackTrace? stackTrace]) {
+  if (!kDebugMode) return;
+  debugPrint('[BinAdminService] $context: $error');
+  if (stackTrace != null) debugPrint('$stackTrace');
+}
+
+class BinAdminException implements Exception {
+  final String message;
+  final List<String> problems;
+
+  const BinAdminException(this.message, {this.problems = const <String>[]});
+
+  @override
+  String toString() => message;
+}
+
+=========== FILE: lib/services/bin_service.dart ===========
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+import '../models/bin_model.dart';
+
+/// Firestore access for registered disposal bins (F2.1, F2.2).
+///
+/// Bins are read-only from the client. Registration goes through the trusted
+/// server, because a bin's coordinates and radius are inputs the server relies
+/// on when deciding a payout — see §5.1 of the project brief and the `bins`
+/// block in `firestore.rules`.
+///
+/// This service also owns the Firestore-to-model conversion. [BinModel] is plain
+/// Dart with no Firebase imports, so it does not know what a `Timestamp` is;
+/// converting here is what keeps the model unit-testable without an emulator.
+class BinService {
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
+
+  CollectionReference<Map<String, dynamic>> get _bins => _db.collection('bins');
+
+  /// Resolves a scanned QR payload to a bin.
+  ///
+  /// Returns null if no bin carries that payload — either the code belongs to
+  /// another system, or it was printed for a bin that has since been removed.
+  ///
+  /// The lookup is by `qrPayload` rather than by document ID because the payload
+  /// is the opaque identifier the printed code carries (§6). Nothing about the
+  /// bin's location or the user is encoded in it, so a photographed code
+  /// discloses nothing and possessing one proves nothing.
+  Future<BinModel?> resolveByPayload(String payload) async {
+    final trimmed = payload.trim();
+    if (trimmed.isEmpty) return null;
+
+    final snapshot =
+        await _bins.where('qrPayload', isEqualTo: trimmed).limit(1).get();
+
+    if (snapshot.docs.isEmpty) return null;
+    return _fromDoc(snapshot.docs.first);
+  }
+
+  /// Fetches a bin by document ID.
+  Future<BinModel?> getBin(String binId) async {
+    final doc = await _bins.doc(binId).get();
+    if (!doc.exists) return null;
+    return _fromDoc(doc);
+  }
+
+  /// All bins currently accepting submissions, for the admin bin list.
+  Stream<List<BinModel>> watchActiveBins() => _bins
+      .where('active', isEqualTo: true)
+      .snapshots()
+      .map((snap) => snap.docs.map(_fromDoc).toList());
+
+  /// Every bin including inactive ones, for administration.
+  Stream<List<BinModel>> watchAllBins() =>
+      _bins.snapshots().map((snap) => snap.docs.map(_fromDoc).toList());
+
+  BinModel _fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final data = Map<String, dynamic>.from(doc.data() ?? <String, dynamic>{});
+
+    // Timestamp is a Firebase type; the model deals in DateTime.
+    final createdAt = data['createdAt'];
+    data['createdAt'] = createdAt is Timestamp ? createdAt.toDate() : null;
+
+    return BinModel.fromJson(data, id: doc.id);
+  }
+}
+
+=========== FILE: lib/services/claim_service.dart ===========
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+
+import '../core/api_config.dart';
+import '../models/claim_model.dart';
+
+import '../core/network_errors.dart';
+
+/// Self-reported eco-action claims (F6.1–F6.4).
+///
+/// Split along the trust boundary, like disposals: the client creates a pending
+/// document and reads its own history directly from Firestore, while every
+/// decision goes through the trusted service. There is no `verify` call here
+/// and there should not be one — claims are never auto-approved, because the
+/// auto-approve lane exists only where mechanical checks can pass.
+class ClaimService {
+  ClaimService({http.Client? client, FirebaseFirestore? firestore})
+      : _client = client ?? http.Client(),
+        _db = firestore ?? FirebaseFirestore.instance;
+
+  final http.Client _client;
+  final FirebaseFirestore _db;
+
+  CollectionReference<Map<String, dynamic>> get _claims =>
+      _db.collection('claims');
+
+  // ---------------------------------------------------------------------------
+  // Firestore reads and the one permitted write
+  // ---------------------------------------------------------------------------
+
+  /// Writes a pending claim and returns its document ID.
+  ///
+  /// `createdAt` is a server timestamp: the rules require it to equal
+  /// `request.time`, so a client clock value is refused outright. The weekly
+  /// quota is measured in ISO weeks, and a client that could backdate a claim
+  /// could place it in a week it had not yet used.
+  Future<String> createPendingClaim(ClaimModel claim) async {
+    final doc = await _claims.add(<String, dynamic>{
+      ...claim.toCreateJson(),
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+    return doc.id;
+  }
+
+  /// A user's own claims, newest first.
+  Stream<List<ClaimModel>> watchUserClaims(String uid) => _claims
+      .where('userId', isEqualTo: uid)
+      .orderBy('createdAt', descending: true)
+      .snapshots()
+      .map((snap) => snap.docs.map(_fromDoc).toList());
+
+  /// Everything awaiting a decision, oldest first.
+  ///
+  /// Oldest first for the same reason as the disposal queue: working newest
+  /// first leaves the earliest submissions waiting longest.
+  Stream<List<ClaimModel>> watchPendingClaims() => _claims
+      .where('status', isEqualTo: 'pending')
+      .orderBy('createdAt')
+      .snapshots()
+      .map((snap) => snap.docs.map(_fromDoc).toList());
+
+  ClaimModel _fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final data = Map<String, dynamic>.from(doc.data() ?? <String, dynamic>{});
+    for (final key in ['createdAt', 'reviewedAt']) {
+      final value = data[key];
+      data[key] = value is Timestamp ? value.toDate() : null;
+    }
+    return ClaimModel.fromJson(data, id: doc.id);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Server calls
+  // ---------------------------------------------------------------------------
+
+  /// The signed-in user's quota position for the current ISO week.
+  Future<ClaimQuotaStatus> fetchQuota() async {
+    final response = await _send(
+      () async => _client
+          .get(ApiConfig.path('/claims/quota'), headers: await _headers())
+          .timeout(ApiConfig.coldStartTimeout),
+      action: 'checking your weekly quota',
+    );
+
+    if (response.statusCode == 200) {
+      final body = _decode(response.body);
+      return ClaimQuotaStatus(
+        weekKey: (body['weekKey'] as String?) ?? '',
+        approvedThisWeek: (body['approvedThisWeek'] as num?)?.toInt() ?? 0,
+        limit: (body['limit'] as num?)?.toInt() ?? 3,
+      );
+    }
+
+    throw ClaimException(
+      _messageFor(response, 'Your quota could not be checked.'),
+    );
+  }
+
+  Future<ClaimReviewOutcome> approve(String claimId) =>
+      _review(claimId, decision: 'approve');
+
+  Future<ClaimReviewOutcome> reject(String claimId, String reason) =>
+      _review(claimId, decision: 'reject', reason: reason);
+
+  Future<ClaimReviewOutcome> _review(
+    String claimId, {
+    required String decision,
+    String? reason,
+  }) async {
+    final response = await _send(
+      () async => _client
+          .post(
+            ApiConfig.path('/claims/$claimId/review'),
+            headers: await _headers(),
+            body: jsonEncode({'decision': decision, 'reason': ?reason}),
+          )
+          .timeout(ApiConfig.coldStartTimeout),
+      action: 'recording the decision',
+    );
+
+    final body = _decode(response.body);
+
+    if (response.statusCode == 200) {
+      return ClaimReviewOutcome(
+        claimId: claimId,
+        status: (body['status'] as String?) ?? 'unknown',
+        pointsAwarded: (body['pointsAwarded'] as num?)?.toInt(),
+        balanceAfter: (body['balanceAfter'] as num?)?.toInt(),
+      );
+    }
+
+    // A 409 carries a message written for an administrator: already decided,
+    // quota exhausted, no wallet. Surface it verbatim.
+    throw ClaimException(
+      (body['message'] as String?) ??
+          'The decision could not be recorded (${response.statusCode}).',
+    );
+  }
+
+  Future<Map<String, String>> _headers() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) throw const ClaimException('You are not signed in.');
+    final token = await user.getIdToken();
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer $token',
+    };
+  }
+
+  Future<http.Response> _send(
+    Future<http.Response> Function() request, {
+    required String action,
+  }) async {
+    try {
+      return await request();
+    } on TimeoutException catch (error) {
+      _log('timed out $action', error);
+      throw ClaimException(slowServerMessage);
+    } on SocketException catch (error) {
+      _log('socket failure $action', error);
+      throw ClaimException(unreachableServerMessage);
+    } on http.ClientException catch (error) {
+      _log('client exception $action — on web, check CORS', error);
+      throw ClaimException(unreachableServerMessage);
+    } on ClaimException {
+      rethrow;
+    } catch (error, stackTrace) {
+      _log('unexpected failure $action', error, stackTrace);
+      throw ClaimException('Something went wrong $action. Try again.');
+    }
+  }
+
+  Map<String, dynamic> _decode(String body) {
+    try {
+      final decoded = jsonDecode(body);
+      return decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
+    } catch (error) {
+      _log('response body was not JSON', error);
+      return <String, dynamic>{};
+    }
+  }
+
+  String _messageFor(http.Response response, String fallback) {
+    final message = _decode(response.body)['message'] as String?;
+    if (message != null && message.isNotEmpty) return message;
+    return '$fallback (${response.statusCode})';
+  }
+}
+
+/// A user's quota position for the current ISO week (F6.4).
+///
+/// Distinct from `ClaimQuota` in the model, which is a static ISO-week key
+/// helper mirroring the server's `isoWeekKey`. This is the server's answer
+/// about a particular person right now.
+class ClaimQuotaStatus {
+  const ClaimQuotaStatus({
+    required this.weekKey,
+    required this.approvedThisWeek,
+    required this.limit,
+  });
+
+  final String weekKey;
+  final int approvedThisWeek;
+  final int limit;
+
+  int get remaining {
+    final left = limit - approvedThisWeek;
+    return left < 0 ? 0 : left;
+  }
+
+  bool get isExhausted => remaining == 0;
+
+  String get summary {
+    if (isExhausted) return 'You have used all $limit claims for this week.';
+    return remaining == 1
+        ? '1 claim left this week.'
+        : '$remaining claims left this week.';
+  }
+}
+
+class ClaimReviewOutcome {
+  const ClaimReviewOutcome({
+    required this.claimId,
+    required this.status,
+    this.pointsAwarded,
+    this.balanceAfter,
+  });
+
+  final String claimId;
+  final String status;
+  final int? pointsAwarded;
+  final int? balanceAfter;
+}
+
+void _log(String context, Object error, [StackTrace? stackTrace]) {
+  if (!kDebugMode) return;
+  debugPrint('[ClaimService] $context: $error');
+  if (stackTrace != null) debugPrint('$stackTrace');
+}
+
+class ClaimException implements Exception {
+  final String message;
+  const ClaimException(this.message);
+
+  @override
+  String toString() => message;
+}
+
+=========== FILE: lib/services/disposal_service.dart ===========
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+import '../models/disposal_model.dart';
+
+/// Firestore and Storage access for disposal submissions (F2.3, F2.7, F7.2).
+///
+/// The client's entire write capability on this collection is one thing:
+/// creating a `pending` document with an exact set of fields. Screening,
+/// approval, rejection and the points award all belong to the trusted server —
+/// see the `disposals` block in `firestore.rules`, and the tests in
+/// `rules_test/m2.rules.test.js` proving that even an administrator cannot
+/// approve from a client.
+class DisposalService {
+  final FirebaseFirestore _db = FirebaseFirestore.instance;
+
+  CollectionReference<Map<String, dynamic>> get _disposals =>
+      _db.collection('disposals');
+
+  /// Writes a pending submission and returns its document ID.
+  ///
+  /// The field map comes from [DisposalModel.toCreateJson], which omits every
+  /// server-owned field by construction, plus a server timestamp. The rules
+  /// require `createdAt == request.time`, so a client clock value is rejected
+  /// outright — the lockout window is meaningless if the client supplies the
+  /// time it is measured against (§7.4).
+  Future<String> createPendingDisposal(DisposalModel disposal) async {
+    final data = <String, dynamic>{
+      ...disposal.toCreateJson(),
+      'createdAt': FieldValue.serverTimestamp(),
+    };
+
+    final doc = await _disposals.add(data);
+    return doc.id;
+  }
+
+  /// A user's submissions, newest first, for the history screen (F7.2).
+  Stream<List<DisposalModel>> watchUserDisposals(String uid) => _disposals
+      .where('userId', isEqualTo: uid)
+      .orderBy('createdAt', descending: true)
+      .snapshots()
+      .map((snap) => snap.docs.map(_fromDoc).toList());
+
+  /// A user's most recent submissions, for the reviewer's context (F2.7).
+  ///
+  /// Bounded on purpose. The review queue renders one card per pending
+  /// submission, and each card asks for its submitter's record — so an unbounded
+  /// `watchUserDisposals` per card would pull every disposal a prolific user has
+  /// ever made, once per card, on a screen an administrator keeps open and
+  /// scrolls. A recent window costs one small query.
+  ///
+  /// Uses the existing `userId` + `createdAt DESC` composite index, so this needs
+  /// no addition to `firestore.indexes.json`. Filtering by status here instead
+  /// would have: "approved" is two values (`autoApproved` and `manualApproved`),
+  /// and an `in` filter alongside the ordering wants an index of its own.
+  Future<List<DisposalModel>> recentForUser(String uid, {int limit = 20}) async {
+    final snapshot = await _disposals
+        .where('userId', isEqualTo: uid)
+        .orderBy('createdAt', descending: true)
+        .limit(limit)
+        .get();
+
+    return snapshot.docs.map(_fromDoc).toList();
+  }
+
+  /// Everything awaiting a decision, for the admin review queue (F2.7).
+  Stream<List<DisposalModel>> watchPendingDisposals() => _disposals
+      .where('status', isEqualTo: 'pending')
+      .orderBy('createdAt')
+      .snapshots()
+      .map((snap) => snap.docs.map(_fromDoc).toList());
+
+  Future<DisposalModel?> getDisposal(String id) async {
+    final doc = await _disposals.doc(id).get();
+    if (!doc.exists) return null;
+    return _fromDoc(doc);
+  }
+
+  DisposalModel _fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
+    final data = Map<String, dynamic>.from(doc.data() ?? <String, dynamic>{});
+
+    for (final key in ['createdAt', 'reviewedAt']) {
+      final value = data[key];
+      data[key] = value is Timestamp ? value.toDate() : null;
+    }
+
+    return DisposalModel.fromJson(data, id: doc.id);
+  }
+}
+
+=========== FILE: lib/services/location_service.dart ===========
+import 'dart:async';
+
+import 'package:geolocator/geolocator.dart';
+
+/// Device location, for the disposal geofence check (F2.4).
+///
+/// Wraps `geolocator` so the rest of the app deals in one result type instead of
+/// a permission enum, a service-enabled boolean and a thrown timeout. Every way
+/// this can fail needs a different message to the user, and several of them are
+/// not errors at all — a denied permission is a choice, not a bug.
+///
+/// TRUST NOTE. Everything here runs on the user's device and reports what the
+/// device claims. A modified client can report any coordinates it likes, and
+/// Android's own developer options include a mock-location setting. The fix
+/// obtained here is therefore for **user feedback**; the authoritative check
+/// happens on the server against the coordinates stored on the submission
+/// (§7.4, F2.5).
+enum LocationOutcome {
+  idle,
+  locating,
+
+  /// A usable fix was obtained.
+  fixed,
+
+  /// Location services are switched off device-wide.
+  serviceDisabled,
+
+  /// The user denied permission this time.
+  denied,
+
+  /// The user denied permission permanently; only Settings can restore it.
+  deniedForever,
+
+  /// A fix was requested but did not arrive in time.
+  timedOut,
+
+  /// Anything else.
+  error,
+}
+
+class LocationResult {
+  final LocationOutcome outcome;
+  final double? latitude;
+  final double? longitude;
+
+  /// Reported horizontal accuracy in metres. Worth surfacing: a fix accurate to
+  /// ±40 m against a 50 m geofence is not really evidence of anything.
+  final double? accuracyMeters;
+
+  final String? message;
+
+  const LocationResult({
+    required this.outcome,
+    this.latitude,
+    this.longitude,
+    this.accuracyMeters,
+    this.message,
+  });
+
+  bool get hasFix =>
+      outcome == LocationOutcome.fixed && latitude != null && longitude != null;
+
+  /// True when the fix is too imprecise to mean much against a typical geofence.
+  bool get isLowAccuracy =>
+      accuracyMeters != null && accuracyMeters! > 30;
+
+  /// Message for the user. Distinguishes the cases the user can fix themselves
+  /// from the ones they cannot.
+  String get displayMessage {
+    switch (outcome) {
+      case LocationOutcome.idle:
+        return 'Location not checked yet.';
+      case LocationOutcome.locating:
+        return 'Getting your location…';
+      case LocationOutcome.fixed:
+        return 'Location captured.';
+      case LocationOutcome.serviceDisabled:
+        return 'Location services are turned off. Switch them on and try again.';
+      case LocationOutcome.denied:
+        return 'Location permission is needed to prove you are at the bin.';
+      case LocationOutcome.deniedForever:
+        return 'Location permission was permanently denied. Enable it for '
+            'Chokro in Settings, then try again.';
+      case LocationOutcome.timedOut:
+        return 'Could not get a location fix. Step outside or away from tall '
+            'buildings and try again.';
+      case LocationOutcome.error:
+        return message ?? 'Could not get your location.';
+    }
+  }
+}
+
+class LocationService {
+  /// Requests a single high-accuracy fix, handling permission along the way.
+  ///
+  /// [timeout] bounds the wait. A GPS fix indoors can take a very long time or
+  /// never arrive at all, and an endless spinner is worse than a message telling
+  /// the user to step outside.
+  Future<LocationResult> getCurrentLocation({
+    Duration timeout = const Duration(seconds: 20),
+  }) async {
+    try {
+      final serviceEnabled = await Geolocator.isLocationServiceEnabled();
+      if (!serviceEnabled) {
+        return const LocationResult(outcome: LocationOutcome.serviceDisabled);
+      }
+
+      var permission = await Geolocator.checkPermission();
+
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+      }
+
+      if (permission == LocationPermission.deniedForever) {
+        return const LocationResult(outcome: LocationOutcome.deniedForever);
+      }
+
+      if (permission == LocationPermission.denied) {
+        return const LocationResult(outcome: LocationOutcome.denied);
+      }
+
+      final position = await Geolocator.getCurrentPosition(
+        locationSettings: LocationSettings(
+          accuracy: LocationAccuracy.high,
+          timeLimit: timeout,
+        ),
+      );
+
+      return LocationResult(
+        outcome: LocationOutcome.fixed,
+        latitude: position.latitude,
+        longitude: position.longitude,
+        accuracyMeters: position.accuracy,
+      );
+    } on TimeoutException {
+      return const LocationResult(outcome: LocationOutcome.timedOut);
+    } on LocationServiceDisabledException {
+      return const LocationResult(outcome: LocationOutcome.serviceDisabled);
+    } catch (err) {
+      final text = err.toString();
+      // Some Android versions surface geolocator's timeout as a platform
+      // exception rather than as TimeoutException.
+      if (text.toLowerCase().contains('time')) {
+        return const LocationResult(outcome: LocationOutcome.timedOut);
+      }
+      return LocationResult(outcome: LocationOutcome.error, message: text);
+    }
+  }
+
+  /// Opens the OS settings page for this app, for the permanently-denied case.
+  Future<void> openSettings() => Geolocator.openAppSettings();
+
+  /// Opens the device location settings, for the service-disabled case.
+  Future<void> openLocationSettings() => Geolocator.openLocationSettings();
+}
+
+=========== FILE: lib/services/lockout_service.dart ===========
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:flutter/foundation.dart';
+
+/// Duplicate-submission lockout, read side (F2.6).
+///
+/// After an approved disposal the server opens a per-user, per-bin window during
+/// which another submission at the same bin is refused. `firestore.rules` is the
+/// enforcement:
+///
+///     function lockoutActive(uid, binId) {
+///       return exists(.../lockouts/$(uid + '_' + binId))
+///         && get(.../lockouts/$(uid + '_' + binId)).data.expiresAt > request.time;
+///     }
+///
+/// This class exists because that rule is written to be *readable* as well:
+///
+///     match /lockouts/{lockoutId} {
+///       // Readable so the app can say "you can submit at this bin again in 4h"
+///       // instead of letting the user photograph a bag for nothing.
+///       allow read: if isSignedIn();
+///     }
+///
+/// Nothing in the app ever read it. A locked-out user scanned the code, walked
+/// through photographing a bag, waited for a GPS fix, declared a count, and was
+/// then refused at submit with a message listing three possible causes — because
+/// a rules rejection arrives as bare `permission-denied` and cannot say which
+/// condition failed. Reading the window up front turns that into one sentence at
+/// the scanner, with the time remaining in it.
+///
+/// TRUST NOTE. Like the client-side distance check (F2.5), this is feedback only.
+/// The rules re-evaluate it against `request.time` on the write, so a device with
+/// a wrong clock or a modified client gains nothing by lying here.
+class LockoutService {
+  LockoutService({this._firestore});
+
+  final FirebaseFirestore? _firestore;
+
+  /// Resolved on use, not in a field initializer — same reason as
+  /// `UserService._db`: a `final` field would throw at construction unless
+  /// Firebase were already initialised, which makes the class untestable.
+  FirebaseFirestore get _db => _firestore ?? FirebaseFirestore.instance;
+
+  /// The document ID the server writes, and the rules read.
+  ///
+  /// `{uid}_{binId}`, composed identically in `server/src/award.js`. A single
+  /// document per pair means the window can be opened, read and released without
+  /// a query.
+  static String lockoutId({required String uid, required String binId}) =>
+      '${uid}_$binId';
+
+  /// When this user may next submit at this bin, or null if they may now.
+  ///
+  /// Returns null for an **expired** document as well as a missing one. Nothing
+  /// deletes these on expiry — there is no scheduler in this system, the same
+  /// constraint that makes suspension expiry lazy — so a stale document is the
+  /// normal resting state and treating its mere existence as a block would lock
+  /// a user out of a bin permanently after one submission.
+  ///
+  /// Never throws. A failed read must not stop someone submitting: the rules
+  /// still enforce the window, so the cost of being wrong here is one wasted
+  /// walk-through, and the cost of throwing would be a scanner that refuses to
+  /// proceed whenever Firestore hiccups.
+  Future<DateTime?> activeUntil({
+    required String uid,
+    required String binId,
+  }) async {
+    if (uid.isEmpty || binId.isEmpty) return null;
+
+    try {
+      final snapshot = await _db
+          .collection('lockouts')
+          .doc(lockoutId(uid: uid, binId: binId))
+          .get();
+
+      if (!snapshot.exists) return null;
+
+      final raw = snapshot.data()?['expiresAt'];
+      final expiresAt = raw is Timestamp ? raw.toDate() : null;
+      if (expiresAt == null) return null;
+
+      // Compared the same way the rules compare it, against now.
+      return expiresAt.isAfter(DateTime.now()) ? expiresAt : null;
+    } catch (err) {
+      debugPrint('[lockout] Could not read the window: $err');
+      return null;
+    }
+  }
+}
+
+=========== FILE: lib/services/photo_upload_service.dart ===========
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+
+import '../core/api_config.dart';
+
+import '../core/network_errors.dart';
+
+/// Uploads disposal photographs through the trusted service.
+///
+/// The image does not go to a storage bucket directly. It goes to the Node
+/// service, which holds the image-host credentials and which needs the raw bytes
+/// anyway — to compute the perceptual hash and to send the image for screening.
+/// One transfer instead of two, and the hash describes exactly the bytes that
+/// were stored.
+///
+/// The user's identity is taken from the Firebase ID token sent with the
+/// request, never from anything in the body. A caller cannot upload into someone
+/// else's folder by claiming a different uid.
+class PhotoUploadService {
+  final http.Client _client;
+
+  PhotoUploadService({http.Client? client}) : _client = client ?? http.Client();
+
+  /// Uploads [file] and returns its URL and Cloudinary public id.
+  ///
+  /// The public id is needed by the verification pipeline: the perceptual hash
+  /// is computed from an 8x8 grayscale transform of the stored image, and that
+  /// transform URL is built from the public id. The server has always returned
+  /// it; it was previously discarded here.
+  ///
+  /// Throws [PhotoUploadException] with a message fit to show a user.
+  Future<UploadedPhoto> uploadDisposalPhoto(File file) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      throw const PhotoUploadException('You are not signed in.');
+    }
+
+    final token = await user.getIdToken();
+    final bytes = await file.readAsBytes();
+
+    http.Response response;
+    try {
+      response = await _client
+          .post(
+            ApiConfig.path('/photos/disposal'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode({'imageBase64': base64Encode(bytes)}),
+          )
+          .timeout(ApiConfig.coldStartTimeout);
+    } on TimeoutException catch (error) {
+      // The genuine cold start: the free instance sleeps after ~15 minutes and
+      // the first request back takes 30-60 seconds. Only this clause should
+      // produce the "took too long" message.
+      _log('timed out after ${ApiConfig.coldStartTimeout}', error);
+      throw PhotoUploadException(slowServerMessage);
+    } on SocketException catch (error) {
+      _log('socket failure — no route to the host', error);
+      throw PhotoUploadException(unreachableServerMessage);
+    } on http.ClientException catch (error) {
+      // On the web build this is the CORS signature: the browser refuses the
+      // request and `package:http` reports "XMLHttpRequest error" with no
+      // detail. It is not a socket failure, so it used to fall through to the
+      // generic clause and read as a timeout. Check the origin against
+      // ALLOWED_ORIGINS on the server before suspecting the network.
+      _log('client exception — on web, check CORS and the origin', error);
+      throw PhotoUploadException(unreachableServerMessage);
+    } catch (error, stackTrace) {
+      _log('unexpected failure sending the photo', error, stackTrace);
+      throw const PhotoUploadException(
+        'Something went wrong sending the photo. Try again.',
+      );
+    }
+
+    if (response.statusCode == 200) {
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final url = body['photoUrl'] as String?;
+      if (url == null || url.isEmpty) {
+        throw const PhotoUploadException(
+          'The server did not return a photo URL.',
+        );
+      }
+      return UploadedPhoto(
+        url: url,
+        // Absent only from an older server build. An empty id means the hash
+        // step is skipped and the submission routes to review — degraded, but
+        // never wrongly approved.
+        publicId: (body['publicId'] as String?) ?? '',
+      );
+    }
+
+    // The server sends a user-safe message for anything it considers the
+    // caller's fault; everything else gets a generic one.
+    String message = 'The photo could not be uploaded.';
+    try {
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final serverMessage = body['message'] as String?;
+      if (serverMessage != null && serverMessage.isNotEmpty) {
+        message = serverMessage;
+      }
+    } catch (error) {
+      // Non-JSON response — keep the generic message, but say so in debug.
+      _log('response body was not JSON (${response.statusCode})', error);
+    }
+
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw const PhotoUploadException(
+        'Your session has expired. Sign in again.',
+      );
+    }
+
+    throw PhotoUploadException(message);
+  }
+}
+
+/// Writes the underlying failure to the debug console without changing what the
+/// user is told. Stripped from release builds.
+void _log(String context, Object error, [StackTrace? stackTrace]) {
+  if (!kDebugMode) return;
+  debugPrint('[PhotoUploadService] $context: $error');
+  if (stackTrace != null) debugPrint('$stackTrace');
+}
+
+/// A stored photograph: where it lives, and how the server can address it.
+class UploadedPhoto {
+  const UploadedPhoto({required this.url, required this.publicId});
+
+  final String url;
+  final String publicId;
+}
+
+class PhotoUploadException implements Exception {
+  final String message;
+  const PhotoUploadException(this.message);
+
+  @override
+  String toString() => message;
+}
+
+=========== FILE: lib/services/points_policy_service.dart ===========
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+
+import '../core/api_config.dart';
+import '../core/points_policy.dart';
+
+import '../core/network_errors.dart';
+
+/// Reads and writes `config/points` through the trusted service (F3.3).
+///
+/// The policy is not written from the client even though an administrator is
+/// the one editing it. Rules cannot express the invariant that matters — that
+/// the claim award stays below the disposal award — so the write goes where
+/// that check can run. The client validates too, but only to give immediate
+/// feedback; the server is not trusting it.
+class PointsPolicyService {
+  final http.Client _client;
+
+  PointsPolicyService({http.Client? client})
+      : _client = client ?? http.Client();
+
+  /// Current policy. Any signed-in user may read it — the values are visible
+  /// in the app anyway, as the amount a disposal is worth.
+  Future<PolicySnapshot> fetch() async {
+    final response = await _send(
+      () async => _client
+          .get(ApiConfig.path('/config/points'), headers: await _headers())
+          .timeout(ApiConfig.coldStartTimeout),
+      action: 'loading the points policy',
+    );
+
+    if (response.statusCode == 200) {
+      final body = _decode(response.body);
+      // The provenance rides alongside the policy numbers in the same object,
+      // so the editor gets both from one request (F3.3).
+      return PolicySnapshot.fromJson(body);
+    }
+
+    throw PolicyException(_messageFor(response, 'The policy could not be '
+        'loaded.'));
+  }
+
+  /// Writes [policy] after the server revalidates it.
+  ///
+  /// Returns the policy as the server stored it, which is what the UI should
+  /// display afterwards — not the local object, so that any server-side
+  /// normalisation is visible rather than assumed away.
+  ///
+  /// Throws [PolicyException] with [PolicyException.problems] populated when
+  /// the server rejects the values.
+  Future<PointsPolicy> save(PointsPolicy policy) async {
+    final response = await _send(
+      () async => _client
+          .post(
+            ApiConfig.path('/config/points'),
+            headers: await _headers(),
+            body: jsonEncode(policy.toJson()),
+          )
+          .timeout(ApiConfig.coldStartTimeout),
+      action: 'saving the points policy',
+    );
+
+    final body = _decode(response.body);
+
+    if (response.statusCode == 200) {
+      final stored = body['policy'];
+      return PointsPolicy.fromJson(
+        stored is Map<String, dynamic> ? stored : null,
+      );
+    }
+
+    if (response.statusCode == 400 && body['error'] == 'invalid_policy') {
+      final raw = body['problems'];
+      final problems = raw is List
+          ? raw.map((p) => '$p').toList(growable: false)
+          : const <String>[];
+      _log('server rejected the policy', problems.join(' | '));
+      throw PolicyException(
+        'The server rejected these values.',
+        problems: problems,
+      );
+    }
+
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw const PolicyException(
+        'Only an administrator can change the points policy.',
+      );
+    }
+
+    throw PolicyException(
+      _messageFor(response, 'The policy could not be saved.'),
+    );
+  }
+
+  Future<Map<String, String>> _headers() async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      throw const PolicyException('You are not signed in.');
+    }
+    final token = await user.getIdToken();
+    return {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer $token',
+    };
+  }
+
+  /// Shared failure handling, so read and write report the same four causes
+  /// distinctly rather than collapsing them into one message.
+  Future<http.Response> _send(
+    Future<http.Response> Function() request, {
+    required String action,
+  }) async {
+    try {
+      return await request();
+    } on TimeoutException catch (error) {
+      _log('timed out $action', error);
+      throw PolicyException(slowServerMessage);
+    } on SocketException catch (error) {
+      _log('socket failure $action', error);
+      throw PolicyException(unreachableServerMessage);
+    } on http.ClientException catch (error) {
+      _log('client exception $action — on web, check CORS', error);
+      throw PolicyException(unreachableServerMessage);
+    } on PolicyException {
+      rethrow;
+    } catch (error, stackTrace) {
+      _log('unexpected failure $action', error, stackTrace);
+      throw PolicyException('Something went wrong $action. Try again.');
+    }
+  }
+
+  Map<String, dynamic> _decode(String body) {
+    try {
+      final decoded = jsonDecode(body);
+      return decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
+    } catch (error) {
+      _log('response body was not JSON', error);
+      return <String, dynamic>{};
+    }
+  }
+
+  String _messageFor(http.Response response, String fallback) {
+    final body = _decode(response.body);
+    final message = body['message'] as String?;
+    if (message != null && message.isNotEmpty) return message;
+    return '$fallback (${response.statusCode})';
+  }
+}
+
+void _log(String context, Object error, [StackTrace? stackTrace]) {
+  if (!kDebugMode) return;
+  debugPrint('[PointsPolicyService] $context: $error');
+  if (stackTrace != null) debugPrint('$stackTrace');
+}
+
+class PolicyException implements Exception {
+  final String message;
+
+  /// Field-level problems returned by the server's `validate()`. Empty for
+  /// transport failures.
+  final List<String> problems;
+
+  const PolicyException(this.message, {this.problems = const <String>[]});
+
+  @override
+  String toString() => message;
+}
+
+=========== FILE: lib/services/push_service.dart ===========
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter/foundation.dart';
+
+/// Push notification plumbing (F7.1).
+///
+/// ## What this class may and may not do
+///
+/// It registers *this* device's token and reads incoming messages. It does not
+/// send anything, and there is no method here that could. §5.1 puts push sends
+/// on the server side of the trust boundary alongside wallet writes, for the
+/// same reason: a device that could push to other users could tell someone their
+/// submission was approved when it was not. Sending lives in `server/src/push.js`
+/// and holds the credentials to prove it.
+///
+/// ## Why the token lives in a subcollection
+///
+/// `users/{uid}/devices/{token}`, not a field on the user document.
+///
+/// The self-update rule on `users/{uid}` is `affectedKeys().hasOnly(['name'])` —
+/// the tightest rule in the file, and the one that stops a user promoting
+/// themselves to admin. Adding `fcmTokens` to that list to store an array would
+/// widen exactly the rule that should never widen. A subcollection is invisible
+/// to it: `match /users/{uid}` does not cover subcollections under rules_version
+/// 2, so the devices rule is purely additive and the user rule is untouched.
+///
+/// It is also the better shape. A person has more than one device, the token
+/// rotates, and dead tokens have to be deleted individually when FCM reports
+/// them — all of which are one-document operations in a subcollection and
+/// array-surgery on a field.
+///
+/// The token itself is the document ID, which makes registration idempotent:
+/// app start and `onTokenRefresh` both write, and the same token lands on the
+/// same document instead of accumulating duplicates.
+///
+/// ## Platform
+///
+/// Mobile only, matching the F7.1 row in §7. Web push needs a VAPID key pair and
+/// a service worker, and the disposal flow that generates most notifications is
+/// already mobile-only. [isSupported] is checked before every call rather than
+/// letting the plugin throw on an unsupported platform.
+class PushService {
+  PushService({this._messaging, this._firestore});
+
+  /// Injected by tests; null in production, where the lazy getters below resolve
+  /// the real singletons on first use.
+  final FirebaseMessaging? _messaging;
+  final FirebaseFirestore? _firestore;
+
+  /// Resolved on use, never in a field initializer.
+  ///
+  /// Same reasoning as `UserService._db`: as a `final` field this would run at
+  /// construction and throw unless Firebase had already been initialised, which
+  /// makes the class impossible to build in a unit test.
+  FirebaseMessaging get _fcm => _messaging ?? FirebaseMessaging.instance;
+  FirebaseFirestore get _db => _firestore ?? FirebaseFirestore.instance;
+
+  /// Whether push is available on this build.
+  ///
+  /// False on web (no VAPID key configured) and on desktop. Every public method
+  /// returns a benign value rather than throwing when this is false, so callers
+  /// do not each have to guard.
+  static bool get isSupported {
+    if (kIsWeb) return false;
+    return defaultTargetPlatform == TargetPlatform.android ||
+        defaultTargetPlatform == TargetPlatform.iOS;
+  }
+
+  /// The value written to `platform`, matching the vocabulary the rules accept.
+  static String get _platformName {
+    if (kIsWeb) return 'web';
+    return defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android';
+  }
+
+  CollectionReference<Map<String, dynamic>> _devices(String uid) =>
+      _db.collection('users').doc(uid).collection('devices');
+
+  // ── permission ────────────────────────────────────────────────────────────
+
+  /// Asks for notification permission, returning whether it was granted.
+  ///
+  /// On Android 13 and above this raises the runtime `POST_NOTIFICATIONS`
+  /// prompt; below that, notifications are granted at install time and this
+  /// returns true without showing anything. On iOS it is the standard prompt.
+  ///
+  /// `provisional: false` is deliberate. A provisional authorisation on iOS
+  /// delivers quietly to the notification centre with no sound and no banner,
+  /// which for a message that says "50 points added" is indistinguishable from
+  /// not sending it at all.
+  ///
+  /// A denial is a legitimate answer, not an error. The submission history
+  /// screen (F7.2) shows every decision regardless, so a user who says no still
+  /// learns the outcome — they just have to open the app to do it.
+  Future<bool> requestPermission() async {
+    if (!isSupported) return false;
+
+    try {
+      final settings = await _fcm.requestPermission(
+        alert: true,
+        badge: true,
+        sound: true,
+        provisional: false,
+      );
+
+      return settings.authorizationStatus == AuthorizationStatus.authorized ||
+          settings.authorizationStatus == AuthorizationStatus.provisional;
+    } catch (err) {
+      debugPrint('[push] Permission request failed: $err');
+      return false;
+    }
+  }
+
+  // ── registration ──────────────────────────────────────────────────────────
+
+  /// Registers this device against [uid] and returns the token, or null.
+  ///
+  /// Safe to call repeatedly — the token is the document ID, so a second call
+  /// with the same token rewrites one document rather than adding another.
+  ///
+  /// The write carries **only** `platform` and `updatedAt`, and that is a hard
+  /// requirement rather than tidiness. The rule is:
+  ///
+  ///     allow create, update: if isSelf(uid)
+  ///       && request.resource.data.keys().hasOnly(['platform', 'updatedAt'])
+  ///       && request.resource.data.updatedAt == request.time
+  ///
+  /// `hasOnly` means an extra field — a device name, an app version, anything
+  /// that looks harmless — fails the write with permission-denied, and the
+  /// failure reads like a rules misconfiguration rather than an extra key. The
+  /// same trap as [UserService.updateName]; the same answer.
+  ///
+  /// `set` without `merge` is what keeps the key set exact on a rewrite.
+  ///
+  /// Never throws. A failure here must not break sign-in, which is the flow that
+  /// calls it.
+  Future<String?> registerDevice(String uid) async {
+    if (!isSupported || uid.isEmpty) return null;
+
+    try {
+      final token = await _fcm.getToken();
+      if (token == null || token.isEmpty) {
+        // Normal on an emulator without Google Play services, and on a device
+        // where the user declined the permission prompt.
+        debugPrint('[push] No FCM token available on this device.');
+        return null;
+      }
+
+      await _devices(uid).doc(token).set({
+        'platform': _platformName,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+
+      return token;
+    } catch (err) {
+      debugPrint('[push] Device registration failed: $err');
+      return null;
+    }
+  }
+
+  /// Retires this device's token for [uid].
+  ///
+  /// MUST BE CALLED BEFORE `signOut`, not after.
+  ///
+  /// Once the session ends, `isSelf(uid)` is false and the rules refuse the
+  /// delete — the document would be stranded, and the next decision for the
+  /// previous user would light up the phone of whoever signed in afterwards.
+  /// Shared and borrowed phones are the norm in this project's setting, so that
+  /// is a real leak of one user's rejection reason to another, not a
+  /// hypothetical one.
+  ///
+  /// [deleteToken] also asks FCM to discard the token itself, so the next
+  /// sign-in mints a fresh one rather than resurrecting the document we just
+  /// removed.
+  ///
+  /// Never throws. Sign-out must not be blocked by a failed cleanup.
+  Future<void> unregisterDevice(String uid) async {
+    if (!isSupported || uid.isEmpty) return;
+
+    try {
+      final token = await _fcm.getToken();
+      if (token != null && token.isNotEmpty) {
+        await _devices(uid).doc(token).delete();
+      }
+      await _fcm.deleteToken();
+    } catch (err) {
+      debugPrint('[push] Device unregistration failed: $err');
+    }
+  }
+
+  /// Fires when FCM rotates this device's token.
+  ///
+  /// Rotation happens on reinstall, on a data clear, and occasionally at FCM's
+  /// discretion. A token that rotates without being re-registered is a device
+  /// that silently stops receiving anything, with no error anywhere — so this
+  /// stream is not optional plumbing.
+  Stream<String> get onTokenRefresh =>
+      isSupported ? _fcm.onTokenRefresh : const Stream<String>.empty();
+
+  // ── incoming ──────────────────────────────────────────────────────────────
+
+  /// Messages that arrive while the app is open and on screen.
+  ///
+  /// Android deliberately does **not** raise a tray notification for a message
+  /// carrying a `notification` block while the app is in the foreground, so
+  /// nothing appears unless we render it. See `pushMessageProvider` for what the
+  /// app does with these.
+  Stream<RemoteMessage> get onMessage =>
+      isSupported
+          ? FirebaseMessaging.onMessage
+          : const Stream<RemoteMessage>.empty();
+
+  /// Fires when a tray notification is tapped and the app was in the background.
+  Stream<RemoteMessage> get onMessageOpenedApp =>
+      isSupported
+          ? FirebaseMessaging.onMessageOpenedApp
+          : const Stream<RemoteMessage>.empty();
+
+  /// The notification that launched the app from a terminated state, if any.
+  ///
+  /// Separate from [onMessageOpenedApp] because the app was not running to
+  /// receive the event — this is the only way to recover it, and it must be
+  /// read once at startup or the tap is lost.
+  Future<RemoteMessage?> initialMessage() async {
+    if (!isSupported) return null;
+    try {
+      return await _fcm.getInitialMessage();
+    } catch (err) {
+      debugPrint('[push] Reading the initial message failed: $err');
+      return null;
+    }
+  }
+}
+
+=========== FILE: lib/services/review_service.dart ===========
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+
+import '../core/api_config.dart';
+
+import '../core/network_errors.dart';
+
+/// Administrator decisions on pending submissions (F2.8).
+///
+/// The approve button calls the trusted service; it does not write Firestore.
+/// Rules deny an administrator every write to `wallets`, `transactions` and
+/// `disposals` — see `rules_test/m2.rules.test.js`, which has a test named
+/// exactly that. There is one code path that credits a wallet, and this is how
+/// the UI reaches it.
+class ReviewService {
+  final http.Client _client;
+
+  ReviewService({http.Client? client}) : _client = client ?? http.Client();
+
+  Future<ReviewOutcome> approve(String disposalId) =>
+      _review(disposalId, decision: 'approve');
+
+  Future<ReviewOutcome> reject(String disposalId, String reason) =>
+      _review(disposalId, decision: 'reject', reason: reason);
+
+  Future<ReviewOutcome> _review(
+    String disposalId, {
+    required String decision,
+    String? reason,
+  }) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      throw const ReviewException('You are not signed in.');
+    }
+
+    final token = await user.getIdToken();
+
+    http.Response response;
+    try {
+      response = await _client
+          .post(
+            ApiConfig.path('/disposals/$disposalId/review'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode({'decision': decision, 'reason': ?reason}),
+          )
+          .timeout(ApiConfig.coldStartTimeout);
+    } on TimeoutException catch (error) {
+      // The genuine cold start. Only this clause should say "took too long".
+      //
+      // Worth knowing when this fires on an approval: the request may still
+      // have reached the server and been applied. `award.js` is transactional
+      // and the endpoint refuses a second decision with a 409, so retrying is
+      // safe — a duplicate credit is not possible.
+      _log('timed out after ${ApiConfig.coldStartTimeout}', error);
+      throw ReviewException(slowServerMessage);
+    } on SocketException catch (error) {
+      _log('socket failure — no route to the host', error);
+      throw ReviewException(unreachableServerMessage);
+    } on http.ClientException catch (error) {
+      // The review queue is web-primary, so this is the clause that matters
+      // here. A CORS rejection arrives as a ClientException with no detail —
+      // not as a SocketException — which is why it used to be reported as a
+      // timeout. Run the web build on an origin listed in ALLOWED_ORIGINS.
+      _log('client exception — on web, check CORS and the origin', error);
+      throw ReviewException(unreachableServerMessage);
+    } catch (error, stackTrace) {
+      _log('unexpected failure recording the decision', error, stackTrace);
+      throw const ReviewException(
+        'Something went wrong recording the decision. Try again.',
+      );
+    }
+
+    final body = _decode(response.body);
+
+    if (response.statusCode == 200) {
+      return ReviewOutcome(
+        disposalId: disposalId,
+        status: body['status'] as String? ?? 'unknown',
+        pointsAwarded: body['pointsAwarded'] as int?,
+        balanceAfter: body['balanceAfter'] as int?,
+      );
+    }
+
+    // 409 carries a message written for an administrator to read — already
+    // decided, daily cap reached, no wallet. Surface it verbatim.
+    final message =
+        body['message'] as String? ??
+        'The decision could not be recorded (${response.statusCode}).';
+    _log('server refused the decision (${response.statusCode})', message);
+    throw ReviewException(message);
+  }
+
+  Map<String, dynamic> _decode(String body) {
+    try {
+      final decoded = jsonDecode(body);
+      return decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
+    } catch (error) {
+      _log('response body was not JSON', error);
+      return <String, dynamic>{};
+    }
+  }
+}
+
+/// Writes the underlying failure to the debug console without changing what the
+/// administrator is told. Stripped from release builds.
+void _log(String context, Object error, [StackTrace? stackTrace]) {
+  if (!kDebugMode) return;
+  debugPrint('[ReviewService] $context: $error');
+  if (stackTrace != null) debugPrint('$stackTrace');
+}
+
+class ReviewOutcome {
+  final String disposalId;
+  final String status;
+  final int? pointsAwarded;
+  final int? balanceAfter;
+
+  const ReviewOutcome({
+    required this.disposalId,
+    required this.status,
+    this.pointsAwarded,
+    this.balanceAfter,
+  });
+}
+
+class ReviewException implements Exception {
+  final String message;
+  const ReviewException(this.message);
+
+  @override
+  String toString() => message;
+}
+
+=========== FILE: lib/services/transaction_service.dart ===========
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+import '../models/transaction_model.dart';
+
+/// Read-only access to the `transactions` ledger.
+///
+/// There is no write method here and there will not be one. Rules deny client
+/// writes to `transactions` for every role; the server writes a ledger entry in
+/// the same transaction as the balance it explains (§5.1, NFR-4).
+class TransactionService {
+  TransactionService({FirebaseFirestore? firestore})
+      : _db = firestore ?? FirebaseFirestore.instance;
+
+  final FirebaseFirestore _db;
+
+  static const String collection = 'transactions';
+
+  /// The signed-in user's own ledger, newest first.
+  ///
+  /// Backed by the deployed composite index (`userId` ascending, `createdAt`
+  /// descending). A missing index surfaces as a `failed-precondition` error
+  /// with a console link, not as an empty list.
+  Stream<List<TransactionModel>> watchUserTransactions(
+    String userId, {
+    int limit = 50,
+  }) {
+    return _db
+        .collection(collection)
+        .where('userId', isEqualTo: userId)
+        .orderBy('createdAt', descending: true)
+        .limit(limit)
+        .snapshots()
+        .map(_mapSnapshot);
+  }
+
+  /// One page, for a pull-to-refresh or a non-streaming caller.
+  Future<List<TransactionModel>> fetchUserTransactions(
+    String userId, {
+    int limit = 50,
+  }) async {
+    final snapshot = await _db
+        .collection(collection)
+        .where('userId', isEqualTo: userId)
+        .orderBy('createdAt', descending: true)
+        .limit(limit)
+        .get();
+    return _mapSnapshot(snapshot);
+  }
+
+  List<TransactionModel> _mapSnapshot(QuerySnapshot<Map<String, dynamic>> snap) {
+    return snap.docs.map((doc) {
+      final data = Map<String, dynamic>.from(doc.data());
+      // Timestamp -> DateTime happens here, never in the model.
+      final created = data['createdAt'];
+      data['createdAt'] = created is Timestamp ? created.toDate() : null;
+      return TransactionModel.fromMap(doc.id, data);
+    }).toList(growable: false);
+  }
+}
+
+=========== FILE: lib/services/user_service.dart ===========
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../models/user_model.dart';
+import '../models/wallet_model.dart';
+import '../models/seller_application_model.dart';
+import '../core/constants.dart';
+
+class UserService {
+  /// Resolved on use rather than in a field initializer.
+  ///
+  /// As a `final` field this ran at construction, so `UserService()` threw
+  /// unless Firebase had already been initialised — which made the class
+  /// impossible to subclass in a unit test even to replace a single method that
+  /// never touches Firestore. `FirebaseFirestore.instance` returns the same
+  /// object every call, so deferring it costs nothing.
+  FirebaseFirestore get _db => FirebaseFirestore.instance;
+
+  // ── registration ──────────────────────────────────────────────────────────
+
+  /// Creates user doc + wallet doc atomically at registration (F1.1).
+  ///
+  /// Both timestamps come from `FieldValue.serverTimestamp()` rather than the
+  /// device, per §6 of the brief. They used to be `DateTime.now()`, which meant
+  /// a phone with a skewed clock wrote a join date and a wallet date that the
+  /// server never agreed to — and unlike a disposal, nothing downstream ever
+  /// re-checks these, so a wrong value would have stayed wrong forever.
+  ///
+  /// The batch is what makes this safe to run from the client: the rules allow
+  /// creating a wallet only at a zero balance, and a user document only for
+  /// yourself at role `buyer` and status `active`, so neither half can be abused
+  /// and both land together or not at all.
+  Future<void> createUserWithWallet(UserModel user) async {
+    final batch = _db.batch();
+
+    batch.set(_db.collection('users').doc(user.uid), {
+      ...user.toFirestore(),
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+
+    batch.set(_db.collection('wallets').doc(user.uid), {
+      ...WalletModel(userId: user.uid, balance: 0).toFirestore(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    await batch.commit();
+  }
+
+  // ── profile management (F1.1) ─────────────────────────────────────────────
+
+  /// Renames the signed-in user's own account.
+  ///
+  /// The write carries **only** `name`, and that is a hard requirement rather
+  /// than tidiness. The rule is:
+  ///
+  ///     allow update: if isSelf(uid)
+  ///       && request.resource.data.diff(resource.data)
+  ///            .affectedKeys().hasOnly(['name'])
+  ///
+  /// `hasOnly` means the diff may contain nothing else. Adding a companion
+  /// `updatedAt` — the reflex on a write like this — would make every rename
+  /// fail with permission-denied, and the failure would look like a rules
+  /// misconfiguration rather than an extra field.
+  ///
+  /// Role and status are absent for the same reason they are absent from the
+  /// rule: a user must not be able to promote or un-suspend themselves.
+  Future<void> updateName({required String uid, required String name}) =>
+      _db.collection('users').doc(uid).update({'name': name});
+
+  // ── user reads ────────────────────────────────────────────────────────────
+
+  Future<UserModel?> getUser(String uid) async {
+    final doc = await _db.collection('users').doc(uid).get();
+    if (!doc.exists) return null;
+    return UserModel.fromFirestore(doc);
+  }
+
+  Stream<UserModel?> watchUser(String uid) =>
+      _db.collection('users').doc(uid).snapshots().map(
+            (doc) => doc.exists ? UserModel.fromFirestore(doc) : null,
+          );
+
+  // ── admin: user list ──────────────────────────────────────────────────────
+
+  Stream<List<UserModel>> watchAllUsers() =>
+      _db.collection('users').snapshots().map(
+            (snap) => snap.docs.map(UserModel.fromFirestore).toList(),
+          );
+
+  Future<void> updateUserRole(String uid, String role) =>
+      _db.collection('users').doc(uid).update({'role': role});
+
+  /// Suspends [uid], indefinitely when [until] is null (F5.2, F5.3).
+  ///
+  /// A timed suspension stores its expiry and nothing further happens. No job
+  /// lifts it later — readers resolve the date themselves, in
+  /// `UserModel.isActiveAt` and in `isActive()` in the rules.
+  ///
+  /// LIMITATION: [until] is computed from the administrator's device clock,
+  /// because Firestore cannot offset a server timestamp within a single write.
+  /// A skewed admin clock produces a skewed expiry. The comparison it is later
+  /// checked against is server-side (`request.time`), so this affects how long
+  /// a suspension lasts — never whether the suspended user can shorten it.
+  Future<void> suspendUser(String uid, {DateTime? until}) =>
+      _db.collection('users').doc(uid).update({
+        'status': AppConstants.statusSuspended,
+        'suspendedAt': FieldValue.serverTimestamp(),
+        'suspendedUntil':
+            until == null ? FieldValue.delete() : Timestamp.fromDate(until),
+      });
+
+  /// Lifts a suspension and clears any expiry, so a later indefinite
+  /// suspension cannot inherit a stale date.
+  Future<void> reinstateUser(String uid) =>
+      _db.collection('users').doc(uid).update({
+        'status': AppConstants.statusActive,
+        'reinstatedAt': FieldValue.serverTimestamp(),
+        'suspendedUntil': FieldValue.delete(),
+      });
+
+  // ── seller applications ───────────────────────────────────────────────────
+
+  Future<void> submitSellerApplication(SellerApplicationModel app) =>
+      _db.collection('sellerApplications').add(app.toFirestore());
+
+  Stream<List<SellerApplicationModel>> watchPendingApplications() =>
+      _db
+          .collection('sellerApplications')
+          .where('status', isEqualTo: AppConstants.statusPending)
+          .snapshots()
+          .map((snap) =>
+              snap.docs.map(SellerApplicationModel.fromFirestore).toList());
+
+  Stream<List<SellerApplicationModel>> watchUserApplications(String uid) =>
+      _db
+          .collection('sellerApplications')
+          .where('userId', isEqualTo: uid)
+          .snapshots()
+          .map((snap) =>
+              snap.docs.map(SellerApplicationModel.fromFirestore).toList());
+
+  Future<void> reviewApplication({
+    required String appId,
+    required String status,
+    required String reviewedBy,
+    String? reason,
+  }) async {
+    final batch = _db.batch();
+
+    batch.update(
+      _db.collection('sellerApplications').doc(appId),
+      {
+        'status': status,
+        'reviewedBy': reviewedBy,
+        'reviewedAt': FieldValue.serverTimestamp(),
+        'reason': ?reason,
+      },
+    );
+
+    if (status == AppConstants.statusApproved) {
+      // find the userId from the application first
+      final appDoc =
+          await _db.collection('sellerApplications').doc(appId).get();
+      final userId = appDoc.data()!['userId'] as String;
+      batch.update(
+        _db.collection('users').doc(userId),
+        {'role': AppConstants.roleSeller},
+      );
+    }
+
+    await batch.commit();
+  }
+
+  // ── wallet ────────────────────────────────────────────────────────────────
+
+  Stream<WalletModel?> watchWallet(String uid) =>
+      _db.collection('wallets').doc(uid).snapshots().map(
+            (doc) => doc.exists ? WalletModel.fromFirestore(doc) : null,
+          );
+}
+
+=========== FILE: lib/services/verification_service.dart ===========
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+
+import '../core/api_config.dart';
+
+/// Asks the trusted service to verify a pending submission (F2.5, F2.12).
+///
+/// The submission already exists as a `pending` document before this is called.
+/// That ordering matters: the document is the record, and this call only
+/// decides whether it can be credited immediately or needs a person. **A failed
+/// verification is not a failed submission** — the document stands, the admin
+/// queue will show it, and the user's history already lists it.
+///
+/// So every failure here returns a [VerificationOutcome] describing the pending
+/// state rather than throwing. The one thing this must never do is leave the
+/// user believing their submission was lost when it was not.
+class VerificationService {
+  final http.Client _client;
+
+  VerificationService({http.Client? client})
+      : _client = client ?? http.Client();
+
+  Future<VerificationOutcome> verify(String disposalId) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      return VerificationOutcome.pending(
+        disposalId,
+        note: 'Not signed in; the submission will be reviewed.',
+      );
+    }
+
+    try {
+      final token = await user.getIdToken();
+      final response = await _client
+          .post(
+            ApiConfig.path('/disposals/$disposalId/verify'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+          )
+          .timeout(ApiConfig.coldStartTimeout);
+
+      if (response.statusCode == 200) {
+        final body = jsonDecode(response.body);
+        if (body is Map<String, dynamic>) {
+          return VerificationOutcome.fromJson(disposalId, body);
+        }
+      }
+
+      _log('verify returned ${response.statusCode}', response.body);
+      return VerificationOutcome.pending(disposalId);
+    } on TimeoutException catch (error) {
+      // The server may well have finished the work and credited the award —
+      // the response was simply lost. Saying "pending" is the honest answer,
+      // and the history screen will show the real outcome when it syncs.
+      _log('verify timed out', error);
+      return VerificationOutcome.pending(
+        disposalId,
+        note: 'The server is taking a while. Check your history shortly.',
+      );
+    } on SocketException catch (error) {
+      _log('verify socket failure', error);
+      return VerificationOutcome.pending(disposalId);
+    } on http.ClientException catch (error) {
+      _log('verify client exception — on web, check CORS', error);
+      return VerificationOutcome.pending(disposalId);
+    } catch (error, stackTrace) {
+      _log('verify failed unexpectedly', error, stackTrace);
+      return VerificationOutcome.pending(disposalId);
+    }
+  }
+}
+
+/// What the server decided, or the pending fallback when it could not be asked.
+class VerificationOutcome {
+  const VerificationOutcome({
+    required this.disposalId,
+    required this.status,
+    this.pointsAwarded = 0,
+    this.balanceAfter,
+    this.flags = const <String>[],
+    this.reasons = const <String>[],
+    this.note,
+  });
+
+  /// The fallback. Matches the document's real state: it was created pending
+  /// and nothing has changed it.
+  factory VerificationOutcome.pending(String disposalId, {String? note}) {
+    return VerificationOutcome(
+      disposalId: disposalId,
+      status: 'pending',
+      note: note,
+    );
+  }
+
+  factory VerificationOutcome.fromJson(
+    String disposalId,
+    Map<String, dynamic> json,
+  ) {
+    final rawFlags = json['flags'];
+    final rawReasons = json['reasons'];
+
+    return VerificationOutcome(
+      disposalId: disposalId,
+      status: (json['status'] as String?) ?? 'pending',
+      pointsAwarded: (json['pointsAwarded'] as num?)?.toInt() ?? 0,
+      balanceAfter: (json['balanceAfter'] as num?)?.toInt(),
+      flags: rawFlags is List
+          ? rawFlags.map((f) => '$f').toList(growable: false)
+          : const <String>[],
+      reasons: rawReasons is List
+          ? rawReasons.map((r) => '$r').toList(growable: false)
+          : const <String>[],
+    );
+  }
+
+  final String disposalId;
+  final String status;
+  final int pointsAwarded;
+  final int? balanceAfter;
+  final List<String> flags;
+  final List<String> reasons;
+
+  /// Extra context for the user when the outcome is the pending fallback.
+  final String? note;
+
+  bool get wasAutoApproved => status == 'autoApproved';
+  bool get needsReview => status == 'pending';
+
+  /// One line for the confirmation screen.
+  String get userMessage {
+    if (wasAutoApproved) {
+      return 'Approved — $pointsAwarded points added to your wallet.';
+    }
+    if (note != null) return note!;
+    if (reasons.isNotEmpty) {
+      return 'Sent for review: ${reasons.first}';
+    }
+    return 'Submitted. A reviewer will check this shortly.';
+  }
+}
+
+void _log(String context, Object error, [StackTrace? stackTrace]) {
+  if (!kDebugMode) return;
+  debugPrint('[VerificationService] $context: $error');
+  if (stackTrace != null) debugPrint('$stackTrace');
+}
+

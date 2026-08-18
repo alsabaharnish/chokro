@@ -7,7 +7,12 @@ class SellerApplicationModel {
   final String businessName;
   final String description;
   final String status;
-  final DateTime createdAt;
+  /// Server time the application was submitted.
+  ///
+  /// Nullable because it is written with `FieldValue.serverTimestamp()` per §6 —
+  /// this model was the last one still stamping the device clock — and Firestore
+  /// resolves that on the server, so the local echo carries null briefly.
+  final DateTime? createdAt;
   final String? reviewedBy;
   final DateTime? reviewedAt;
   final String? reason;
@@ -18,7 +23,7 @@ class SellerApplicationModel {
     required this.businessName,
     required this.description,
     required this.status,
-    required this.createdAt,
+    this.createdAt,
     this.reviewedBy,
     this.reviewedAt,
     this.reason,
@@ -35,7 +40,10 @@ class SellerApplicationModel {
       businessName: data['businessName'] as String,
       description: data['description'] as String,
       status: data['status'] as String,
-      createdAt: (data['createdAt'] as Timestamp).toDate(),
+      // Nullable-tolerant: `createdAt` is a pending server timestamp for one
+      // round trip after the write, and the old unchecked cast threw on exactly
+      // the document it had just created.
+      createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
       reviewedBy: data['reviewedBy'] as String?,
       reviewedAt: data['reviewedAt'] != null
           ? (data['reviewedAt'] as Timestamp).toDate()
@@ -49,7 +57,9 @@ class SellerApplicationModel {
         'businessName': businessName,
         'description': description,
         'status': status,
-        'createdAt': Timestamp.fromDate(createdAt),
+        // Omitted deliberately; the service supplies
+        // `FieldValue.serverTimestamp()`. Writing the device clock here let a
+        // phone with a skewed clock date its own application (§6).
         if (reviewedBy != null) 'reviewedBy': reviewedBy,
         if (reviewedAt != null) 'reviewedAt': Timestamp.fromDate(reviewedAt!),
         if (reason != null) 'reason': reason,

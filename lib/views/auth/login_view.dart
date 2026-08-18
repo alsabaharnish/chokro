@@ -32,6 +32,83 @@ class _LoginViewState extends ConsumerState<LoginView> {
     super.dispose();
   }
 
+  /// Sends a password-reset email (F1.1).
+  ///
+  /// Confirms the same way whether or not the address has an account. Firebase
+  /// does not report which, and this must not imply it either — a form that
+  /// answered "no such account" would let anyone test which email addresses hold
+  /// accounts. That is the same leak `authErrorMessage` avoids by keeping the
+  /// three credential failures indistinguishable, and it would be a poor place to
+  /// undo it.
+  ///
+  /// The email field is validated first, and reused, so someone who has already
+  /// typed their address does not type it twice.
+  Future<void> _forgotPassword() async {
+    FocusScope.of(context).unfocus();
+
+    final email = _emailController.text.trim();
+    final invalid = validateEmail(email);
+
+    if (invalid != null) {
+      final scheme = Theme.of(context).colorScheme;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('Enter your email address first — $invalid.'),
+            backgroundColor: scheme.errorContainer,
+          ),
+        );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Reset your password?'),
+        content: Text(
+          'We will email a reset link to $email. Open it on this device and '
+          'choose a new password.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Send link'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    await ref.read(authControllerProvider.notifier).sendPasswordReset(email);
+    if (!mounted) return;
+
+    final error = ref.read(authControllerProvider).error;
+    final scheme = Theme.of(context).colorScheme;
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          // A malformed address is worth reporting — that is about the text
+          // typed, not about who exists. Anything else confirms, including the
+          // case where no account has that address.
+          content: Text(
+            error == null
+                ? 'If an account exists for $email, a reset link is on its way.'
+                : (error is AuthFailure ? error.message : authErrorMessage(null)),
+          ),
+          backgroundColor: error == null ? null : scheme.errorContainer,
+          showCloseIcon: true,
+        ),
+      );
+  }
+
   Future<void> _submit() async {
     // Dismiss the keyboard first: the error snackbar appears at the bottom of
     // the screen, and an open keyboard covered it entirely on a small phone.
@@ -174,6 +251,10 @@ class _LoginViewState extends ConsumerState<LoginView> {
                             : const Text('Sign In'),
                       ),
                       const SizedBox(height: AppTheme.gapSm),
+                      TextButton(
+                        onPressed: isLoading ? null : _forgotPassword,
+                        child: const Text('Forgot your password?'),
+                      ),
                       TextButton(
                         onPressed: isLoading ? null : () => context.go('/register'),
                         child: const Text("Don't have an account? Register"),

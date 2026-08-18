@@ -129,14 +129,14 @@ class TransactionModel {
     );
   }
 
-  Map<String, dynamic> toMap() => <String, dynamic>{
-        'userId': userId,
-        'delta': delta,
-        'source': source.wireValue,
-        'refId': refId,
-        'balanceAfter': balanceAfter,
-        'createdAt': createdAt,
-      };
+  // `toMap()` was deleted rather than kept.
+  //
+  // Zero callers in `lib/`, in `test/` and on the server, and it was actively
+  // misleading: no client may ever write a `transactions` document — the rules
+  // refuse it to an administrator as flatly as to a buyer — so a serialiser for
+  // one could only ever have been used by mistake. Every ledger entry is written
+  // by `award.js` inside the same transaction that moves the balance, which is
+  // what makes "no client writes a balance" true without qualification.
 
   @override
   String toString() =>

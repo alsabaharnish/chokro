@@ -1,0 +1,3293 @@
+=========== FILE: lib/core/api_config.dart ===========
+/// Where the trusted service lives.
+///
+/// Everything that decides a payout runs there, not here — see §5.1 of the
+/// project brief. The client calls it for photo upload now, and for submission
+/// verification once that endpoint exists.
+class ApiConfig {
+  const ApiConfig._();
+
+  /// Deployed service. Override at build time for local development:
+  ///
+  ///   flutter run --dart-define=CHOKRO_API=http://10.0.2.2:8787
+  ///
+  /// Note `10.0.2.2` rather than `localhost` on the Android emulator — the
+  /// emulator's localhost is the emulator itself. On a physical device, use the
+  /// Mac's LAN address instead.
+  static const String baseUrl = String.fromEnvironment(
+    'CHOKRO_API',
+    defaultValue: 'https://chokro.onrender.com',
+  );
+
+  static Uri path(String suffix) => Uri.parse('$baseUrl$suffix');
+
+  /// Render's free instance sleeps after roughly 15 minutes idle and takes
+  /// 30–60 seconds to wake. Requests must outlast that or the first submission
+  /// after a quiet period fails for no good reason.
+  static const Duration coldStartTimeout = Duration(seconds: 90);
+}
+
+=========== FILE: lib/core/auth_errors.dart ===========
+/// Turns an authentication failure into something a user can act on.
+///
+/// The login and register screens were showing `error.toString()` in a
+/// snackbar, which puts text like
+///
+///   [firebase_auth/invalid-credential] The supplied auth credential is
+///   incorrect, malformed or has expired.
+///
+/// in front of someone who mistyped their password. It names our vendor, leaks
+/// the exception class, and does not say what to do next.
+///
+/// Deliberately no Flutter and no Firebase import, so this is unit-testable
+/// without a binding or a live project. The code is read off the exception by
+/// the caller.
+library;
+
+/// An authentication failure carrying a message already fit to display.
+///
+/// The controller converts the vendor exception into this at the boundary, so
+/// no view has to know that Firebase exists or what shape its errors are.
+class AuthFailure implements Exception {
+  const AuthFailure(this.message, {this.code});
+
+  /// Ready to show. Never null, never a stack trace, never a vendor prefix.
+  final String message;
+
+  /// The originating Firebase code, kept for logging and tests. Not shown.
+  final String? code;
+
+  @override
+  String toString() => message;
+}
+
+/// Maps a Firebase Auth error code to a message worth reading.
+///
+/// Unknown codes fall through to a generic message rather than exposing the
+/// code itself: an unrecognised code means we have not thought about that case,
+/// and the raw string helps the user no more than silence would.
+String authErrorMessage(String? code) {
+  switch (code) {
+    // Firebase collapses wrong-password and user-not-found into
+    // invalid-credential when email enumeration protection is on (the default
+    // for projects created since late 2023). All three must say the same thing
+    // anyway — telling an attacker which half of the pair was wrong is exactly
+    // the enumeration leak that protection exists to close.
+    case 'invalid-credential':
+    case 'wrong-password':
+    case 'user-not-found':
+      return 'That email and password do not match. Check both and try again.';
+
+    case 'invalid-email':
+      return 'That does not look like an email address.';
+
+    case 'user-disabled':
+      return 'This account has been disabled. Contact an administrator.';
+
+    case 'email-already-in-use':
+      return 'An account already exists with that email. Sign in instead.';
+
+    case 'weak-password':
+      return 'Choose a longer password — at least six characters.';
+
+    case 'operation-not-allowed':
+      return 'Email sign-in is not enabled for this app. Contact an '
+          'administrator.';
+
+    case 'too-many-requests':
+      return 'Too many attempts. Wait a few minutes before trying again.';
+
+    case 'network-request-failed':
+      return 'No connection. Check your network and try again.';
+
+    case 'requires-recent-login':
+      return 'For security, sign in again before making this change.';
+
+    default:
+      return 'Something went wrong signing you in. Try again.';
+  }
+}
+
+=========== FILE: lib/core/bin_label_pdf.dart ===========
+/// Printable bin labels (F2.1).
+///
+/// A registered bin is worth nothing until its code is on the bin, so
+/// "generate a QR" really means "produce something an administrator can put on
+/// paper". This builds that paper.
+///
+/// ## Why a PDF rather than printing the screen
+///
+/// The QR dialog used to advise "Ctrl+P prints the page", which prints the
+/// Flutter canvas: the modal scrim, the navigation bar and a code sized for a
+/// screen. Flutter's web canvas does not decompose into printable content at
+/// all, so what came out was unusable. A PDF is the same document on every
+/// platform, and `printing` hands it to the browser's print dialog on web and
+/// to the system print or share sheet on mobile — which is exactly the split
+/// §5.4 of the brief describes.
+///
+/// ## Why the barcode is vector
+///
+/// `pw.BarcodeWidget` emits drawing commands rather than a bitmap, so the code
+/// is resolution-independent: it prints at the full sharpness of whatever
+/// printer is used, with no resampling to soften the module edges that a
+/// scanner needs to distinguish.
+library;
+
+import 'dart:typed_data';
+
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+
+import '../models/bin_model.dart';
+
+/// Error correction for the printed code.
+///
+/// Deliberately higher than a screen would need. This label is going onto a
+/// waste bin outdoors, where it will be rained on, sun-bleached and scuffed;
+/// `high` recovers from roughly 30% of the code being unreadable, which is the
+/// difference between a label that lasts a season and one that has to be
+/// reprinted. The cost is a denser code, which is why the printed size below is
+/// generous.
+const _correction = pw.BarcodeQRCorrectionLevel.high;
+
+/// One label, centred on a single A4 page.
+///
+/// Used when an administrator has just registered a bin and wants its code
+/// immediately.
+///
+/// [theme] carries the Unicode fonts from [labelTheme]. Passing null falls back
+/// to the built-in Latin-1 fonts, which silently drop any other script — see
+/// `pdf_fonts.dart` for why that matters here.
+Future<Uint8List> buildBinLabelPdf(BinModel bin, {pw.ThemeData? theme}) async {
+  // Metadata, not page content: the `pdf` package encodes it as UTF-16, so a
+  // Bengali label is safe here even when the page falls back to Latin-1 fonts.
+  final doc = pw.Document(title: 'Chokro bin: ${bin.label}', theme: theme);
+
+  doc.addPage(
+    pw.Page(
+      pageFormat: PdfPageFormat.a4,
+      margin: const pw.EdgeInsets.all(18 * PdfPageFormat.mm),
+      build: (context) =>
+          pw.Center(child: _labelCard(bin, 88 * PdfPageFormat.mm)),
+    ),
+  );
+
+  return doc.save();
+}
+
+/// Several labels per page, four to an A4 sheet, with cut guides.
+///
+/// Registering twenty bins and printing twenty single-label pages wastes
+/// nineteen sheets and a lot of an administrator's time. The label is the same
+/// widget at a smaller barcode size, so the two documents cannot drift apart.
+///
+/// [bins] is printed in the order given; the caller decides the sort.
+Future<Uint8List> buildBinLabelSheetPdf(
+  List<BinModel> bins, {
+  pw.ThemeData? theme,
+}) async {
+  // A print dialog for a zero-page document is a confusing thing to be shown,
+  // so callers must not reach here with nothing to print.
+  assert(bins.isNotEmpty, 'buildBinLabelSheetPdf called with no bins');
+
+  final doc = pw.Document(title: 'Chokro bin labels', theme: theme);
+
+  // Four to a page. Any more and the barcode gets too small to scan reliably
+  // from the arm's length someone actually stands at.
+  const perPage = 4;
+
+  for (var start = 0; start < bins.length; start += perPage) {
+    final page = bins.skip(start).take(perPage).toList();
+
+    doc.addPage(
+      pw.Page(
+        pageFormat: PdfPageFormat.a4,
+        margin: const pw.EdgeInsets.all(10 * PdfPageFormat.mm),
+        build: (context) => pw.Column(
+          children: [
+            for (var row = 0; row < 2; row++)
+              pw.Expanded(
+                child: pw.Row(
+                  children: [
+                    for (var col = 0; col < 2; col++)
+                      pw.Expanded(
+                        child: _cell(
+                          // The last page is usually short. Empty cells keep
+                          // the surviving labels in their own quarter of the
+                          // sheet rather than stretching them.
+                          row * 2 + col < page.length
+                              ? page[row * 2 + col]
+                              : null,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  return doc.save();
+}
+
+/// A label inside a trim guide.
+///
+/// The border is the line to cut along. Shared by both documents so a label
+/// trimmed off a four-up sheet is the same artefact as one printed on its own.
+pw.Widget _labelCard(BinModel bin, double qrSize) {
+  return pw.Container(
+    padding: pw.EdgeInsets.all(
+      7 * PdfPageFormat.mm * (qrSize / (88 * PdfPageFormat.mm)).clamp(0.7, 1.0),
+    ),
+    decoration: pw.BoxDecoration(
+      border: pw.Border.all(color: PdfColors.grey400, width: 0.5),
+    ),
+    child: _BinLabel(bin: bin, qrSize: qrSize),
+  );
+}
+
+/// One quarter of a sheet.
+pw.Widget _cell(BinModel? bin) {
+  if (bin == null) return pw.SizedBox();
+
+  return pw.Container(
+    margin: const pw.EdgeInsets.all(3 * PdfPageFormat.mm),
+    child: pw.Center(child: _labelCard(bin, 46 * PdfPageFormat.mm)),
+  );
+}
+
+/// The label itself, at whatever barcode size the page has room for.
+class _BinLabel extends pw.StatelessWidget {
+  _BinLabel({required this.bin, required this.qrSize});
+
+  final BinModel bin;
+  final double qrSize;
+
+  /// Text scales with the barcode so the sheet layout and the single-page
+  /// layout stay in proportion instead of needing two sets of sizes.
+  double get _scale => qrSize / (88 * PdfPageFormat.mm);
+
+  @override
+  pw.Widget build(pw.Context context) {
+    return pw.Column(
+      mainAxisSize: pw.MainAxisSize.min,
+      children: [
+        pw.Text(
+          'CHOKRO',
+          style: pw.TextStyle(
+            fontSize: 11 * _scale.clamp(0.6, 1.0),
+            fontWeight: pw.FontWeight.bold,
+            letterSpacing: 2,
+            color: PdfColors.grey700,
+          ),
+        ),
+        pw.SizedBox(height: 4 * PdfPageFormat.mm * _scale),
+
+        pw.Text(
+          bin.label,
+          textAlign: pw.TextAlign.center,
+          maxLines: 2,
+          style: pw.TextStyle(
+            fontSize: 20 * _scale.clamp(0.55, 1.0),
+            fontWeight: pw.FontWeight.bold,
+          ),
+        ),
+        pw.SizedBox(height: 4 * PdfPageFormat.mm * _scale),
+
+        // White plate behind the code. A scanner needs the light quiet zone
+        // around a QR to find its edges, and printing onto coloured or
+        // patterned stock removes it.
+        pw.Container(
+          padding: pw.EdgeInsets.all(4 * PdfPageFormat.mm * _scale),
+          color: PdfColors.white,
+          child: pw.BarcodeWidget(
+            barcode: pw.Barcode.qrCode(errorCorrectLevel: _correction),
+            data: bin.qrPayload,
+            width: qrSize,
+            height: qrSize,
+            drawText: false,
+          ),
+        ),
+        pw.SizedBox(height: 4 * PdfPageFormat.mm * _scale),
+
+        pw.Text(
+          'Scan with the Chokro app to log a disposal',
+          textAlign: pw.TextAlign.center,
+          style: pw.TextStyle(fontSize: 11 * _scale.clamp(0.65, 1.0)),
+        ),
+        pw.SizedBox(height: 1.5 * PdfPageFormat.mm * _scale),
+        pw.Text(
+          'You must be at this bin. Your location is checked.',
+          textAlign: pw.TextAlign.center,
+          style: pw.TextStyle(
+            fontSize: 8.5 * _scale.clamp(0.7, 1.0),
+            color: PdfColors.grey700,
+          ),
+        ),
+
+        pw.SizedBox(height: 5 * PdfPageFormat.mm * _scale),
+        pw.Divider(color: PdfColors.grey300, height: 0.5),
+        pw.SizedBox(height: 2 * PdfPageFormat.mm * _scale),
+
+        // Installer's strip. Whoever carries a stack of these to the street
+        // needs to know which bin each belongs to, and support needs the
+        // payload when someone reports that a code will not scan.
+        //
+        // Printing the coordinates here discloses nothing: the label is
+        // physically attached to the bin it describes. What must never be
+        // encoded is the *barcode* — see [BinModel.qrPayload].
+        pw.Text(
+          '${bin.lat.toStringAsFixed(5)}, ${bin.lng.toStringAsFixed(5)}'
+          '  ·  ${bin.radiusMeters.round()} m radius',
+          textAlign: pw.TextAlign.center,
+          style: pw.TextStyle(
+            fontSize: 7.5 * _scale.clamp(0.9, 1.0),
+            color: PdfColors.grey600,
+          ),
+        ),
+        pw.SizedBox(height: 1 * PdfPageFormat.mm * _scale),
+        pw.Text(
+          bin.qrPayload,
+          textAlign: pw.TextAlign.center,
+          maxLines: 1,
+          style: pw.TextStyle(
+            font: pw.Font.courier(),
+            fontSize: 7 * _scale.clamp(0.9, 1.0),
+            color: PdfColors.grey600,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+=========== FILE: lib/core/constants.dart ===========
+class AppConstants {
+  // responsive breakpoint
+  static const double webBreakpoint = 900.0;
+
+  // user roles
+  static const String roleAdmin = 'admin';
+  static const String roleSeller = 'seller';
+  static const String roleBuyer = 'buyer';
+
+  // user status
+  static const String statusActive = 'active';
+  static const String statusSuspended = 'suspended';
+
+  // seller application status
+  static const String statusPending = 'pending';
+  static const String statusApproved = 'approved';
+  static const String statusRejected = 'rejected';
+}
+
+=========== FILE: lib/core/geo.dart ===========
+/// Chokro — geospatial arithmetic (F2.5).
+///
+/// Pure Dart. No Firebase, no plugins, no `geolocator` import. The `geolocator`
+/// package supplies coordinates; this file decides what they mean. Keeping the
+/// two apart is what makes the radius check unit-testable without a device.
+///
+/// TRUST BOUNDARY — read this before using any of it.
+/// Everything here runs on the user's phone, on coordinates the phone reported.
+/// A modified client can report any coordinates it likes. The distance computed
+/// on-device is therefore **user feedback only** ("you appear to be 40m from
+/// this bin"). The authoritative check runs on the server, against the
+/// coordinates stored on the submission, at decision time. Both sides call the
+/// same maths — that is the point of putting it in a pure file — but only one
+/// side's answer is trusted. See §7.4 of the project brief.
+library;
+
+import 'dart:math' as math;
+
+/// Mean Earth radius in metres (IUGG). Haversine assumes a sphere, which is
+/// wrong by roughly 0.3% at worst — irrelevant at the scale of a bin geofence,
+/// where the radius is tens of metres and GPS error alone is larger.
+const double earthRadiusMeters = 6371000.0;
+
+/// Great-circle distance in metres between two coordinates.
+///
+/// Returns 0 for identical points. Never negative. Accurate to well under a
+/// metre for the short distances this app deals with.
+double haversineDistance({
+  required double lat1,
+  required double lng1,
+  required double lat2,
+  required double lng2,
+}) {
+  final phi1 = _toRadians(lat1);
+  final phi2 = _toRadians(lat2);
+  final deltaPhi = _toRadians(lat2 - lat1);
+  final deltaLambda = _toRadians(lng2 - lng1);
+
+  final sinHalfLat = math.sin(deltaPhi / 2);
+  final sinHalfLng = math.sin(deltaLambda / 2);
+
+  final a =
+      sinHalfLat * sinHalfLat +
+      math.cos(phi1) * math.cos(phi2) * sinHalfLng * sinHalfLng;
+
+  // asin form rather than atan2: numerically better behaved for small distances,
+  // which is the only case that matters here.
+  final clamped = a > 1.0 ? 1.0 : a;
+  return 2 * earthRadiusMeters * math.asin(math.sqrt(clamped));
+}
+
+/// Whether a captured position falls inside a bin's accepted radius.
+///
+/// The comparison is inclusive: standing exactly on the boundary counts as
+/// inside. GPS precision makes the boundary fuzzy anyway, and refusing an
+/// honest user for a sub-metre difference is the wrong failure direction.
+bool isWithinRadius({
+  required double binLat,
+  required double binLng,
+  required double capturedLat,
+  required double capturedLng,
+  required double radiusMeters,
+}) {
+  if (radiusMeters <= 0) return false;
+  final distance = haversineDistance(
+    lat1: binLat,
+    lng1: binLng,
+    lat2: capturedLat,
+    lng2: capturedLng,
+  );
+  return distance <= radiusMeters;
+}
+
+/// Whether a GPS fix is too imprecise to be the centre of a geofence this size
+/// (F2.1).
+///
+/// Asked when an administrator registers a bin from a live fix, and judged
+/// against the radius rather than a fixed threshold, because that ratio is what
+/// decides whether honest submissions will pass.
+///
+/// A bin's recorded coordinates are not checked once — they become the reference
+/// point every future submission at that bin is measured against, so an error
+/// here is inherited by all of them. If the centre lands 30 m from the real bin
+/// inside a 40 m radius, a resident standing at the bin can measure 70 m and be
+/// refused, and nothing on the submission would ever reveal that the bin, not
+/// the resident, was in the wrong place. A fix good to ±30 m is meanwhile
+/// perfectly adequate for a 200 m compound.
+///
+/// Half the radius is the threshold: at that point the error alone can consume
+/// the whole margin a resident has to stand in.
+///
+/// Returns false when either value is unknown or the radius is nonsensical —
+/// this reports a fix that *is* too rough, and declines to guess otherwise.
+bool isFixTooRoughForRadius({
+  required double? accuracyMeters,
+  required double? radiusMeters,
+}) {
+  if (accuracyMeters == null || radiusMeters == null) return false;
+  if (accuracyMeters.isNaN || radiusMeters.isNaN) return false;
+  if (radiusMeters <= 0) return false;
+  return accuracyMeters > radiusMeters / 2;
+}
+
+/// Whether [latitude] is a possible latitude.
+bool isValidLatitude(double latitude) =>
+    !latitude.isNaN && latitude >= -90.0 && latitude <= 90.0;
+
+/// Whether [longitude] is a possible longitude.
+bool isValidLongitude(double longitude) =>
+    !longitude.isNaN && longitude >= -180.0 && longitude <= 180.0;
+
+/// Whether a coordinate pair is usable at all.
+///
+/// Guards against the `0, 0` that a failed location fix often produces — a real
+/// point in the Gulf of Guinea, and never anywhere a Chokro bin will be. A
+/// submission carrying null island coordinates is a broken fix, not a location.
+bool isPlausibleCoordinate(double latitude, double longitude) {
+  if (!isValidLatitude(latitude) || !isValidLongitude(longitude)) return false;
+  if (latitude == 0.0 && longitude == 0.0) return false;
+  return true;
+}
+
+/// Human-readable distance for the submission and review screens.
+/// Metres below a kilometre, one decimal place of kilometres above it.
+String formatDistance(double meters) {
+  if (meters.isNaN || meters < 0) return '—';
+  if (meters < 1000) return '${meters.round()} m';
+  return '${(meters / 1000).toStringAsFixed(1)} km';
+}
+
+double _toRadians(double degrees) => degrees * math.pi / 180.0;
+
+=========== FILE: lib/core/label_format.dart ===========
+/// Pure display helpers.
+///
+/// No Flutter, no Firebase, no model imports — so this is unit-testable on its
+/// own and safe to call from any layer. Everything here is total: it returns a
+/// sensible string for any input rather than throwing.
+library;
+
+/// Returns the bare name of an enum value, or the string itself.
+///
+/// `ItemType.plasticBottles` -> `plasticBottles`
+/// `'plasticBottles'`        -> `plasticBottles`
+/// `null`                    -> `''`
+///
+/// Accepting `Object?` is deliberate: the view layer can render a field whether
+/// the model stores it as a typed enum or as a raw wire string, so a later
+/// change of representation in the model does not ripple into the views.
+String enumName(Object? value) {
+  if (value == null) return '';
+  if (value is String) return value;
+  final text = value.toString();
+  final dot = text.indexOf('.');
+  return dot == -1 ? text : text.substring(dot + 1);
+}
+
+/// Turns an identifier into readable sentence-case text.
+///
+/// `plasticBottles`   -> `Plastic bottles`
+/// `paper_cardboard`  -> `Paper cardboard`
+/// `outsideRadius`    -> `Outside radius`
+String humanise(Object? value) {
+  final raw = enumName(value).trim();
+  if (raw.isEmpty) return '';
+  final spaced = raw.replaceAll('_', ' ').replaceAllMapped(
+        RegExp(r'([a-z0-9])([A-Z])'),
+        (m) => '${m[1]} ${m[2]!.toLowerCase()}',
+      );
+  return spaced[0].toUpperCase() + spaced.substring(1);
+}
+
+const List<String> _months = <String>[
+  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
+  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+];
+
+/// `2 Aug 2026, 14:05`. Local time.
+///
+/// Written by hand rather than pulling in `intl`: one format is needed, the
+/// interface is English-only for this release (NFR-8), and adding a
+/// localisation package now would imply a localisation story that is deferred.
+String formatDateTime(DateTime? value) {
+  if (value == null) return '';
+  final local = value.toLocal();
+  final month = _months[local.month - 1];
+  final hh = local.hour.toString().padLeft(2, '0');
+  final mm = local.minute.toString().padLeft(2, '0');
+  return '${local.day} $month ${local.year}, $hh:$mm';
+}
+
+/// `2 Aug 2026`. Local time, no clock.
+///
+/// For dates where the time of day is noise rather than information: a join
+/// date, a suspension expiry. The home screen and the profile screen had each
+/// grown a private copy of this, complete with its own duplicate month list.
+String formatDate(DateTime? value) {
+  if (value == null) return '';
+  final local = value.toLocal();
+  return '${local.day} ${_months[local.month - 1]} ${local.year}';
+}
+
+/// How long until [until]: `4h 12m`, `12m`, `under a minute`.
+///
+/// The counterpart to [formatAge], which looks backwards. Used for the disposal
+/// lockout window (F2.6), where the number is the whole point of the message —
+/// "you already used this bin" leaves someone guessing whether to wait or walk,
+/// and "try again in 4h 12m" does not.
+///
+/// Rounds down and never returns a negative: an elapsed window reads as
+/// `under a minute` on its way to not being shown at all.
+String formatCountdown(DateTime? until, {DateTime? now}) {
+  if (until == null) return '';
+
+  final remaining = until.difference(now ?? DateTime.now());
+  if (remaining.isNegative || remaining.inMinutes < 1) return 'under a minute';
+
+  final hours = remaining.inHours;
+  final minutes = remaining.inMinutes % 60;
+
+  if (hours == 0) return '${minutes}m';
+  if (minutes == 0) return '${hours}h';
+  return '${hours}h ${minutes}m';
+}
+
+/// Short relative age for list rows: `just now`, `14m ago`, `3h ago`, `5d ago`.
+/// Falls back to the absolute date beyond a week.
+///
+/// A null timestamp means the server timestamp has not resolved yet — the write
+/// is still in Firestore's local queue — so it reads as `just now` rather than
+/// as an error.
+String formatAge(DateTime? value, {DateTime? now}) {
+  if (value == null) return 'just now';
+  final reference = now ?? DateTime.now();
+  final diff = reference.difference(value);
+  if (diff.isNegative || diff.inMinutes < 1) return 'just now';
+  if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
+  if (diff.inHours < 24) return '${diff.inHours}h ago';
+  if (diff.inDays < 7) return '${diff.inDays}d ago';
+  return formatDateTime(value);
+}
+
+/// `50` -> `+50`, `-120` -> `-120`, `0` -> `0`.
+String signedPoints(int delta) => delta > 0 ? '+$delta' : '$delta';
+
+/// `1` -> `1 item`, `4` -> `4 items`.
+String itemCount(int? count) {
+  if (count == null) return '';
+  return count == 1 ? '1 item' : '$count items';
+}
+
+=========== FILE: lib/core/network_errors.dart ===========
+/// Messages for the ways a call to the trusted service can fail to happen at
+/// all.
+///
+/// Six services each spoke to the server and each wrote the same three
+/// sentences by hand. That was survivable while the sentences were right; it
+/// stopped being survivable when one of them turned out to be wrong in the same
+/// way six times.
+library;
+
+import 'package:flutter/foundation.dart' show kIsWeb;
+
+/// What to say when the request never reached the server.
+///
+/// `http.ClientException` means different things on different platforms, and the
+/// services were reporting only one of them.
+///
+/// On mobile it really is the network. On **web** it is most often CORS: the
+/// browser refused the request because the response carried no
+/// `Access-Control-Allow-Origin` for this page's origin. Every one of these
+/// services already logged "on web, check CORS" to the debug console — and then
+/// told the user to check their connection.
+///
+/// That cost real time: registering a bin from a local build served on a port
+/// missing from the server's `ALLOWED_ORIGINS` produced "check your connection"
+/// while the server was up and answering `/health` in 300 ms.
+///
+/// So the web wording names both possibilities without jargon. It has to stay
+/// true in production, where a signed-in administrator on the hosted origin sees
+/// this only if the service is genuinely down.
+String get unreachableServerMessage => kIsWeb
+    ? 'Could not reach the server. It may be offline, or it may be refusing '
+        'requests from this address.'
+    : 'Could not reach the server. Check your connection.';
+
+/// What to say when the server was reached but took too long.
+///
+/// Render's free instance sleeps after about 15 minutes idle and takes 30–60
+/// seconds to wake, so the first action after a quiet period can time out
+/// through no fault of the user or the network.
+const String slowServerMessage =
+    'The server took too long to respond. It may be starting up — try again in '
+    'a moment.';
+
+=========== FILE: lib/core/pdf_fonts.dart ===========
+/// Fonts for the printed bin label (F2.1).
+///
+/// ## Why this is not just Helvetica
+///
+/// The `pdf` package's built-in fonts are the PDF standard 14 — Helvetica,
+/// Courier, Times — which are Latin-1 only. Anything outside that set is not
+/// drawn at all: no fallback glyph, no box, nothing. The text silently
+/// disappears from the page.
+///
+/// Two things on this label are affected. The brief's own example bin label is
+/// "Merul Badda — Block C gate", and that em dash is already outside Latin-1.
+/// More seriously, this is an app for Dhaka: a label written in Bengali —
+/// "মেরুল বাড্ডা" — would print as an empty space, and the administrator would
+/// not find out until they were standing at the bin holding a blank label.
+///
+/// So the label is drawn in Noto Sans with Noto Sans Bengali behind it, which
+/// covers both scripts the app is actually used in.
+///
+/// ## Why it degrades instead of failing
+///
+/// `PdfGoogleFonts` fetches over the network. An administrator registering a bin
+/// necessarily has a connection, because registration itself goes through the
+/// server — but reprinting an old label offline should not be impossible. On a
+/// fetch failure this returns null and the caller prints with the built-in
+/// fonts: an ASCII label still comes out correctly, which is strictly better
+/// than refusing to print.
+///
+/// A failure is not cached, so the next attempt tries again rather than leaving
+/// the app in Latin-1 mode until it restarts.
+library;
+
+import 'package:flutter/foundation.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
+
+Future<pw.ThemeData?>? _cached;
+
+/// Fonts covering Latin and Bengali, or null to fall back to the built-ins.
+///
+/// Memoised: printing a twenty-label sheet must not fetch four font files
+/// twenty times.
+Future<pw.ThemeData?> labelTheme() => _cached ??= _load();
+
+Future<pw.ThemeData?> _load() async {
+  try {
+    // Fetched together rather than in sequence — four round trips in series is
+    // a visible pause before the print dialog appears.
+    final fonts = await Future.wait([
+      PdfGoogleFonts.notoSansRegular(),
+      PdfGoogleFonts.notoSansBold(),
+      PdfGoogleFonts.notoSansBengaliRegular(),
+      PdfGoogleFonts.notoSansBengaliBold(),
+    ]);
+
+    return pw.ThemeData.withFont(
+      base: fonts[0],
+      bold: fonts[1],
+      // Consulted glyph by glyph, so a label mixing Bengali and Latin — a
+      // street name in Bengali with a block number in digits — renders whole.
+      fontFallback: [fonts[2], fonts[3]],
+    );
+  } catch (error) {
+    if (kDebugMode) {
+      debugPrint('[pdf_fonts] falling back to built-in fonts: $error');
+    }
+    // Not cached, so going back online restores Unicode without a restart.
+    _cached = null;
+    return null;
+  }
+}
+
+/// Drops the memoised fonts. For tests.
+@visibleForTesting
+void resetLabelThemeCache() => _cached = null;
+
+=========== FILE: lib/core/points_policy.dart ===========
+/// Chokro — points policy (§7.3 of the project brief).
+///
+/// This is the single source of truth for every number that governs the points
+/// economy. Nothing in this file imports Firebase. It is plain Dart so that all
+/// of the arithmetic below is unit-testable without an emulator.
+///
+/// Values are admin-tunable at runtime: they live in the Firestore document
+/// `config/points` and are read into a [PointsPolicy] via [PointsPolicy.fromJson].
+/// The constants declared here are the *defaults* — used on first run, when the
+/// config document is missing, and as the fallback for any individual field the
+/// document omits or stores with a bad type.
+///
+/// IMPORTANT INVARIANT — snapshot on award.
+/// When a disposal, claim or purchase is approved, the awarded amount must be
+/// written onto that record (`pointsAwarded`) at that moment. Never re-derive a
+/// past award from the current policy. An admin lowering the disposal award from
+/// 50 to 40 must not silently rewrite what last month's disposals were worth.
+/// This mirrors the order line-item price snapshot rule in §6.
+library;
+
+/// Default values, straight from §7.3 of the brief.
+class PointsPolicyDefaults {
+  const PointsPolicyDefaults._();
+
+  /// Points credited for one approved disposal submission.
+  static const int disposalAward = 50;
+
+  /// Points credited for one approved self-reported eco-action claim.
+  /// Must stay strictly below [disposalAward] — see [PointsPolicy.validate].
+  static const int claimAward = 15;
+
+  /// Maximum approved claims per user per ISO week.
+  static const int claimQuotaPerWeek = 3;
+
+  /// Purchase award as a whole percentage of the order's payable amount.
+  static const int purchaseAwardPercent = 5;
+
+  /// Redemption rate, expressed as a block: [redemptionPointsPerBlock] points
+  /// are worth [redemptionTakaPerBlock] taka. Default: 100 points = ৳10.
+  static const int redemptionPointsPerBlock = 100;
+  static const int redemptionTakaPerBlock = 10;
+
+  /// Ceiling on how much of an order's subtotal may be paid with points,
+  /// as a whole percentage. Points supplement payment; they do not replace it.
+  static const int maxRedemptionPercentOfSubtotal = 50;
+
+  /// Hours a user is locked out of re-submitting at the same bin.
+  static const int lockoutHours = 6;
+
+  /// Maximum approved disposal submissions per user per calendar day.
+  static const int dailyDisposalCap = 3;
+}
+
+/// A resolved, validated set of points-economy parameters.
+///
+/// Immutable. Obtain one from [PointsPolicy.defaults] or [PointsPolicy.fromJson],
+/// and produce modified copies with [copyWith] (used by the admin config screen).
+class PointsPolicy {
+  final int disposalAward;
+  final int claimAward;
+  final int claimQuotaPerWeek;
+  final int purchaseAwardPercent;
+  final int redemptionPointsPerBlock;
+  final int redemptionTakaPerBlock;
+  final int maxRedemptionPercentOfSubtotal;
+  final int lockoutHours;
+  final int dailyDisposalCap;
+
+  const PointsPolicy({
+    required this.disposalAward,
+    required this.claimAward,
+    required this.claimQuotaPerWeek,
+    required this.purchaseAwardPercent,
+    required this.redemptionPointsPerBlock,
+    required this.redemptionTakaPerBlock,
+    required this.maxRedemptionPercentOfSubtotal,
+    required this.lockoutHours,
+    required this.dailyDisposalCap,
+  });
+
+  /// The §7.3 baseline.
+  static const PointsPolicy defaults = PointsPolicy(
+    disposalAward: PointsPolicyDefaults.disposalAward,
+    claimAward: PointsPolicyDefaults.claimAward,
+    claimQuotaPerWeek: PointsPolicyDefaults.claimQuotaPerWeek,
+    purchaseAwardPercent: PointsPolicyDefaults.purchaseAwardPercent,
+    redemptionPointsPerBlock: PointsPolicyDefaults.redemptionPointsPerBlock,
+    redemptionTakaPerBlock: PointsPolicyDefaults.redemptionTakaPerBlock,
+    maxRedemptionPercentOfSubtotal:
+        PointsPolicyDefaults.maxRedemptionPercentOfSubtotal,
+    lockoutHours: PointsPolicyDefaults.lockoutHours,
+    dailyDisposalCap: PointsPolicyDefaults.dailyDisposalCap,
+  );
+
+  // ---------------------------------------------------------------------------
+  // Serialization — `config/points`
+  // ---------------------------------------------------------------------------
+
+  /// Reads a policy from the `config/points` document.
+  ///
+  /// Deliberately forgiving: any field that is missing, null, or not an integer
+  /// falls back to its default rather than throwing. A malformed config document
+  /// must never be able to take the app down — worst case it runs on defaults.
+  ///
+  /// Note this does NOT validate cross-field invariants. Call [validate] before
+  /// writing a policy back; reads are tolerant, writes are strict.
+  factory PointsPolicy.fromJson(Map<String, dynamic>? json) {
+    final map = json ?? const <String, dynamic>{};
+
+    int read(String key, int fallback) {
+      final value = map[key];
+      if (value is int) return value;
+      if (value is num) return value.toInt();
+      return fallback;
+    }
+
+    return PointsPolicy(
+      disposalAward: read('disposalAward', defaults.disposalAward),
+      claimAward: read('claimAward', defaults.claimAward),
+      claimQuotaPerWeek: read('claimQuotaPerWeek', defaults.claimQuotaPerWeek),
+      purchaseAwardPercent:
+          read('purchaseAwardPercent', defaults.purchaseAwardPercent),
+      redemptionPointsPerBlock:
+          read('redemptionPointsPerBlock', defaults.redemptionPointsPerBlock),
+      redemptionTakaPerBlock:
+          read('redemptionTakaPerBlock', defaults.redemptionTakaPerBlock),
+      maxRedemptionPercentOfSubtotal: read(
+        'maxRedemptionPercentOfSubtotal',
+        defaults.maxRedemptionPercentOfSubtotal,
+      ),
+      lockoutHours: read('lockoutHours', defaults.lockoutHours),
+      dailyDisposalCap: read('dailyDisposalCap', defaults.dailyDisposalCap),
+    );
+  }
+
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'disposalAward': disposalAward,
+        'claimAward': claimAward,
+        'claimQuotaPerWeek': claimQuotaPerWeek,
+        'purchaseAwardPercent': purchaseAwardPercent,
+        'redemptionPointsPerBlock': redemptionPointsPerBlock,
+        'redemptionTakaPerBlock': redemptionTakaPerBlock,
+        'maxRedemptionPercentOfSubtotal': maxRedemptionPercentOfSubtotal,
+        'lockoutHours': lockoutHours,
+        'dailyDisposalCap': dailyDisposalCap,
+      };
+
+  PointsPolicy copyWith({
+    int? disposalAward,
+    int? claimAward,
+    int? claimQuotaPerWeek,
+    int? purchaseAwardPercent,
+    int? redemptionPointsPerBlock,
+    int? redemptionTakaPerBlock,
+    int? maxRedemptionPercentOfSubtotal,
+    int? lockoutHours,
+    int? dailyDisposalCap,
+  }) {
+    return PointsPolicy(
+      disposalAward: disposalAward ?? this.disposalAward,
+      claimAward: claimAward ?? this.claimAward,
+      claimQuotaPerWeek: claimQuotaPerWeek ?? this.claimQuotaPerWeek,
+      purchaseAwardPercent: purchaseAwardPercent ?? this.purchaseAwardPercent,
+      redemptionPointsPerBlock:
+          redemptionPointsPerBlock ?? this.redemptionPointsPerBlock,
+      redemptionTakaPerBlock:
+          redemptionTakaPerBlock ?? this.redemptionTakaPerBlock,
+      maxRedemptionPercentOfSubtotal:
+          maxRedemptionPercentOfSubtotal ?? this.maxRedemptionPercentOfSubtotal,
+      lockoutHours: lockoutHours ?? this.lockoutHours,
+      dailyDisposalCap: dailyDisposalCap ?? this.dailyDisposalCap,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Validation
+  // ---------------------------------------------------------------------------
+
+  /// Returns a list of human-readable problems with this policy. Empty means OK.
+  ///
+  /// Call this in the admin config screen before saving, and again on the server
+  /// before writing `config/points`. The client is not trusted to have called it.
+  ///
+  /// The load-bearing rule here is the last one: **award value must track
+  /// verification strength** (§7.3). A claim rests on an administrator's read of
+  /// a photograph and nothing else; a disposal is geofenced, time-locked and
+  /// hash-checked. If a claim ever pays more than a disposal, users optimise into
+  /// the weaker route and the entire verification design stops meaning anything.
+  List<String> validate() {
+    final problems = <String>[];
+
+    void positive(String label, int value) {
+      if (value <= 0) problems.add('$label must be greater than zero.');
+    }
+
+    positive('Disposal award', disposalAward);
+    positive('Claim award', claimAward);
+    positive('Claim quota per week', claimQuotaPerWeek);
+    positive('Redemption points per block', redemptionPointsPerBlock);
+    positive('Redemption taka per block', redemptionTakaPerBlock);
+    positive('Lockout window', lockoutHours);
+    positive('Daily disposal cap', dailyDisposalCap);
+
+    if (purchaseAwardPercent < 0 || purchaseAwardPercent > 100) {
+      problems.add('Purchase award percent must be between 0 and 100.');
+    }
+    if (maxRedemptionPercentOfSubtotal < 0 ||
+        maxRedemptionPercentOfSubtotal > 100) {
+      problems.add('Max redemption percent must be between 0 and 100.');
+    }
+    if (lockoutHours > 24 * 7) {
+      problems.add('Lockout window may not exceed one week.');
+    }
+
+    if (claimAward >= disposalAward) {
+      problems.add(
+        'Claim award ($claimAward) must be lower than disposal award '
+        '($disposalAward): the weaker verification route must pay less.',
+      );
+    }
+
+    return problems;
+  }
+
+  bool get isValid => validate().isEmpty;
+
+  // ---------------------------------------------------------------------------
+  // Redemption arithmetic
+  // ---------------------------------------------------------------------------
+
+  /// Points required to buy one taka of value. With the defaults, 10.
+  ///
+  /// Redemption is always transacted in whole taka, so points are spent in
+  /// multiples of this number. This avoids ever owing a buyer ৳2.7.
+  int get pointsPerTaka {
+    final ratio = redemptionPointsPerBlock ~/ redemptionTakaPerBlock;
+    return ratio < 1 ? 1 : ratio;
+  }
+
+  /// Taka value of [points], rounded down. Points that don't fill a whole taka
+  /// are not spent — see [pointsToSpendForTaka].
+  int takaForPoints(int points) {
+    if (points <= 0) return 0;
+    return points ~/ pointsPerTaka;
+  }
+
+  /// Points actually deducted to deliver [taka] of discount. Always an exact
+  /// multiple of [pointsPerTaka], so the ledger never records a partial block.
+  int pointsToSpendForTaka(int taka) {
+    if (taka <= 0) return 0;
+    return taka * pointsPerTaka;
+  }
+
+  /// The most points a buyer may apply to an order with this [subtotal],
+  /// given their current wallet [balance].
+  ///
+  /// Bounded by three things at once: the wallet balance, the
+  /// [maxRedemptionPercentOfSubtotal] ceiling, and whole-taka granularity.
+  /// Always returns an exact multiple of [pointsPerTaka].
+  int maxRedeemablePoints({required int subtotal, required int balance}) {
+    if (subtotal <= 0 || balance <= 0) return 0;
+
+    final takaCeiling = (subtotal * maxRedemptionPercentOfSubtotal) ~/ 100;
+    if (takaCeiling <= 0) return 0;
+
+    final pointsCeiling = pointsToSpendForTaka(takaCeiling);
+    final usable = balance < pointsCeiling ? balance : pointsCeiling;
+
+    // Round down to a whole-taka block.
+    return (usable ~/ pointsPerTaka) * pointsPerTaka;
+  }
+
+  /// Applies [pointsRequested] to an order and returns the resulting split.
+  ///
+  /// Clamps the request to [maxRedeemablePoints] rather than throwing — the UI
+  /// should prevent an over-request, but the arithmetic must be safe if it
+  /// doesn't. The server recomputes this at checkout; the client's figure is
+  /// display only.
+  RedemptionOutcome applyRedemption({
+    required int subtotal,
+    required int balance,
+    required int pointsRequested,
+  }) {
+    final cap = maxRedeemablePoints(subtotal: subtotal, balance: balance);
+    var pointsApplied = pointsRequested < 0 ? 0 : pointsRequested;
+    if (pointsApplied > cap) pointsApplied = cap;
+
+    // Never spend points that don't buy a whole taka.
+    pointsApplied = (pointsApplied ~/ pointsPerTaka) * pointsPerTaka;
+
+    final discount = takaForPoints(pointsApplied);
+    return RedemptionOutcome(
+      subtotal: subtotal,
+      pointsApplied: pointsApplied,
+      discount: discount,
+      payable: subtotal - discount,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Award arithmetic
+  // ---------------------------------------------------------------------------
+
+  /// Points credited to the buyer when an order is confirmed received.
+  ///
+  /// Computed from the *payable* amount, not the subtotal — points already
+  /// redeemed do not earn points back, which would otherwise be a slow leak.
+  int purchaseAward(int payable) {
+    if (payable <= 0) return 0;
+    return (payable * purchaseAwardPercent) ~/ 100;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Lockout and cap arithmetic
+  // ---------------------------------------------------------------------------
+
+  /// When a lockout opened at [from] expires.
+  ///
+  /// In production [from] is always a server timestamp (§7.4, client clock
+  /// manipulation). This function is pure so it can be tested; it does not read
+  /// the clock itself.
+  DateTime lockoutExpiry(DateTime from) =>
+      from.add(Duration(hours: lockoutHours));
+
+  /// Whether a lockout expiring at [expiresAt] is still in force at [now].
+  /// A null [expiresAt] means no lockout document exists — not locked out.
+  bool isLockedOut({required DateTime? expiresAt, required DateTime now}) {
+    if (expiresAt == null) return false;
+    return now.isBefore(expiresAt);
+  }
+
+  /// Whether another disposal may be approved today, given how many already were.
+  bool canApproveAnotherDisposalToday(int approvedToday) =>
+      approvedToday < dailyDisposalCap;
+
+  /// Whether another claim may be approved this ISO week.
+  bool canApproveAnotherClaimThisWeek(int approvedThisWeek) =>
+      approvedThisWeek < claimQuotaPerWeek;
+
+  @override
+  String toString() => 'PointsPolicy(${toJson()})';
+
+  @override
+  bool operator ==(Object other) =>
+      other is PointsPolicy &&
+      other.disposalAward == disposalAward &&
+      other.claimAward == claimAward &&
+      other.claimQuotaPerWeek == claimQuotaPerWeek &&
+      other.purchaseAwardPercent == purchaseAwardPercent &&
+      other.redemptionPointsPerBlock == redemptionPointsPerBlock &&
+      other.redemptionTakaPerBlock == redemptionTakaPerBlock &&
+      other.maxRedemptionPercentOfSubtotal == maxRedemptionPercentOfSubtotal &&
+      other.lockoutHours == lockoutHours &&
+      other.dailyDisposalCap == dailyDisposalCap;
+
+  @override
+  int get hashCode => Object.hash(
+        disposalAward,
+        claimAward,
+        claimQuotaPerWeek,
+        purchaseAwardPercent,
+        redemptionPointsPerBlock,
+        redemptionTakaPerBlock,
+        maxRedemptionPercentOfSubtotal,
+        lockoutHours,
+        dailyDisposalCap,
+      );
+}
+
+/// The result of applying points to an order. All amounts in whole taka.
+class RedemptionOutcome {
+  final int subtotal;
+  final int pointsApplied;
+  final int discount;
+  final int payable;
+
+  const RedemptionOutcome({
+    required this.subtotal,
+    required this.pointsApplied,
+    required this.discount,
+    required this.payable,
+  });
+
+  @override
+  String toString() =>
+      'RedemptionOutcome(subtotal: $subtotal, pointsApplied: $pointsApplied, '
+      'discount: $discount, payable: $payable)';
+}
+
+/// ISO-8601 week keys, used as the document ID for `claimQuotas/{userId}_{isoWeek}`.
+///
+/// Kept here rather than in a date utility because the weekly quota is a points
+/// policy concern, and because getting this wrong silently corrupts quota
+/// enforcement at year boundaries. ISO weeks start on Monday, and week 1 is the
+/// week containing the first Thursday of the year — which is why a date in early
+/// January can legitimately belong to the previous ISO year.
+class IsoWeek {
+  const IsoWeek._();
+
+  /// The ISO week number (1–53) containing [date].
+  static int weekNumber(DateTime date) {
+    final thursday = _thursdayOfWeek(date);
+    final firstOfYear = DateTime.utc(thursday.year, 1, 1);
+    return (thursday.difference(firstOfYear).inDays ~/ 7) + 1;
+  }
+
+  /// The ISO week-numbering year containing [date]. Not always [DateTime.year].
+  static int weekYear(DateTime date) => _thursdayOfWeek(date).year;
+
+  /// Document-ID-safe key, e.g. `2026-W31`. Zero-padded so keys sort correctly.
+  static String key(DateTime date) {
+    final week = weekNumber(date).toString().padLeft(2, '0');
+    return '${weekYear(date)}-W$week';
+  }
+
+  /// Full quota document ID for a user in the week containing [date].
+  static String quotaDocId(String userId, DateTime date) =>
+      '${userId}_${key(date)}';
+
+  /// The Thursday of the ISO week containing [date]. ISO week numbering is
+  /// anchored on Thursday, so this single step resolves both week and year.
+  static DateTime _thursdayOfWeek(DateTime date) {
+    final utc = DateTime.utc(date.year, date.month, date.day);
+    return utc.add(Duration(days: 4 - utc.weekday));
+  }
+}
+
+/// Who last changed the points policy, and when (F3.3).
+///
+/// The server has recorded `updatedAt` and `updatedBy` on every policy write
+/// since the endpoint existed, and `fromDoc` strips both because `validate()`
+/// depends on an exact key set — so neither ever reached a person.
+///
+/// It matters because of what this screen is. The policy defines the economy, any
+/// administrator can change it, and the values give no hint of their own history:
+/// a disposal award of 50 looks identical whether it is the untouched default
+/// from §7.3 or something a colleague set an hour ago. An administrator about to
+/// change it should be able to tell those apart.
+class PolicyProvenance {
+  const PolicyProvenance({this.updatedAt, this.updatedBy, this.updatedByName});
+
+  /// Server time of the last write. Null when nothing has ever been saved.
+  final DateTime? updatedAt;
+
+  /// The editing administrator's uid, kept for the case where their name cannot
+  /// be resolved — a deleted account, or a failed lookup.
+  final String? updatedBy;
+
+  /// Resolved on the server, because a uid is not something to show a person.
+  final String? updatedByName;
+
+  static const unknown = PolicyProvenance();
+
+  factory PolicyProvenance.fromJson(Map<String, dynamic> json) {
+    final raw = json['updatedAt'];
+    return PolicyProvenance(
+      updatedAt: raw is String ? DateTime.tryParse(raw) : null,
+      updatedBy: json['updatedBy'] as String?,
+      updatedByName: json['updatedByName'] as String?,
+    );
+  }
+
+  /// True when the policy document does not exist, so these are the defaults.
+  ///
+  /// Worth stating outright on the screen: "nobody has changed this" is different
+  /// information from "somebody set it to exactly the defaults".
+  bool get isUntouched => updatedAt == null;
+
+  /// Whoever made the last change, as well as it can be named.
+  String get editor => updatedByName ?? updatedBy ?? 'an administrator';
+}
+
+/// A policy read together with the provenance of its last change.
+///
+/// One object so the editor gets both from a single request. Fetching provenance
+/// separately would double a call that every award calculation depends on.
+class PolicySnapshot {
+  const PolicySnapshot({required this.policy, required this.provenance});
+
+  final PointsPolicy policy;
+  final PolicyProvenance provenance;
+
+  factory PolicySnapshot.fromJson(Map<String, dynamic> json) => PolicySnapshot(
+        policy: PointsPolicy.fromJson(json),
+        provenance: PolicyProvenance.fromJson(json),
+      );
+}
+
+=========== FILE: lib/core/policy_fields.dart ===========
+/// Field descriptors for the points policy editor (F3.3).
+///
+/// One list drives the form, the change summary and the per-field parsing. No
+/// Flutter, no Firebase — pure, so the diff logic is unit-testable.
+///
+/// The alternative was nine near-identical form fields and a hand-written diff.
+/// This keeps the definition of "what a policy parameter is" in exactly one
+/// place, so adding a tenth parameter is one entry here rather than three edits
+/// in three files.
+library;
+
+import 'points_policy.dart';
+
+class PolicyField {
+  const PolicyField({
+    required this.key,
+    required this.label,
+    required this.help,
+    required this.read,
+    required this.write,
+    this.suffix,
+  });
+
+  /// Matches the Firestore field name in `config/points`.
+  final String key;
+
+  final String label;
+
+  /// Shown under the input. Explains *why* the value is what it is, because an
+  /// administrator changing a number needs the reasoning, not a restatement.
+  final String help;
+
+  /// Unit shown after the input, where one clarifies the number.
+  final String? suffix;
+
+  final int Function(PointsPolicy policy) read;
+  final PointsPolicy Function(PointsPolicy policy, int value) write;
+}
+
+/// Every tunable parameter, in the order the form presents them.
+///
+/// Grouped by concern: awards first, then redemption, then the anti-farming
+/// limits.
+const List<PolicyField> policyFields = <PolicyField>[
+  PolicyField(
+    key: 'disposalAward',
+    label: 'Disposal award',
+    suffix: 'points',
+    help: 'Credited for one approved disposal. The strongest verification '
+        'route — geofenced, time-locked and hash-checked — so it pays most.',
+    read: _readDisposalAward,
+    write: _writeDisposalAward,
+  ),
+  PolicyField(
+    key: 'claimAward',
+    label: 'Claim award',
+    suffix: 'points',
+    help: 'Credited for one approved self-reported action. Must stay strictly '
+        'below the disposal award: the weaker route must pay less, or users '
+        'optimise into it.',
+    read: _readClaimAward,
+    write: _writeClaimAward,
+  ),
+  PolicyField(
+    key: 'purchaseAwardPercent',
+    label: 'Purchase award',
+    suffix: '% of payable',
+    help: 'Computed in points, not taka value. At 5%, a BDT 1000 order earns '
+        '50 points — worth BDT 5. A light loyalty bonus, not an earn route.',
+    read: _readPurchaseAwardPercent,
+    write: _writePurchaseAwardPercent,
+  ),
+  PolicyField(
+    key: 'redemptionPointsPerBlock',
+    label: 'Redemption block — points',
+    suffix: 'points',
+    help: 'With the taka figure below, sets the exchange rate. 100 points to '
+        'BDT 10 means 10 points buys BDT 1.',
+    read: _readRedemptionPoints,
+    write: _writeRedemptionPoints,
+  ),
+  PolicyField(
+    key: 'redemptionTakaPerBlock',
+    label: 'Redemption block — taka',
+    suffix: 'BDT',
+    help: 'Points are spent in whole-taka multiples, so a remainder stays in '
+        'the wallet rather than leaving the ledger unable to reconcile.',
+    read: _readRedemptionTaka,
+    write: _writeRedemptionTaka,
+  ),
+  PolicyField(
+    key: 'maxRedemptionPercentOfSubtotal',
+    label: 'Maximum redemption',
+    suffix: '% of subtotal',
+    help: 'Ceiling on how much of an order may be paid with points. Points '
+        'supplement payment; they do not replace it.',
+    read: _readMaxRedemption,
+    write: _writeMaxRedemption,
+  ),
+  PolicyField(
+    key: 'lockoutHours',
+    label: 'Lockout window',
+    suffix: 'hours',
+    help: 'How long a user is blocked from re-submitting at the same bin. '
+        'Blocks trivial farming while permitting genuine twice-daily disposal.',
+    read: _readLockoutHours,
+    write: _writeLockoutHours,
+  ),
+  PolicyField(
+    key: 'dailyDisposalCap',
+    label: 'Daily disposal cap',
+    suffix: 'per day',
+    help: 'Approved submissions per user per day. Second line of defence '
+        'against farming across several bins.',
+    read: _readDailyCap,
+    write: _writeDailyCap,
+  ),
+  PolicyField(
+    key: 'claimQuotaPerWeek',
+    label: 'Claim quota',
+    suffix: 'per ISO week',
+    help: 'Approved claims per user per week. For the self-reported route the '
+        'rate limit is the safeguard, since nothing mechanical can verify it.',
+    read: _readClaimQuota,
+    write: _writeClaimQuota,
+  ),
+];
+
+/// A single parameter that differs between two policies.
+class PolicyChange {
+  const PolicyChange({
+    required this.field,
+    required this.from,
+    required this.to,
+  });
+
+  final PolicyField field;
+  final int from;
+  final int to;
+
+  String get summary => '${field.label}: $from → $to';
+
+  @override
+  String toString() => summary;
+}
+
+/// Every parameter that differs, in form order. Empty means the policies match.
+///
+/// Used to show an administrator exactly what they are about to change before
+/// they commit to it — a points policy edit alters the economy, so a silent
+/// save is the wrong interaction.
+List<PolicyChange> diffPolicies(PointsPolicy before, PointsPolicy after) {
+  final changes = <PolicyChange>[];
+  for (final field in policyFields) {
+    final from = field.read(before);
+    final to = field.read(after);
+    if (from != to) {
+      changes.add(PolicyChange(field: field, from: from, to: to));
+    }
+  }
+  return changes;
+}
+
+// Top-level functions rather than closures so the descriptor list can be const.
+
+int _readDisposalAward(PointsPolicy p) => p.disposalAward;
+PointsPolicy _writeDisposalAward(PointsPolicy p, int v) =>
+    p.copyWith(disposalAward: v);
+
+int _readClaimAward(PointsPolicy p) => p.claimAward;
+PointsPolicy _writeClaimAward(PointsPolicy p, int v) =>
+    p.copyWith(claimAward: v);
+
+int _readPurchaseAwardPercent(PointsPolicy p) => p.purchaseAwardPercent;
+PointsPolicy _writePurchaseAwardPercent(PointsPolicy p, int v) =>
+    p.copyWith(purchaseAwardPercent: v);
+
+int _readRedemptionPoints(PointsPolicy p) => p.redemptionPointsPerBlock;
+PointsPolicy _writeRedemptionPoints(PointsPolicy p, int v) =>
+    p.copyWith(redemptionPointsPerBlock: v);
+
+int _readRedemptionTaka(PointsPolicy p) => p.redemptionTakaPerBlock;
+PointsPolicy _writeRedemptionTaka(PointsPolicy p, int v) =>
+    p.copyWith(redemptionTakaPerBlock: v);
+
+int _readMaxRedemption(PointsPolicy p) => p.maxRedemptionPercentOfSubtotal;
+PointsPolicy _writeMaxRedemption(PointsPolicy p, int v) =>
+    p.copyWith(maxRedemptionPercentOfSubtotal: v);
+
+int _readLockoutHours(PointsPolicy p) => p.lockoutHours;
+PointsPolicy _writeLockoutHours(PointsPolicy p, int v) =>
+    p.copyWith(lockoutHours: v);
+
+int _readDailyCap(PointsPolicy p) => p.dailyDisposalCap;
+PointsPolicy _writeDailyCap(PointsPolicy p, int v) =>
+    p.copyWith(dailyDisposalCap: v);
+
+int _readClaimQuota(PointsPolicy p) => p.claimQuotaPerWeek;
+PointsPolicy _writeClaimQuota(PointsPolicy p, int v) =>
+    p.copyWith(claimQuotaPerWeek: v);
+
+=========== FILE: lib/core/submitter_record.dart ===========
+/// The submitter's prior record, for the review queue (F2.7).
+///
+/// The brief asks the queue to show "photo, distance, flags and the user's
+/// history". The first three were there; this is the fourth, and it is the one
+/// that changes a decision rather than describing a submission.
+///
+/// A photograph that is merely ambiguous means something different depending on
+/// who sent it. From an account with thirty clean approvals it is almost
+/// certainly a bad camera angle. From one with four rejections in its last ten
+/// it is worth a closer look. Without this, every borderline case is judged in
+/// isolation and the reviewer has no way to tell those two situations apart.
+///
+/// Pure and countable so it can be unit-tested without Firestore.
+library;
+
+import '../models/disposal_model.dart';
+
+class SubmitterRecord {
+  const SubmitterRecord({
+    required this.approved,
+    required this.rejected,
+    required this.pending,
+    required this.considered,
+  });
+
+  /// Both `autoApproved` and `manualApproved`. The distinction matters to the
+  /// user's history screen, not to a reviewer asking "does this person submit
+  /// honestly".
+  final int approved;
+
+  final int rejected;
+
+  /// Still awaiting a decision — other cards in this same queue.
+  final int pending;
+
+  /// How many submissions were examined, which is bounded. Reported so the
+  /// interface can say "of their last 12" rather than implying an all-time
+  /// count it did not compute.
+  final int considered;
+
+  static const empty = SubmitterRecord(
+    approved: 0,
+    rejected: 0,
+    pending: 0,
+    considered: 0,
+  );
+
+  /// Counts [disposals], skipping [excludeId].
+  ///
+  /// The submission being reviewed is in that list and is itself pending.
+  /// Counting it would add one to `pending` on every card and make the record
+  /// describe the present rather than the past.
+  factory SubmitterRecord.from(
+    List<DisposalModel> disposals, {
+    String? excludeId,
+  }) {
+    var approved = 0;
+    var rejected = 0;
+    var pending = 0;
+    var considered = 0;
+
+    for (final disposal in disposals) {
+      if (excludeId != null && disposal.id == excludeId) continue;
+      considered++;
+
+      switch (disposal.status) {
+        case DisposalStatus.autoApproved:
+        case DisposalStatus.manualApproved:
+          approved++;
+        case DisposalStatus.rejected:
+          rejected++;
+        case DisposalStatus.pending:
+          pending++;
+      }
+    }
+
+    return SubmitterRecord(
+      approved: approved,
+      rejected: rejected,
+      pending: pending,
+      considered: considered,
+    );
+  }
+
+  /// Nothing decided before this one.
+  bool get isFirstSubmission => considered == 0;
+
+  /// Whether the record is worth the reviewer's attention.
+  ///
+  /// Any prior rejection qualifies. Deliberately not a ratio: with a handful of
+  /// submissions a ratio swings wildly, and "two of their last five were
+  /// rejected" is exactly the case a threshold would hide.
+  bool get hasRejections => rejected > 0;
+
+  /// One line for the card.
+  ///
+  /// Reports decisions only. [pending] is deliberately left out: the record is
+  /// fetched per submitter and cached, so it cannot exclude the specific card
+  /// being viewed, and that card is itself pending. Printing "1 awaiting review"
+  /// beside the very submission under review invents a second one that does not
+  /// exist. Decided outcomes are also the only part that answers the reviewer's
+  /// actual question, which is whether this person submits honestly.
+  ///
+  /// [considered] is still the full window, so the count in brackets is the
+  /// number of submissions looked at rather than the number decided.
+  String get summary {
+    if (isFirstSubmission) return 'First submission';
+
+    final parts = <String>[
+      '$approved approved',
+      if (rejected > 0) '$rejected rejected',
+    ];
+
+    return '${parts.join(' · ')} (last $considered)';
+  }
+}
+
+=========== FILE: lib/core/theme.dart ===========
+import 'package:flutter/material.dart';
+
+/// The app's single source of visual truth.
+///
+/// Before this existed, every screen reached for its own colours — `Colors.red`
+/// for an error snackbar, `Colors.green` for a tick — which meant the palette
+/// was whatever each screen happened to pick, and none of it survived a switch
+/// to dark mode. Component styling was duplicated too: `border:
+/// OutlineInputBorder()` was written out at every single `TextFormField`.
+///
+/// Everything here derives from one seed, so the light and dark schemes stay in
+/// step by construction rather than by somebody remembering to update both.
+class AppTheme {
+  const AppTheme._();
+
+  /// Green 800. The recycling association is the point.
+  static const Color seed = Color(0xFF2E7D32);
+
+  /// Standard gaps, so vertical rhythm is a choice from a set rather than a
+  /// number typed at each call site. The home screen had a doubled `16` and a
+  /// missing one, which is what happens when spacing is ad hoc.
+  static const double gapXs = 4;
+  static const double gapSm = 8;
+  static const double gapMd = 16;
+  static const double gapLg = 24;
+  static const double gapXl = 32;
+
+  /// Content stops stretching past this and centres. Long lines of text are
+  /// hard to read, and a 1600 px-wide form looks broken.
+  static const double maxContentWidth = 720;
+  static const double maxFormWidth = 440;
+
+  static ThemeData light() => _build(Brightness.light);
+  static ThemeData dark() => _build(Brightness.dark);
+
+  static ThemeData _build(Brightness brightness) {
+    final scheme = ColorScheme.fromSeed(
+      seedColor: seed,
+      brightness: brightness,
+    );
+
+    return ThemeData(
+      colorScheme: scheme,
+      useMaterial3: true,
+
+      // Fill the surface rather than leaving cards floating on white: with
+      // Material 3's low-contrast surfaces, elevation alone does not read as a
+      // boundary in dark mode.
+      scaffoldBackgroundColor: scheme.surface,
+
+      appBarTheme: AppBarTheme(
+        centerTitle: false,
+        backgroundColor: scheme.surface,
+        foregroundColor: scheme.onSurface,
+        surfaceTintColor: scheme.surfaceTint,
+        elevation: 0,
+        scrolledUnderElevation: 2,
+        titleTextStyle: TextStyle(
+          fontSize: 20,
+          fontWeight: FontWeight.w600,
+          color: scheme.onSurface,
+        ),
+      ),
+
+      cardTheme: CardThemeData(
+        elevation: 0,
+        margin: EdgeInsets.zero,
+        clipBehavior: Clip.antiAlias,
+        color: scheme.surfaceContainerLow,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          // A hairline outline instead of a shadow. It survives dark mode,
+          // where a shadow on a dark surface is invisible.
+          side: BorderSide(color: scheme.outlineVariant),
+        ),
+      ),
+
+      // Every form field in the app was repeating `OutlineInputBorder()`.
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: scheme.surfaceContainerLowest,
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: scheme.outline),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: scheme.outlineVariant),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: scheme.primary, width: 2),
+        ),
+        errorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: scheme.error),
+        ),
+        focusedErrorBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(color: scheme.error, width: 2),
+        ),
+      ),
+
+      // 48 dp minimum height on every button: the Material accessibility floor
+      // for a touch target, and several of these are tapped one-handed while
+      // standing over a bin.
+      //
+      // The width is Material's own default minimum of 64, and must stay a
+      // finite number. `Size.fromHeight(48)` reads like "height only" but is
+      // defined as `Size(double.infinity, 48)`, which sets an *infinite minimum
+      // width*. Inside a Column that merely fills the available width, so the
+      // forms looked correct — but a Row hands its non-flex children unbounded
+      // width, so every button placed directly in a Row threw "BoxConstraints
+      // forces an infinite width" and took the screen down with it. That is most
+      // of the admin queues, where approve and reject sit side by side.
+      //
+      // Buttons that should span their container say so where they are used,
+      // with `CrossAxisAlignment.stretch`.
+      filledButtonTheme: FilledButtonThemeData(
+        style: FilledButton.styleFrom(
+          minimumSize: const Size(64, 48),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+        ),
+      ),
+      outlinedButtonTheme: OutlinedButtonThemeData(
+        style: OutlinedButton.styleFrom(
+          minimumSize: const Size(64, 48),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(12),
+          ),
+          textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+        ),
+      ),
+      textButtonTheme: TextButtonThemeData(
+        style: TextButton.styleFrom(
+          minimumSize: const Size(64, 44),
+          textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+        ),
+      ),
+
+      // Floating so it clears the bottom navigation bar. A fixed snackbar sat
+      // behind it, which hid half the message on the admin screens.
+      snackBarTheme: SnackBarThemeData(
+        behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        insetPadding: const EdgeInsets.all(gapMd),
+      ),
+
+      dialogTheme: DialogThemeData(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+        ),
+      ),
+
+      navigationBarTheme: NavigationBarThemeData(
+        backgroundColor: scheme.surfaceContainer,
+        indicatorColor: scheme.secondaryContainer,
+        elevation: 0,
+        labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+      ),
+
+      navigationRailTheme: NavigationRailThemeData(
+        backgroundColor: scheme.surfaceContainer,
+        indicatorColor: scheme.secondaryContainer,
+      ),
+
+      listTileTheme: const ListTileThemeData(
+        contentPadding: EdgeInsets.symmetric(horizontal: gapMd, vertical: gapXs),
+      ),
+
+      chipTheme: ChipThemeData(
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(999),
+          side: BorderSide(color: scheme.outlineVariant),
+        ),
+      ),
+
+      dividerTheme: DividerThemeData(
+        color: scheme.outlineVariant,
+        space: 1,
+        thickness: 1,
+      ),
+
+      progressIndicatorTheme: ProgressIndicatorThemeData(
+        color: scheme.primary,
+      ),
+    );
+  }
+}
+
+/// Semantic colours that Material's [ColorScheme] has no slot for.
+///
+/// `Colors.green` was scattered through the views for "this succeeded". That
+/// reads as a hardcoded value in light mode and as a glare in dark mode, so it
+/// is derived from the scheme instead.
+extension AppSemanticColors on ColorScheme {
+  /// A positive outcome: a resolved bin, an approved application, a good fix.
+  Color get success => brightness == Brightness.light
+      ? const Color(0xFF1B5E20)
+      : const Color(0xFF81C784);
+
+  Color get onSuccessContainer => brightness == Brightness.light
+      ? const Color(0xFF0B2F0D)
+      : const Color(0xFFC8E6C9);
+
+  Color get successContainer => brightness == Brightness.light
+      ? const Color(0xFFC8E6C9)
+      : const Color(0xFF1B3D1E);
+
+  /// Something needing attention but not an error — a flagged submission.
+  Color get warning => brightness == Brightness.light
+      ? const Color(0xFF8D6E00)
+      : const Color(0xFFE8C547);
+}
+
+=========== FILE: lib/core/validators.dart ===========
+/// Form validators, shared so the same field is judged the same way everywhere.
+///
+/// The login and register screens each carried their own copy of
+/// `v == null || !v.contains('@') ? 'Enter a valid email' : null`, which accepts
+/// `@`, `a@`, and `@@@` — so the first real feedback a user got was a
+/// `invalid-email` round trip to Firebase.
+///
+/// No Flutter import, so these are unit-testable directly. Each returns null
+/// when the value is acceptable and a message to display otherwise, matching
+/// `FormFieldValidator`'s contract.
+library;
+
+/// Deliberately permissive: one or more non-space, non-`@` characters, an `@`,
+/// a dotted domain with a 2+ character final label.
+///
+/// Validating email exactly is famously not worth attempting — the grammar in
+/// RFC 5322 admits addresses no provider would issue, and any regex strict
+/// enough to be "correct" rejects valid ones. The only authority on whether an
+/// address works is whether mail reaches it. This catches typing mistakes,
+/// which is all a form field should try to do.
+final RegExp _emailPattern = RegExp(r'^[^@\s]+@[^@\s.]+(\.[^@\s.]+)*\.[^@\s.]{2,}$');
+
+String? validateEmail(String? value) {
+  final email = value?.trim() ?? '';
+  if (email.isEmpty) return 'Enter your email address';
+  if (!_emailPattern.hasMatch(email)) {
+    return 'That does not look like an email address';
+  }
+  return null;
+}
+
+/// Firebase Auth's own floor is six characters and it rejects anything shorter
+/// with `weak-password`. Checking here means the user is told before a round
+/// trip, and told in terms of what to do.
+String? validateNewPassword(String? value) {
+  final password = value ?? '';
+  if (password.isEmpty) return 'Choose a password';
+  if (password.length < 6) {
+    final needed = 6 - password.length;
+    return '$needed more character${needed == 1 ? '' : 's'}';
+  }
+  return null;
+}
+
+/// A display name. Trimmed, because ' ' is not a name.
+String? validateName(String? value) {
+  final name = value?.trim() ?? '';
+  if (name.isEmpty) return 'Enter your name';
+  if (name.length < 2) return 'That is too short to be a name';
+  return null;
+}
+
+/// Free text with a minimum useful length, used for the seller application's
+/// description and anywhere else a one-word answer is not an answer.
+String? validateMinLength(String? value, int minimum, String subject) {
+  final text = value?.trim() ?? '';
+  if (text.isEmpty) return 'Enter $subject';
+  if (text.length < minimum) {
+    final needed = minimum - text.length;
+    return '$needed more character${needed == 1 ? '' : 's'}';
+  }
+  return null;
+}
+
+=========== FILE: lib/models/bin_model.dart ===========
+/// Chokro — bin model (F2.1).
+///
+/// Plain Dart, no Firebase imports (§5.1). The service layer converts Firestore
+/// `Timestamp` values to [DateTime] before calling [BinModel.fromJson], and back
+/// again on write. Models never know what a Timestamp is.
+library;
+
+/// A registered disposal point.
+///
+/// Bins are created by an administrator standing at the bin, so `lat`/`lng` come
+/// from a live GPS fix rather than typed input (§5.3). The [qrPayload] is printed
+/// and attached to the physical bin.
+class BinModel {
+  /// Firestore document ID. Null for a bin not yet written.
+  final String? id;
+
+  /// Human-readable name shown in the app and on the printed label,
+  /// e.g. "Merul Badda — Block C gate".
+  final String label;
+
+  final double lat;
+  final double lng;
+
+  /// Accepted distance in metres for a disposal submission at this bin.
+  /// Tuned per bin: a rooftop bin in a dense block needs a tighter radius than
+  /// one in an open compound.
+  final double radiusMeters;
+
+  /// The opaque identifier encoded into the printed QR code.
+  ///
+  /// SECURITY: this carries no coordinates and no user data (§6). A photographed
+  /// or copied code discloses nothing, and possessing one proves nothing — it
+  /// only names a bin. Standing near that bin is proved separately, by GPS.
+  final String qrPayload;
+
+  /// Inactive bins stop accepting submissions but are never deleted, because
+  /// past disposals reference them and a dangling reference breaks history.
+  final bool active;
+
+  /// UID of the administrator who registered the bin.
+  final String createdBy;
+
+  final DateTime? createdAt;
+
+  const BinModel({
+    this.id,
+    required this.label,
+    required this.lat,
+    required this.lng,
+    required this.radiusMeters,
+    required this.qrPayload,
+    required this.active,
+    required this.createdBy,
+    this.createdAt,
+  });
+
+  factory BinModel.fromJson(Map<String, dynamic> json, {String? id}) {
+    return BinModel(
+      id: id ?? json['id'] as String?,
+      label: (json['label'] as String?) ?? '',
+      lat: _toDouble(json['lat']),
+      lng: _toDouble(json['lng']),
+      radiusMeters: _toDouble(json['radiusMeters'], fallback: 50.0),
+      qrPayload: (json['qrPayload'] as String?) ?? '',
+      active: (json['active'] as bool?) ?? true,
+      createdBy: (json['createdBy'] as String?) ?? '',
+      createdAt: json['createdAt'] as DateTime?,
+    );
+  }
+
+  /// Field map for a Firestore write.
+  ///
+  /// [createdAt] is deliberately omitted: it must be written with
+  /// `FieldValue.serverTimestamp()` by the service layer, never with a
+  /// client-authored clock value (§7.4).
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'label': label,
+        'lat': lat,
+        'lng': lng,
+        'radiusMeters': radiusMeters,
+        'qrPayload': qrPayload,
+        'active': active,
+        'createdBy': createdBy,
+      };
+
+  BinModel copyWith({
+    String? id,
+    String? label,
+    double? lat,
+    double? lng,
+    double? radiusMeters,
+    String? qrPayload,
+    bool? active,
+    String? createdBy,
+    DateTime? createdAt,
+  }) {
+    return BinModel(
+      id: id ?? this.id,
+      label: label ?? this.label,
+      lat: lat ?? this.lat,
+      lng: lng ?? this.lng,
+      radiusMeters: radiusMeters ?? this.radiusMeters,
+      qrPayload: qrPayload ?? this.qrPayload,
+      active: active ?? this.active,
+      createdBy: createdBy ?? this.createdBy,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+
+  /// Human-readable problems with this bin. Empty means it is safe to save.
+  List<String> validate() {
+    final problems = <String>[];
+    if (label.trim().isEmpty) {
+      problems.add('Bin label is required.');
+    }
+    if (qrPayload.trim().isEmpty) {
+      problems.add('QR payload is required.');
+    }
+    if (createdBy.trim().isEmpty) {
+      problems.add('Creating administrator is required.');
+    }
+    if (lat.isNaN || lat < -90 || lat > 90) {
+      problems.add('Latitude is out of range.');
+    }
+    if (lng.isNaN || lng < -180 || lng > 180) {
+      problems.add('Longitude is out of range.');
+    }
+    if (lat == 0 && lng == 0) {
+      problems.add('Coordinates look like a failed GPS fix.');
+    }
+    if (radiusMeters <= 0) {
+      problems.add('Radius must be greater than zero.');
+    }
+    if (radiusMeters > 1000) {
+      problems.add('Radius may not exceed 1000 m — a geofence that large '
+          'no longer proves the user was at the bin.');
+    }
+    return problems;
+  }
+
+  bool get isValid => validate().isEmpty;
+
+  /// Whether this bin can currently accept submissions.
+  bool get acceptsSubmissions => active && isValid;
+
+  @override
+  String toString() => 'BinModel(id: $id, label: $label, active: $active)';
+
+  @override
+  bool operator ==(Object other) =>
+      other is BinModel &&
+      other.id == id &&
+      other.label == label &&
+      other.lat == lat &&
+      other.lng == lng &&
+      other.radiusMeters == radiusMeters &&
+      other.qrPayload == qrPayload &&
+      other.active == active &&
+      other.createdBy == createdBy &&
+      other.createdAt == createdAt;
+
+  @override
+  int get hashCode => Object.hash(
+        id,
+        label,
+        lat,
+        lng,
+        radiusMeters,
+        qrPayload,
+        active,
+        createdBy,
+        createdAt,
+      );
+}
+
+double _toDouble(Object? value, {double fallback = 0.0}) {
+  if (value is double) return value;
+  if (value is int) return value.toDouble();
+  if (value is num) return value.toDouble();
+  return fallback;
+}
+
+=========== FILE: lib/models/claim_model.dart ===========
+/// Chokro — self-reported eco-action claims (F6.1–F6.4).
+///
+/// Plain Dart, no Firebase imports (§5.1).
+///
+/// ## Why this is deliberately the weakest route
+///
+/// A disposal is geofenced, time-locked, hash-checked and screened. A claim has
+/// none of that, because there is nothing objective to check a photograph of a
+/// planted tree against — no bin, no radius, no distance. The safeguards that
+/// remain are a fixed action vocabulary, a weekly quota, an administrator's own
+/// eyes, and a smaller award.
+///
+/// That asymmetry is the design, not a gap in it. §7.3 enforces
+/// `claimAward < disposalAward` as a validated invariant precisely so the
+/// weaker route can never pay better than the stronger one — if it did, users
+/// would optimise into it and the verification design would stop meaning
+/// anything.
+///
+/// **Claims are never auto-approved.** The auto-approve lane exists only where
+/// mechanical checks can pass, and here none can.
+library;
+
+/// Where a claim sits in its lifecycle.
+///
+/// Three states, not the disposal's four. There is no `autoApproved` because
+/// there is no automatic lane — every approval is a person's decision, so
+/// `approved` always implies a human looked.
+enum ClaimStatus {
+  pending,
+  approved,
+  rejected;
+
+  /// Falls back to [pending] for anything unrecognised — fail toward no payout,
+  /// the same rule the disposal status uses.
+  static ClaimStatus fromName(String? name) {
+    for (final status in ClaimStatus.values) {
+      if (status.name == name) return status;
+    }
+    return ClaimStatus.pending;
+  }
+
+  bool get isPending => this == ClaimStatus.pending;
+  bool get isApproved => this == ClaimStatus.approved;
+  bool get isRejected => this == ClaimStatus.rejected;
+  bool get isTerminal => this != ClaimStatus.pending;
+}
+
+/// The closed action vocabulary (§7, FR-6).
+///
+/// Fixed rather than free text for three reasons: it keeps an unmoderated text
+/// field out of the system, it makes claims sortable for review, and it gives
+/// an administrator a specific question to answer about the photograph rather
+/// than an open-ended one.
+enum ClaimActionType {
+  treePlanting,
+  composting,
+  refusingSingleUsePlastic,
+  reusableBagOrBottle,
+  communityCleanup;
+
+  static ClaimActionType? fromName(String? name) {
+    for (final type in ClaimActionType.values) {
+      if (type.name == name) return type;
+    }
+    return null;
+  }
+
+  String get label {
+    switch (this) {
+      case ClaimActionType.treePlanting:
+        return 'Tree planting';
+      case ClaimActionType.composting:
+        return 'Composting';
+      case ClaimActionType.refusingSingleUsePlastic:
+        return 'Refusing single-use plastic';
+      case ClaimActionType.reusableBagOrBottle:
+        return 'Reusable bag or bottle';
+      case ClaimActionType.communityCleanup:
+        return 'Community cleanup';
+    }
+  }
+
+  /// What the photograph should show. Shown on the submission screen, so the
+  /// user knows what evidence is expected before they take it.
+  String get evidenceHint {
+    switch (this) {
+      case ClaimActionType.treePlanting:
+        return 'Show the planted sapling in the ground.';
+      case ClaimActionType.composting:
+        return 'Show the compost bin or heap with material in it.';
+      case ClaimActionType.refusingSingleUsePlastic:
+        return 'Show the reusable alternative you used instead.';
+      case ClaimActionType.reusableBagOrBottle:
+        return 'Show the bag or bottle in use.';
+      case ClaimActionType.communityCleanup:
+        return 'Show the collected waste or the cleaned area.';
+    }
+  }
+}
+
+/// One self-reported action.
+class ClaimModel {
+  /// Firestore document ID. Null before the document is written.
+  final String? id;
+
+  final String userId;
+  final ClaimActionType actionType;
+
+  final String photoUrl;
+
+  /// Cloudinary public id, for the server's perceptual hash.
+  final String photoPublicId;
+
+  /// SERVER-WRITTEN ONLY. Null on the document the client creates.
+  ///
+  /// Compared against this user's own previous claims. A recycled photograph is
+  /// the obvious way to abuse a route with no geofence, so the hash matters
+  /// more here than it does for disposals — though cross-user sharing is still
+  /// not detected, which is stated as a limitation (§7.2).
+  final String? photoHash;
+
+  final ClaimStatus status;
+
+  /// Points credited, snapshotted at approval. Never re-derived from the
+  /// current policy (§6.2).
+  final int? pointsAwarded;
+
+  /// Mandatory on rejection, and shown to the user.
+  final String? rejectionReason;
+
+  /// UID of the deciding administrator. Never null on a decided claim — unlike
+  /// a disposal, there is no path here that decides without a person.
+  final String? reviewedBy;
+
+  final DateTime? reviewedAt;
+  final DateTime? createdAt;
+
+  const ClaimModel({
+    this.id,
+    required this.userId,
+    required this.actionType,
+    required this.photoUrl,
+    this.photoPublicId = '',
+    this.photoHash,
+    this.status = ClaimStatus.pending,
+    this.pointsAwarded,
+    this.rejectionReason,
+    this.reviewedBy,
+    this.reviewedAt,
+    this.createdAt,
+  });
+
+  factory ClaimModel.fromJson(Map<String, dynamic> json, {String? id}) {
+    return ClaimModel(
+      id: id ?? json['id'] as String?,
+      userId: (json['userId'] as String?) ?? '',
+      actionType: ClaimActionType.fromName(json['actionType'] as String?) ??
+          ClaimActionType.reusableBagOrBottle,
+      photoUrl: (json['photoUrl'] as String?) ?? '',
+      photoPublicId: (json['photoPublicId'] as String?) ?? '',
+      photoHash: json['photoHash'] as String?,
+      status: ClaimStatus.fromName(json['status'] as String?),
+      pointsAwarded: _toNullableInt(json['pointsAwarded']),
+      rejectionReason: json['rejectionReason'] as String?,
+      reviewedBy: json['reviewedBy'] as String?,
+      reviewedAt: json['reviewedAt'] as DateTime?,
+      createdAt: json['createdAt'] as DateTime?,
+    );
+  }
+
+  /// The map the *client* may write when creating a claim.
+  ///
+  /// Everything that decides a payout is absent by construction, and the rules
+  /// enforce the same shape with `hasOnly`. This method exists so the client
+  /// cannot accidentally send a field the rules would reject — it is not the
+  /// security measure itself.
+  Map<String, dynamic> toCreateJson() => <String, dynamic>{
+        'userId': userId,
+        'actionType': actionType.name,
+        'photoUrl': photoUrl,
+        'photoPublicId': photoPublicId,
+        'status': ClaimStatus.pending.name,
+      };
+
+  ClaimModel copyWith({
+    String? id,
+    String? userId,
+    ClaimActionType? actionType,
+    String? photoUrl,
+    String? photoPublicId,
+    String? photoHash,
+    ClaimStatus? status,
+    int? pointsAwarded,
+    String? rejectionReason,
+    String? reviewedBy,
+    DateTime? reviewedAt,
+    DateTime? createdAt,
+  }) {
+    return ClaimModel(
+      id: id ?? this.id,
+      userId: userId ?? this.userId,
+      actionType: actionType ?? this.actionType,
+      photoUrl: photoUrl ?? this.photoUrl,
+      photoPublicId: photoPublicId ?? this.photoPublicId,
+      photoHash: photoHash ?? this.photoHash,
+      status: status ?? this.status,
+      pointsAwarded: pointsAwarded ?? this.pointsAwarded,
+      rejectionReason: rejectionReason ?? this.rejectionReason,
+      reviewedBy: reviewedBy ?? this.reviewedBy,
+      reviewedAt: reviewedAt ?? this.reviewedAt,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+
+  int get creditedPoints => status.isApproved ? (pointsAwarded ?? 0) : 0;
+
+  String get userFacingStatus {
+    switch (status) {
+      case ClaimStatus.pending:
+        return 'Pending review';
+      case ClaimStatus.approved:
+        return 'Approved';
+      case ClaimStatus.rejected:
+        return 'Rejected';
+    }
+  }
+
+  List<String> validate() {
+    final problems = <String>[];
+    if (userId.trim().isEmpty) problems.add('User is required.');
+    if (photoUrl.trim().isEmpty) problems.add('A photograph is required.');
+    if (status.isRejected &&
+        (rejectionReason == null || rejectionReason!.trim().isEmpty)) {
+      problems.add('A rejection must record a reason.');
+    }
+    if (status.isApproved && (pointsAwarded == null || pointsAwarded! <= 0)) {
+      problems.add('An approved claim must record the points awarded.');
+    }
+    if (status.isTerminal &&
+        (reviewedBy == null || reviewedBy!.trim().isEmpty)) {
+      // Unlike a disposal, every decided claim has a human behind it.
+      problems.add('A decided claim must record the reviewing administrator.');
+    }
+    return problems;
+  }
+
+  bool get isValid => validate().isEmpty;
+
+  @override
+  String toString() =>
+      'ClaimModel(id: $id, ${actionType.name}, ${status.name}, '
+      'points: $pointsAwarded)';
+}
+
+/// ISO-8601 week key, e.g. `2026-W31`.
+///
+/// Duplicated deliberately from `points_policy.dart`'s [IsoWeek] rather than
+/// imported, so this file stays self-contained — but the two must agree, and
+/// both are tested against the same year-boundary cases. The server has a third
+/// copy in `pointsPolicy.js`.
+///
+/// Getting this wrong silently corrupts quota enforcement at year boundaries:
+/// ISO weeks start on Monday, and week 1 is the week containing the first
+/// Thursday, so early January can belong to the previous ISO year.
+class ClaimQuota {
+  const ClaimQuota._();
+
+  /// Document ID for `claimQuotas/{userId}_{isoWeek}`.
+  static String docId(String userId, DateTime date) =>
+      '${userId}_${weekKey(date)}';
+
+  static String weekKey(DateTime date) {
+    final thursday = _thursdayOfWeek(date);
+    final firstOfYear = DateTime.utc(thursday.year, 1, 1);
+    final week = (thursday.difference(firstOfYear).inDays ~/ 7) + 1;
+    return '${thursday.year}-W${week.toString().padLeft(2, '0')}';
+  }
+
+  static DateTime _thursdayOfWeek(DateTime date) {
+    final utc = DateTime.utc(date.year, date.month, date.day);
+    return utc.add(Duration(days: 4 - utc.weekday));
+  }
+}
+
+int? _toNullableInt(Object? value) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  return null;
+}
+
+=========== FILE: lib/models/disposal_model.dart ===========
+/// Chokro — disposal submission model (F2.3–F2.8).
+///
+/// Plain Dart, no Firebase imports (§5.1).
+///
+/// This model carries the state machine for the earn loop, which is larger than
+/// the original brief anticipated. The brief assumed one approval path (an
+/// administrator). The design now has two — an automatic one when the AI screen
+/// and the mechanical checks all pass, and a manual one when anything is
+/// unclear — and the user is told which one credited them. That distinction has
+/// to survive into the ledger, so it lives in the status rather than being
+/// inferred from whether `reviewedBy` happens to be set.
+library;
+
+/// Where a submission sits in its lifecycle.
+///
+/// Two approved states, deliberately. Collapsing them would lose the answer to
+/// "was this checked by a person?", which is exactly what an examiner will ask
+/// about any auto-credited award, and what an appeal needs in order to be
+/// meaningful.
+enum DisposalStatus {
+  /// Awaiting a human decision. Either the AI was not confident, a mechanical
+  /// check flagged something, or the AI was unreachable. Points are not credited
+  /// and the wallet balance is untouched — the UI shows the amount as pending.
+  pending,
+
+  /// Cleared automatically: inside the radius, no active lockout, under the
+  /// daily cap, photo hash not seen before, and the AI screen passed. Points
+  /// credited by the server without a person looking.
+  autoApproved,
+
+  /// Cleared by an administrator after landing in the review queue. Points
+  /// credited by the server on the administrator's decision.
+  manualApproved,
+
+  /// Refused. No points, a mandatory reason recorded and shown to the user, and
+  /// the bin lockout released so a legitimate retry is possible (§7.4).
+  rejected;
+
+  /// Parses the string stored in Firestore, falling back to [pending].
+  ///
+  /// Falling back to the *unrewarded* state is deliberate: an unrecognised or
+  /// corrupted status must never be read as "approved". Fail toward no payout.
+  static DisposalStatus fromName(String? name) {
+    for (final status in DisposalStatus.values) {
+      if (status.name == name) return status;
+    }
+    return DisposalStatus.pending;
+  }
+
+  /// Whether points were awarded for this submission.
+  bool get isApproved =>
+      this == DisposalStatus.autoApproved || this == DisposalStatus.manualApproved;
+
+  bool get isPending => this == DisposalStatus.pending;
+  bool get isRejected => this == DisposalStatus.rejected;
+
+  /// Whether the outcome is settled. Pending submissions are the only ones the
+  /// admin queue should show.
+  bool get isTerminal => this != DisposalStatus.pending;
+
+  /// Whether a person made this decision.
+  bool get wasHumanDecided =>
+      this == DisposalStatus.manualApproved || this == DisposalStatus.rejected;
+}
+
+/// What the user says they are disposing of. A closed vocabulary, for the same
+/// reasons as the claim action types (§7): it makes submissions sortable, gives
+/// the AI screen something specific to check the photo against, and keeps an
+/// unmoderated free-text field out of the system.
+enum DisposalItemType {
+  plasticBottle,
+  plasticOther,
+  paper,
+  glass,
+  metal,
+  eWaste,
+  organic;
+
+  static DisposalItemType? fromName(String? name) {
+    for (final type in DisposalItemType.values) {
+      if (type.name == name) return type;
+    }
+    return null;
+  }
+
+  /// Label for the picker and the review queue.
+  String get label {
+    switch (this) {
+      case DisposalItemType.plasticBottle:
+        return 'Plastic bottles';
+      case DisposalItemType.plasticOther:
+        return 'Other plastic';
+      case DisposalItemType.paper:
+        return 'Paper and cardboard';
+      case DisposalItemType.glass:
+        return 'Glass';
+      case DisposalItemType.metal:
+        return 'Metal and cans';
+      case DisposalItemType.eWaste:
+        return 'Electronic waste';
+      case DisposalItemType.organic:
+        return 'Organic waste';
+    }
+  }
+}
+
+/// Why a submission was routed to human review instead of being auto-approved.
+///
+/// Recorded on the submission and shown to the reviewing administrator, so the
+/// queue explains itself rather than presenting a photo with no context. A
+/// submission may carry several flags at once.
+enum DisposalFlag {
+  /// GPS position fell outside the bin's radius.
+  outsideRadius,
+
+  /// The photo's perceptual hash closely matches one this user submitted before.
+  duplicatePhoto,
+
+  /// The AI's read of the photo disagrees with the count the user declared.
+  countMismatch,
+
+  /// The AI's confidence fell below the auto-approve threshold.
+  lowConfidence,
+
+  /// The AI did not see the declared material in the photo.
+  itemTypeMismatch,
+
+  /// The user has already had the maximum approved disposals today (§7.3).
+  dailyCapReached,
+
+  /// The AI service could not be reached or errored. Fail toward review, never
+  /// toward payout.
+  screeningUnavailable;
+
+  static DisposalFlag? fromName(String? name) {
+    for (final flag in DisposalFlag.values) {
+      if (flag.name == name) return flag;
+    }
+    return null;
+  }
+
+  /// Sentence shown to the administrator in the review queue.
+  String get explanation {
+    switch (this) {
+      case DisposalFlag.outsideRadius:
+        return 'Captured position was outside the bin radius.';
+      case DisposalFlag.duplicatePhoto:
+        return 'Photo closely matches an earlier submission by this user.';
+      case DisposalFlag.countMismatch:
+        return 'Declared item count does not match what the screen detected.';
+      case DisposalFlag.lowConfidence:
+        return 'Automated screening was not confident enough to decide.';
+      case DisposalFlag.itemTypeMismatch:
+        return 'Declared material was not detected in the photo.';
+      case DisposalFlag.dailyCapReached:
+        return 'User has reached the daily approved-disposal cap.';
+      case DisposalFlag.screeningUnavailable:
+        return 'Automated screening was unavailable; not yet checked.';
+    }
+  }
+}
+
+/// One disposal submission.
+class DisposalModel {
+  /// Firestore document ID. Null before the document is written.
+  final String? id;
+
+  final String userId;
+  final String binId;
+
+  /// Cloudinary URL for the disposal photograph.
+  final String photoUrl;
+
+  /// Cloudinary public_id for the stored image.
+  ///
+  /// Needed server-side: the perceptual hash is computed from an 8x8 grayscale
+  /// transform of this image, and the transform URL is built from the public
+  /// id. Written by the client because only the client sees the upload
+  /// response, and harmless in its hands — it names an image that is already
+  /// public at an unguessable URL.
+  final String photoPublicId;
+
+  /// Perceptual hash of the photograph, used for duplicate detection.
+  ///
+  /// SERVER-WRITTEN ONLY. This is null on the document the client creates. The
+  /// trusted service computes it from the stored image and writes it during
+  /// screening. A client-supplied hash would be worthless — a modified app would
+  /// simply send a fresh random value every time and the check would never fire.
+  final String? photoHash;
+
+  /// Coordinates reported by the device at capture time.
+  final double capturedLat;
+  final double capturedLng;
+
+  /// Distance from the bin as computed on-device, in metres.
+  ///
+  /// Display and feedback only. The server recomputes this from
+  /// [capturedLat]/[capturedLng] and never trusts the number stored here — a
+  /// client can lie about both the distance and the coordinates, but storing the
+  /// raw inputs at least makes the lie auditable (§7.4, F2.5).
+  final double distanceMeters;
+
+  /// How many items the user says they are disposing of.
+  final int declaredItemCount;
+
+  /// What the user says the items are.
+  final DisposalItemType itemType;
+
+  final DisposalStatus status;
+
+  /// Why this went to review. Empty on an auto-approved submission.
+  final List<DisposalFlag> flags;
+
+  /// Screening confidence, 0.0–1.0. Null if screening has not run or failed.
+  final double? screenConfidence;
+
+  /// Item count the screen believes it saw. Null if it could not tell.
+  final int? screenItemCount;
+
+  /// Short free-text note from the screening service, for the admin queue only.
+  /// Never shown to the user — it would teach people how to game the screen.
+  final String? screenNotes;
+
+  /// Points credited, snapshotted at decision time.
+  ///
+  /// Null until approved. Once set it is never recomputed from the current
+  /// policy: an administrator lowering the disposal award must not rewrite what
+  /// past submissions were worth (see `points_policy.dart`).
+  final int? pointsAwarded;
+
+  /// Mandatory on rejection, and surfaced to the user.
+  final String? rejectionReason;
+
+  /// UID of the deciding administrator. Null on an auto-approved submission —
+  /// which is precisely how the two approval paths stay distinguishable.
+  final String? reviewedBy;
+
+  final DateTime? reviewedAt;
+  final DateTime? createdAt;
+
+  const DisposalModel({
+    this.id,
+    required this.userId,
+    required this.binId,
+    required this.photoUrl,
+    this.photoPublicId = '',
+    this.photoHash,
+    required this.capturedLat,
+    required this.capturedLng,
+    required this.distanceMeters,
+    required this.declaredItemCount,
+    required this.itemType,
+    this.status = DisposalStatus.pending,
+    this.flags = const <DisposalFlag>[],
+    this.screenConfidence,
+    this.screenItemCount,
+    this.screenNotes,
+    this.pointsAwarded,
+    this.rejectionReason,
+    this.reviewedBy,
+    this.reviewedAt,
+    this.createdAt,
+  });
+
+  factory DisposalModel.fromJson(Map<String, dynamic> json, {String? id}) {
+    final rawFlags = json['flags'];
+    final flags = <DisposalFlag>[];
+    if (rawFlags is List) {
+      for (final entry in rawFlags) {
+        final flag = DisposalFlag.fromName(entry as String?);
+        if (flag != null) flags.add(flag);
+      }
+    }
+
+    return DisposalModel(
+      id: id ?? json['id'] as String?,
+      userId: (json['userId'] as String?) ?? '',
+      binId: (json['binId'] as String?) ?? '',
+      photoUrl: (json['photoUrl'] as String?) ?? '',
+      photoPublicId: (json['photoPublicId'] as String?) ?? '',
+      photoHash: json['photoHash'] as String?,
+      capturedLat: _toDouble(json['capturedLat']),
+      capturedLng: _toDouble(json['capturedLng']),
+      distanceMeters: _toDouble(json['distanceMeters']),
+      declaredItemCount: _toInt(json['declaredItemCount']),
+      itemType: DisposalItemType.fromName(json['itemType'] as String?) ??
+          DisposalItemType.plasticOther,
+      status: DisposalStatus.fromName(json['status'] as String?),
+      flags: flags,
+      screenConfidence: _toNullableDouble(json['screenConfidence']),
+      screenItemCount: _toNullableInt(json['screenItemCount']),
+      screenNotes: json['screenNotes'] as String?,
+      pointsAwarded: _toNullableInt(json['pointsAwarded']),
+      rejectionReason: json['rejectionReason'] as String?,
+      reviewedBy: json['reviewedBy'] as String?,
+      reviewedAt: json['reviewedAt'] as DateTime?,
+      createdAt: json['createdAt'] as DateTime?,
+    );
+  }
+
+  /// Field map for a Firestore write.
+  ///
+  /// Timestamps are omitted — the service layer writes them with
+  /// `FieldValue.serverTimestamp()` (§7.4). [photoHash], [screenConfidence],
+  /// [screenItemCount], [screenNotes], [pointsAwarded] and [status] transitions
+  /// are written by the trusted server, not by this map from the client.
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'userId': userId,
+        'binId': binId,
+        'photoUrl': photoUrl,
+        if (photoHash != null) 'photoHash': photoHash,
+        'capturedLat': capturedLat,
+        'capturedLng': capturedLng,
+        'distanceMeters': distanceMeters,
+        'declaredItemCount': declaredItemCount,
+        'itemType': itemType.name,
+        'status': status.name,
+        'flags': flags.map((flag) => flag.name).toList(),
+        if (screenConfidence != null) 'screenConfidence': screenConfidence,
+        if (screenItemCount != null) 'screenItemCount': screenItemCount,
+        if (screenNotes != null) 'screenNotes': screenNotes,
+        if (pointsAwarded != null) 'pointsAwarded': pointsAwarded,
+        if (rejectionReason != null) 'rejectionReason': rejectionReason,
+        if (reviewedBy != null) 'reviewedBy': reviewedBy,
+      };
+
+  /// The map the *client* is allowed to write when creating a submission.
+  ///
+  /// Everything that decides a payout is absent by construction. The Firestore
+  /// rules enforce the same shape — this method exists so the client cannot
+  /// accidentally send a field the rules would reject, not as the security
+  /// measure itself. The rules are the security measure.
+  Map<String, dynamic> toCreateJson() => <String, dynamic>{
+        'userId': userId,
+        'binId': binId,
+        'photoUrl': photoUrl,
+        'photoPublicId': photoPublicId,
+        'capturedLat': capturedLat,
+        'capturedLng': capturedLng,
+        'distanceMeters': distanceMeters,
+        'declaredItemCount': declaredItemCount,
+        'itemType': itemType.name,
+        'status': DisposalStatus.pending.name,
+        'flags': const <String>[],
+      };
+
+  DisposalModel copyWith({
+    String? id,
+    String? userId,
+    String? binId,
+    String? photoUrl,
+    String? photoPublicId,
+    String? photoHash,
+    double? capturedLat,
+    double? capturedLng,
+    double? distanceMeters,
+    int? declaredItemCount,
+    DisposalItemType? itemType,
+    DisposalStatus? status,
+    List<DisposalFlag>? flags,
+    double? screenConfidence,
+    int? screenItemCount,
+    String? screenNotes,
+    int? pointsAwarded,
+    String? rejectionReason,
+    String? reviewedBy,
+    DateTime? reviewedAt,
+    DateTime? createdAt,
+  }) {
+    return DisposalModel(
+      id: id ?? this.id,
+      userId: userId ?? this.userId,
+      binId: binId ?? this.binId,
+      photoUrl: photoUrl ?? this.photoUrl,
+      photoPublicId: photoPublicId ?? this.photoPublicId,
+      photoHash: photoHash ?? this.photoHash,
+      capturedLat: capturedLat ?? this.capturedLat,
+      capturedLng: capturedLng ?? this.capturedLng,
+      distanceMeters: distanceMeters ?? this.distanceMeters,
+      declaredItemCount: declaredItemCount ?? this.declaredItemCount,
+      itemType: itemType ?? this.itemType,
+      status: status ?? this.status,
+      flags: flags ?? this.flags,
+      screenConfidence: screenConfidence ?? this.screenConfidence,
+      screenItemCount: screenItemCount ?? this.screenItemCount,
+      screenNotes: screenNotes ?? this.screenNotes,
+      pointsAwarded: pointsAwarded ?? this.pointsAwarded,
+      rejectionReason: rejectionReason ?? this.rejectionReason,
+      reviewedBy: reviewedBy ?? this.reviewedBy,
+      reviewedAt: reviewedAt ?? this.reviewedAt,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Derived state
+  // ---------------------------------------------------------------------------
+
+  bool get isPending => status.isPending;
+  bool get isApproved => status.isApproved;
+  bool get isRejected => status.isRejected;
+  bool get wasAutoApproved => status == DisposalStatus.autoApproved;
+  bool get wasManuallyApproved => status == DisposalStatus.manualApproved;
+
+  /// Points actually in the user's wallet from this submission.
+  /// Zero unless approved — a pending submission has awarded nothing.
+  int get creditedPoints => isApproved ? (pointsAwarded ?? 0) : 0;
+
+  bool get hasFlags => flags.isNotEmpty;
+
+  /// One-line status for the user's history screen.
+  String get userFacingStatus {
+    switch (status) {
+      case DisposalStatus.pending:
+        return 'Pending review';
+      case DisposalStatus.autoApproved:
+        return 'Approved';
+      case DisposalStatus.manualApproved:
+        return 'Manually verified';
+      case DisposalStatus.rejected:
+        return 'Rejected';
+    }
+  }
+
+  /// Structural problems with the record, independent of any decision.
+  ///
+  /// Not a substitute for the rules or the server checks — this catches a
+  /// malformed submission early, in the app, before an upload is wasted.
+  List<String> validate() {
+    final problems = <String>[];
+    if (userId.trim().isEmpty) problems.add('User is required.');
+    if (binId.trim().isEmpty) problems.add('Bin is required.');
+    if (photoUrl.trim().isEmpty) problems.add('A photograph is required.');
+    if (declaredItemCount <= 0) {
+      problems.add('Item count must be at least 1.');
+    }
+    if (declaredItemCount > 100) {
+      problems.add('Item count is implausibly high.');
+    }
+    if (capturedLat.isNaN || capturedLat < -90 || capturedLat > 90) {
+      problems.add('Captured latitude is out of range.');
+    }
+    if (capturedLng.isNaN || capturedLng < -180 || capturedLng > 180) {
+      problems.add('Captured longitude is out of range.');
+    }
+    if (capturedLat == 0 && capturedLng == 0) {
+      problems.add('Location fix failed; try again with GPS enabled.');
+    }
+    if (status.isRejected &&
+        (rejectionReason == null || rejectionReason!.trim().isEmpty)) {
+      problems.add('A rejection must record a reason.');
+    }
+    if (status.isApproved && (pointsAwarded == null || pointsAwarded! <= 0)) {
+      problems.add('An approved submission must record the points awarded.');
+    }
+    if (status == DisposalStatus.manualApproved &&
+        (reviewedBy == null || reviewedBy!.trim().isEmpty)) {
+      problems.add('A manual approval must record the reviewing administrator.');
+    }
+    return problems;
+  }
+
+  bool get isValid => validate().isEmpty;
+
+  @override
+  String toString() =>
+      'DisposalModel(id: $id, status: ${status.name}, flags: '
+      '${flags.map((f) => f.name).toList()}, points: $pointsAwarded)';
+}
+
+double _toDouble(Object? value, {double fallback = 0.0}) {
+  if (value is double) return value;
+  if (value is num) return value.toDouble();
+  return fallback;
+}
+
+double? _toNullableDouble(Object? value) {
+  if (value is double) return value;
+  if (value is num) return value.toDouble();
+  return null;
+}
+
+int _toInt(Object? value, {int fallback = 0}) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  return fallback;
+}
+
+int? _toNullableInt(Object? value) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  return null;
+}
+
+=========== FILE: lib/models/seller_application_model.dart ===========
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../core/constants.dart';
+
+class SellerApplicationModel {
+  final String id;
+  final String userId;
+  final String businessName;
+  final String description;
+  final String status;
+  final DateTime createdAt;
+  final String? reviewedBy;
+  final DateTime? reviewedAt;
+  final String? reason;
+
+  const SellerApplicationModel({
+    required this.id,
+    required this.userId,
+    required this.businessName,
+    required this.description,
+    required this.status,
+    required this.createdAt,
+    this.reviewedBy,
+    this.reviewedAt,
+    this.reason,
+  });
+
+  bool get isPending => status == AppConstants.statusPending;
+  bool get isApproved => status == AppConstants.statusApproved;
+
+  factory SellerApplicationModel.fromFirestore(DocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>;
+    return SellerApplicationModel(
+      id: doc.id,
+      userId: data['userId'] as String,
+      businessName: data['businessName'] as String,
+      description: data['description'] as String,
+      status: data['status'] as String,
+      createdAt: (data['createdAt'] as Timestamp).toDate(),
+      reviewedBy: data['reviewedBy'] as String?,
+      reviewedAt: data['reviewedAt'] != null
+          ? (data['reviewedAt'] as Timestamp).toDate()
+          : null,
+      reason: data['reason'] as String?,
+    );
+  }
+
+  Map<String, dynamic> toFirestore() => {
+        'userId': userId,
+        'businessName': businessName,
+        'description': description,
+        'status': status,
+        'createdAt': Timestamp.fromDate(createdAt),
+        if (reviewedBy != null) 'reviewedBy': reviewedBy,
+        if (reviewedAt != null) 'reviewedAt': Timestamp.fromDate(reviewedAt!),
+        if (reason != null) 'reason': reason,
+      };
+}
+
+=========== FILE: lib/models/transaction_model.dart ===========
+/// The ledger entry written alongside every balance change (NFR-4).
+///
+/// Plain Dart, no Firebase imports. The service layer converts `Timestamp` to
+/// `DateTime` on the way in, so this file stays emulator-free and testable.
+///
+/// Every field here is written by the trusted server. The client never creates
+/// a transaction — rules deny client writes to the collection entirely — so
+/// this model is read-only in practice and carries no `toFirestore` path.
+library;
+
+/// Where a balance change came from.
+///
+/// `unknown` exists so that a source value this build does not recognise
+/// renders as "Other" instead of crashing the ledger. Reads are forgiving;
+/// writes are strict and happen server-side.
+enum TransactionSource { disposal, purchase, claim, redemption, unknown }
+
+TransactionSource parseTransactionSource(Object? raw) {
+  final name = raw is String ? raw : raw?.toString().split('.').last;
+  switch (name) {
+    case 'disposal':
+      return TransactionSource.disposal;
+    case 'purchase':
+      return TransactionSource.purchase;
+    case 'claim':
+      return TransactionSource.claim;
+    case 'redemption':
+      return TransactionSource.redemption;
+    default:
+      return TransactionSource.unknown;
+  }
+}
+
+extension TransactionSourceDisplay on TransactionSource {
+  /// The value as stored in Firestore.
+  String get wireValue => name;
+
+  /// User-facing label. Named for what the user did, not for the schema.
+  String get label {
+    switch (this) {
+      case TransactionSource.disposal:
+        return 'Waste disposal';
+      case TransactionSource.purchase:
+        return 'Marketplace purchase';
+      case TransactionSource.claim:
+        return 'Eco-action claim';
+      case TransactionSource.redemption:
+        return 'Points redeemed';
+      case TransactionSource.unknown:
+        return 'Other';
+    }
+  }
+
+  /// One line explaining why the balance moved, shown under the label.
+  String get description {
+    switch (this) {
+      case TransactionSource.disposal:
+        return 'Verified disposal at a registered bin';
+      case TransactionSource.purchase:
+        return 'Reward for a confirmed order';
+      case TransactionSource.claim:
+        return 'Approved self-reported action';
+      case TransactionSource.redemption:
+        return 'Spent at checkout';
+      case TransactionSource.unknown:
+        return '';
+    }
+  }
+}
+
+class TransactionModel {
+  const TransactionModel({
+    required this.id,
+    required this.userId,
+    required this.delta,
+    required this.source,
+    this.refId,
+    this.balanceAfter,
+    this.createdAt,
+  });
+
+  /// Firestore document id.
+  final String id;
+
+  final String userId;
+
+  /// Signed. Positive credits, negative debits.
+  final int delta;
+
+  final TransactionSource source;
+
+  /// The disposal, claim or order this entry settles. Null only on entries
+  /// that reference nothing.
+  final String? refId;
+
+  /// The wallet balance immediately after this entry was applied. Server
+  /// written inside the same transaction as the balance itself.
+  final int? balanceAfter;
+
+  /// Null while the server timestamp is still unresolved locally.
+  final DateTime? createdAt;
+
+  bool get isCredit => delta > 0;
+
+  /// `+50` / `-120`.
+  String get signedDelta => delta > 0 ? '+$delta' : '$delta';
+
+  /// Tolerant on numbers: Firestore returns integers as `int` but a value that
+  /// has been through JSON may arrive as `double` or as a numeric string.
+  static int? _asInt(Object? value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value);
+    return null;
+  }
+
+  /// [data] must already have `createdAt` converted from `Timestamp` to
+  /// `DateTime` by the service layer.
+  factory TransactionModel.fromMap(String id, Map<String, dynamic> data) {
+    final created = data['createdAt'];
+    return TransactionModel(
+      id: id,
+      userId: (data['userId'] as String?) ?? '',
+      delta: _asInt(data['delta']) ?? 0,
+      source: parseTransactionSource(data['source']),
+      refId: data['refId'] as String?,
+      balanceAfter: _asInt(data['balanceAfter']),
+      createdAt: created is DateTime ? created : null,
+    );
+  }
+
+  Map<String, dynamic> toMap() => <String, dynamic>{
+        'userId': userId,
+        'delta': delta,
+        'source': source.wireValue,
+        'refId': refId,
+        'balanceAfter': balanceAfter,
+        'createdAt': createdAt,
+      };
+
+  @override
+  String toString() =>
+      'TransactionModel($id, ${source.wireValue}, $signedDelta, after=$balanceAfter)';
+}
+
+=========== FILE: lib/models/user_model.dart ===========
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../core/constants.dart';
+
+/// A platform account.
+///
+/// ## Suspension and lazy expiry (F5.2, F5.3)
+///
+/// A suspension can be permanent or temporary. There is no scheduler in this
+/// system — Cloud Functions need a billing card and the free Render instance
+/// sleeps — so nothing exists that could wake up and lift a suspension when its
+/// time is up. A temporary suspension therefore expires *lazily*: the account
+/// is suspended for exactly as long as `suspendedUntil` is in the future, and
+/// the question is answered whenever someone asks it.
+///
+/// The same rule is written twice: [isActiveAt] here, and `isActive()` in
+/// `firestore.rules`, which compares `suspendedUntil` against `request.time`.
+/// The rules version is the one that enforces; this one exists so the interface
+/// can tell the user the truth. They must agree, and
+/// `rules_test/suspension.rules.test.js` proves the rules half.
+///
+/// `status` stays `'suspended'` after the expiry passes. Nothing rewrites it,
+/// because nothing is running to do so — a lapsed suspension is a suspended
+/// status plus a past date, and every reader resolves that for itself.
+class UserModel {
+  final String uid;
+  final String name;
+  final String email;
+  final String role;
+  final String status;
+
+  /// When the account was opened, as the *server* saw it.
+  ///
+  /// Nullable, and honestly so. It is written with
+  /// `FieldValue.serverTimestamp()`, which Firestore resolves on the server —
+  /// so the locally cached snapshot Firestore hands back immediately after
+  /// registration carries null here until the round trip completes. That window
+  /// is brief, but it is real, and it is on the signup path where every account
+  /// passes exactly once.
+  final DateTime? createdAt;
+
+  /// When a temporary suspension lapses.
+  ///
+  /// Null while active, and null for a *permanent* suspension — which is why
+  /// null must never be read as "not suspended". Only [isActiveAt] should
+  /// interpret this field.
+  final DateTime? suspendedUntil;
+
+  const UserModel({
+    required this.uid,
+    required this.name,
+    required this.email,
+    required this.role,
+    required this.status,
+    this.createdAt,
+    this.suspendedUntil,
+  });
+
+  bool get isAdmin => role == AppConstants.roleAdmin;
+  bool get isSeller => role == AppConstants.roleSeller || isAdmin;
+
+  /// Whether this account may act, evaluated at [now].
+  ///
+  /// Pure and clock-injected so it can be unit-tested without waiting. An
+  /// unrecognised status is not active — fail closed, the same way an
+  /// unrecognised disposal status falls back to `pending`.
+  bool isActiveAt(DateTime now) {
+    if (status == AppConstants.statusActive) return true;
+    if (status != AppConstants.statusSuspended) return false;
+
+    final until = suspendedUntil;
+    if (until == null) return false; // permanent
+    return now.isAfter(until);
+  }
+
+  bool get isActive => isActiveAt(DateTime.now());
+
+  /// Suspended with no end date.
+  bool get isSuspendedIndefinitely =>
+      status == AppConstants.statusSuspended && suspendedUntil == null;
+
+  /// Suspended now, but with an end date in the future.
+  bool get isSuspendedTemporarily =>
+      status == AppConstants.statusSuspended &&
+      suspendedUntil != null &&
+      !isActive;
+
+  /// Status still reads `suspended`, but the date has passed, so the account
+  /// is acting normally again. Worth surfacing in the admin list: it explains
+  /// why a "suspended" user is submitting.
+  bool get hasLapsedSuspension =>
+      status == AppConstants.statusSuspended &&
+      suspendedUntil != null &&
+      isActive;
+
+  /// Reads a user document, tolerating a field that is missing or the wrong
+  /// shape.
+  ///
+  /// Every cast here used to be unchecked — `data['name'] as String`,
+  /// `(data['createdAt'] as Timestamp).toDate()`, and the whole payload as a
+  /// `Map`. Any one of them throwing takes far more with it than
+  /// a single screen, because this factory sits under `watchUser`, which feeds
+  /// `currentUserProvider`, which the router's gate reads to decide where the
+  /// user is allowed to be. A throw there surfaces as an `AsyncError` with no
+  /// value, the gate reads "signed in with no profile", and a perfectly valid
+  /// account is redirected to the account-recovery screen — a dead end reached
+  /// because one field was the wrong type.
+  ///
+  /// `createdAt` is the case that actually happens: it is written with
+  /// `FieldValue.serverTimestamp()`, so the local echo of the registration write
+  /// has it as null for one round trip. The old cast crashed on precisely the
+  /// document it had just created.
+  ///
+  /// A missing role or status falls back to the least privileged value, never a
+  /// permissive one: an unreadable account gets buyer rights and an inactive
+  /// status, and the rules refuse anything more regardless of what this says.
+  factory UserModel.fromFirestore(DocumentSnapshot doc) =>
+      UserModel.fromMap(doc.data(), uid: doc.id);
+
+  /// The parsing itself, over a plain map.
+  ///
+  /// Split out so it can be tested without a `DocumentSnapshot` — that type is
+  /// sealed, so faking one means implementing a sealed class, and the analyzer
+  /// is right to object. This mirrors [BinModel.fromJson], which the rest of the
+  /// codebase already shapes this way.
+  factory UserModel.fromMap(Object? raw, {required String uid}) {
+    final data = raw is Map<String, dynamic> ? raw : const <String, dynamic>{};
+
+    return UserModel(
+      uid: uid,
+      name: _string(data['name']),
+      email: _string(data['email']),
+      // Fail closed. `isAdmin`/`isSeller` compare against these, so guessing
+      // upward here would hand out privileges on malformed data.
+      role: _string(data['role'], fallback: AppConstants.roleBuyer),
+      status: _string(data['status'], fallback: AppConstants.statusSuspended),
+      createdAt: _date(data['createdAt']),
+      suspendedUntil: _date(data['suspendedUntil']),
+    );
+  }
+
+  /// Field map for a Firestore write.
+  ///
+  /// Omits `suspendedUntil` when null rather than writing an explicit null.
+  /// Registration writes this map, and an absent key is cleaner than a null one
+  /// for a field that only an administrator ever sets.
+  ///
+  /// `createdAt` is deliberately omitted, exactly as [BinModel.toJson] omits
+  /// its own: §6 of the brief requires every `createdAt` to be written with
+  /// `FieldValue.serverTimestamp()`, and this used to write
+  /// `Timestamp.fromDate(DateTime.now())` from the device instead. A phone with
+  /// a wrong clock — or one deliberately set back — recorded a join date the
+  /// server never agreed to. The service layer supplies it; the rules require
+  /// the key to be present on create, and a server timestamp satisfies that.
+  Map<String, dynamic> toFirestore() => {
+        'name': name,
+        'email': email,
+        'role': role,
+        'status': status,
+        if (suspendedUntil != null)
+          'suspendedUntil': Timestamp.fromDate(suspendedUntil!),
+      };
+
+  /// [clearSuspendedUntil] exists because passing null to [suspendedUntil]
+  /// cannot be distinguished from omitting it.
+  UserModel copyWith({
+    String? name,
+    String? role,
+    String? status,
+    DateTime? suspendedUntil,
+    bool clearSuspendedUntil = false,
+  }) =>
+      UserModel(
+        uid: uid,
+        name: name ?? this.name,
+        email: email,
+        role: role ?? this.role,
+        status: status ?? this.status,
+        createdAt: createdAt,
+        suspendedUntil:
+            clearSuspendedUntil ? null : (suspendedUntil ?? this.suspendedUntil),
+      );
+}
+
+/// A string field, whatever Firestore actually returned.
+String _string(Object? value, {String fallback = ''}) =>
+    value is String ? value : fallback;
+
+/// A date field, tolerating both a resolved `Timestamp` and an unresolved
+/// `FieldValue.serverTimestamp()` that has not come back from the server yet.
+DateTime? _date(Object? value) {
+  if (value is Timestamp) return value.toDate();
+  // Firestore normally hands back Timestamp, but a document written by another
+  // client or a migration script can carry an ISO string or epoch millis.
+  if (value is DateTime) return value;
+  if (value is String) return DateTime.tryParse(value);
+  if (value is int) return DateTime.fromMillisecondsSinceEpoch(value);
+  return null;
+}
+
+=========== FILE: lib/models/wallet_model.dart ===========
+import 'package:cloud_firestore/cloud_firestore.dart';
+
+/// A user's single points balance (F3.1).
+///
+/// One document per user. Only the Admin SDK ever changes `balance` after
+/// creation — the rules refuse a client update outright, including an admin's —
+/// so this model is read-only in practice apart from the zero-balance document
+/// registration opens.
+class WalletModel {
+  final String userId;
+  final int balance;
+
+  /// When the balance last changed, as the server saw it.
+  ///
+  /// Nullable for the same reason as `UserModel.createdAt`: it is written with
+  /// `FieldValue.serverTimestamp()`, so the locally cached snapshot immediately
+  /// after registration carries null until the server round trip completes.
+  final DateTime? updatedAt;
+
+  const WalletModel({
+    required this.userId,
+    required this.balance,
+    this.updatedAt,
+  });
+
+  /// Reads a wallet document without trusting any field's type.
+  ///
+  /// Every cast here was previously unchecked, and `updatedAt` in particular
+  /// crashed on the document registration had just written, because a pending
+  /// server timestamp reads as null locally. This is the balance shown on the
+  /// home screen, so a throw here greeted a brand-new account with an error
+  /// where its zero balance should be.
+  ///
+  /// A missing balance reads as zero. That is the safe direction: it under-states
+  /// what someone has rather than inventing points, and the authoritative figure
+  /// lives in Firestore either way.
+  factory WalletModel.fromFirestore(DocumentSnapshot doc) =>
+      WalletModel.fromMap(doc.data(), uid: doc.id);
+
+  /// The parsing itself, over a plain map — testable without faking the sealed
+  /// `DocumentSnapshot` type.
+  factory WalletModel.fromMap(Object? raw, {required String uid}) {
+    final data = raw is Map<String, dynamic> ? raw : const <String, dynamic>{};
+
+    final balance = data['balance'];
+    final updatedAt = data['updatedAt'];
+
+    return WalletModel(
+      userId: data['userId'] is String ? data['userId'] as String : uid,
+      balance: balance is num ? balance.toInt() : 0,
+      updatedAt: updatedAt is Timestamp ? updatedAt.toDate() : null,
+    );
+  }
+
+  /// Field map for a Firestore write.
+  ///
+  /// `updatedAt` is omitted deliberately — §6 of the brief requires a server
+  /// timestamp, and the service layer supplies it. The rules require the key to
+  /// be present when the document is created, and a server timestamp satisfies
+  /// that.
+  Map<String, dynamic> toFirestore() => {
+        'userId': userId,
+        'balance': balance,
+      };
+}
+

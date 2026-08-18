@@ -91,14 +91,15 @@ function creditWalletInTransaction(
  * @param {object} args
  * @param {string} args.disposalId
  * @param {string|null} args.adminUid  null for an automatic approval
- * @param {string[]} args.flags        why it went to review, if it did
+ * @param {string[]|null} args.flags   why it went to review; null preserves the
+ *                                     flags already on the document
  * @returns {Promise<object>} outcome summary
  *
  * The award is read from the live policy and **snapshotted onto the disposal**.
  * An administrator lowering the disposal award later must not rewrite what past
  * submissions were worth (§6.2).
  */
-async function approveDisposal({ disposalId, adminUid = null, flags = [] }) {
+async function approveDisposal({ disposalId, adminUid = null, flags = null }) {
   const firestore = db();
   const disposalRef = firestore.collection('disposals').doc(disposalId);
 
@@ -171,18 +172,36 @@ async function approveDisposal({ disposalId, adminUid = null, flags = [] }) {
     txn.update(disposalRef, {
       status: adminUid ? 'manualApproved' : 'autoApproved',
       pointsAwarded: award,
-      flags,
+      // `flags ?? existing`, never a bare `flags`.
+      //
+      // The default used to be `[]`, and the review route passes none — so every
+      // manual decision overwrote the flags with an empty array and destroyed the
+      // record of why the submission reached the queue, at the exact moment a
+      // human acted on it. Reviewing the reviewer became impossible: the queue
+      // showed "outsideRadius, lowConfidence" and the approved document showed
+      // nothing.
+      //
+      // Preserving is the default now, so a caller that omits flags cannot erase
+      // them. `verifyDisposal` passes its own explicitly and still overwrites,
+      // which is correct — it is the pass that computed them.
+      flags: flags ?? disposal.flags ?? [],
       reviewedBy: adminUid,
       reviewedAt: adminUid ? serverTimestamp() : null,
     });
 
     // Open the per-bin lockout window (F2.6). Rules read this document to refuse
     // a repeat submission at the same bin.
+    //
+    // `disposalId` is recorded so a later rejection can tell whether it owns this
+    // window — see the release in `rejectDisposal`. The document key is
+    // `{uid}_{binId}` and cannot carry it, because the rules have to be able to
+    // compose the key from those two values alone.
     const lockoutId = `${uid}_${disposal.binId}`;
     txn.set(firestore.collection('lockouts').doc(lockoutId), {
       expiresAt: policyModule.lockoutExpiry(policy, new Date()),
       userId: uid,
       binId: disposal.binId,
+      disposalId,
     });
 
     // Dashboard counters, incremented here rather than by counting collections
@@ -233,7 +252,7 @@ async function approveDisposal({ disposalId, adminUid = null, flags = [] }) {
  * No points, a mandatory reason recorded and shown to the user, and the bin
  * lockout released so a legitimate retry is possible (§7.4).
  */
-async function rejectDisposal({ disposalId, adminUid, reason, flags = [] }) {
+async function rejectDisposal({ disposalId, adminUid, reason, flags = null }) {
   if (!reason || !reason.trim()) {
     throw new Error('A rejection must record a reason.');
   }
@@ -264,19 +283,38 @@ async function rejectDisposal({ disposalId, adminUid, reason, flags = [] }) {
       );
     }
 
+    // Read before any write — Firestore requires every read in a transaction to
+    // precede every write.
+    const lockoutRef = firestore
+      .collection('lockouts')
+      .doc(`${disposal.userId}_${disposal.binId}`);
+    const lockoutSnap = await txn.get(lockoutRef);
+
     txn.update(disposalRef, {
       status: 'rejected',
       rejectionReason: reason.trim(),
-      flags,
+      // Preserved, not cleared — see the note in `approveDisposal`. A rejection
+      // is precisely the decision whose justification most needs to survive.
+      flags: flags ?? disposal.flags ?? [],
       reviewedBy: adminUid,
       reviewedAt: serverTimestamp(),
       pointsAwarded: 0,
     });
 
-    // Release the lockout: a rejected submission should not also cost the user
-    // six hours at that bin.
-    const lockoutId = `${disposal.userId}_${disposal.binId}`;
-    txn.delete(firestore.collection('lockouts').doc(lockoutId));
+    // Release the lockout, but ONLY if this submission is the one that opened it.
+    //
+    // The key is `{uid}_{binId}` with no disposal in it, so an unconditional
+    // delete released whatever window happened to be there. That is reachable:
+    // nothing opens a lockout at submission time, so a user can have two pending
+    // submissions at one bin — and then approving A opens the window while
+    // rejecting B deletes it, reopening the bin hours early and handing back a
+    // free submission that the approval was supposed to have spent.
+    //
+    // A rejected submission still should not cost six hours at that bin, which
+    // is why the release exists at all; it just must not release somebody else's.
+    if (lockoutSnap.exists && lockoutSnap.data().disposalId === disposalId) {
+      txn.delete(lockoutRef);
+    }
 
     txn.set(
       firestore.collection('stats').doc('platform'),

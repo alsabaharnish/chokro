@@ -89,9 +89,16 @@ class PhotoUploadService {
       }
       return UploadedPhoto(
         url: url,
-        // Absent only from an older server build. An empty id means the hash
-        // step is skipped and the submission routes to review — degraded, but
-        // never wrongly approved.
+        // Absent only from an older server build.
+        //
+        // An empty id means `verifyDisposal` skips the hash step entirely. That
+        // now routes to review rather than approving: it leaves
+        // `duplicateChecked` false, `decide()` raises `hashUnavailable`, and a
+        // flagged submission cannot take the auto-approve lane.
+        //
+        // This comment previously asserted the same outcome while nothing
+        // implemented it — the skipped check produced no flag at all, so an
+        // empty id auto-approved with the duplicate defence never having run.
         publicId: (body['publicId'] as String?) ?? '',
       );
     }

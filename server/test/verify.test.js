@@ -136,6 +136,10 @@ describe('decide', () => {
     distanceMeters: 12,
     radiusMeters: 50,
     isDuplicate: false,
+    // The hash step ran and found nothing. Stated explicitly because
+    // `duplicateChecked` defaults to false — "did not run" — so that a caller
+    // which forgets it gets a review rather than a silent auto-approve.
+    duplicateChecked: true,
     declaredItemCount: 3,
     screening: {
       confidence: 0.9,

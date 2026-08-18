@@ -433,12 +433,22 @@ app.get('/config/points', requireAuth, async (req, res) => {
 app.post('/config/points', requireAuth, requireAdmin, async (req, res) => {
   const { db, serverTimestamp } = require('./firebase');
 
-  const proposed = policyModule.fromDoc(req.body || {});
-  const problems = policyModule.validate(proposed);
+  // `fromRequest`, NOT `fromDoc`. The forgiving reader turned a body of `{}`
+  // into a complete policy of defaults that validated cleanly and overwrote the
+  // whole live economy — see the note on `fromRequest`.
+  const { policy: proposed, problems: shapeProblems } =
+    policyModule.fromRequest(req.body);
+
+  const problems = [...shapeProblems, ...policyModule.validate(proposed)];
 
   if (problems.length > 0) {
     return res.status(400).json({ error: 'invalid_policy', problems });
   }
+
+  // A full overwrite is deliberate and is only safe because `fromRequest` has
+  // just guaranteed all nine fields are present — the editor always sends the
+  // complete policy. A merge would let a partial payload leave the document in a
+  // combination nothing validated as a whole.
 
   await db()
     .collection('config')

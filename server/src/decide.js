@@ -30,6 +30,7 @@ const FLAGS = Object.freeze({
   ITEM_TYPE_MISMATCH: 'itemTypeMismatch',
   DAILY_CAP_REACHED: 'dailyCapReached',
   SCREENING_UNAVAILABLE: 'screeningUnavailable',
+  HASH_UNAVAILABLE: 'hashUnavailable',
 });
 
 const FLAG_EXPLANATIONS = Object.freeze({
@@ -47,6 +48,9 @@ const FLAG_EXPLANATIONS = Object.freeze({
     'This user has already reached the daily limit of approved disposals.',
   [FLAGS.SCREENING_UNAVAILABLE]:
     'Automated screening could not be reached, so this was not checked.',
+  [FLAGS.HASH_UNAVAILABLE]:
+    'The photograph could not be fingerprinted, so it was not compared against ' +
+    'earlier submissions.',
 });
 
 /**
@@ -66,6 +70,7 @@ const CONFIDENCE_THRESHOLD = 0.75;
  * @param {number} input.distanceMeters      recomputed server-side, never trusted from the client
  * @param {number} input.radiusMeters        from the bin document
  * @param {boolean} input.isDuplicate        from findDuplicate
+ * @param {boolean} input.duplicateChecked   false when the hash could not be computed
  * @param {number} input.declaredItemCount
  * @param {object|null} input.screening      null when screening did not run
  * @param {number} input.screening.confidence      0-1
@@ -79,6 +84,10 @@ function decide({
   distanceMeters,
   radiusMeters,
   isDuplicate = false,
+  // Defaults to false — "the check did not run" — which is the fail-closed
+  // reading. A caller that forgets to pass this gets a review, not a silent
+  // auto-approve. Mirrors `screening = null` above it.
+  duplicateChecked = false,
   declaredItemCount,
   screening = null,
   approvedToday = 0,
@@ -97,7 +106,21 @@ function decide({
   }
 
   // 2. Duplicate photograph, within this user's own history.
-  if (isDuplicate) {
+  //
+  // Three states, not two, and conflating the first two is what made this
+  // pipeline pay out on unchecked photographs. `isDuplicate: false` means
+  // "compared against the user's history and found nothing"; it does NOT mean
+  // "could not compare". `hashImage` throws on a missing cloud name, a non-200
+  // from Cloudinary, an unexpected bit depth or a zlib error, and every one of
+  // those used to arrive here indistinguishable from a clean result — no flag,
+  // `flags.length === 0`, straight down the auto-approve lane with the duplicate
+  // defence never having run.
+  //
+  // Exactly the reasoning already applied to `screening === null` below, and the
+  // same danger.
+  if (!duplicateChecked) {
+    flags.push(FLAGS.HASH_UNAVAILABLE);
+  } else if (isDuplicate) {
     flags.push(FLAGS.DUPLICATE_PHOTO);
   }
 
