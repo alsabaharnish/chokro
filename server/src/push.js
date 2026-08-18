@@ -136,10 +136,10 @@ function claimApprovedMessage({ pointsAwarded }) {
       kind: 'claimDecision',
       status: 'approved',
       pointsAwarded: String(pointsAwarded),
-      // Claims do not appear in the disposal history screen, so the ledger is
-      // the honest destination — it is where the credit is visible. See the
-      // integration notes: mounting the existing ClaimHistoryList on a /claims
-      // route would give this a better home.
+      // The ledger, deliberately, even though `/claims` now exists. An approval
+      // credits points, and the news is that the points landed — the wallet is
+      // where that is visible. A rejection has no credit to show, which is why it
+      // goes to `/claims` instead.
       route: '/wallet',
     },
   };
@@ -148,14 +148,15 @@ function claimApprovedMessage({ pointsAwarded }) {
 /**
  * A rejected eco-action.
  *
- * Routed to `/claims/new`, NOT to `/wallet` like the approval above. A rejection
+ * Routed to `/claims`, NOT to `/wallet` like the approval above. A rejection
  * credits nothing, so there is no ledger entry for it — a tap landing on the
  * wallet would show a screen with nothing whatsoever about the decision on it.
- * `/claims/new` carries the `Your eco-actions` list, which shows each claim's
- * status and its rejection reason, and offers a re-submission.
+ * `/history` is no help either; it lists disposals only.
  *
- * The proper destination would be a claims history route of its own; `/history`
- * lists disposals only. Noted as a follow-on rather than built here.
+ * `/claims` is the eco-action history, showing each claim's status and its
+ * rejection reason. It briefly pointed at `/claims/new` instead, which is the
+ * submit *form* — the history was mounted inside it and disappeared as soon as a
+ * claim was submitted.
  */
 function claimRejectedMessage({ reason }) {
   return {
@@ -165,7 +166,7 @@ function claimRejectedMessage({ reason }) {
       kind: 'claimDecision',
       status: 'rejected',
       pointsAwarded: '0',
-      route: '/claims/new',
+      route: '/claims',
     },
   };
 }
@@ -293,21 +294,49 @@ async function sendToUser({ uid, message }) {
     return { sent: 0, failed: tokens.length, skipped: false };
   }
 
-  const dead = [];
-  response.responses.forEach((result, index) => {
-    if (result.success) return;
-    const code = result.error && result.error.code;
-    if (DEAD_TOKEN_CODES.has(code)) dead.push(tokens[index]);
-    else console.warn(`[push] Transient failure for ${uid}: ${code}`);
-  });
+  // Interpreting the result is guarded too, not just the send.
+  //
+  // This block used to sit outside the try above, which broke the promise in the
+  // module header that nothing here throws. `response.responses.forEach` on a
+  // malformed or unexpected response raises a TypeError that travels out of
+  // `sendToUser`, out of `notifyDisposalApproved`, out of `approveDisposal`, and
+  // arrives at the administrator as a 409 "review failed" — *after* the wallet
+  // was credited and the ledger entry written. The one path where a push problem
+  // misreports a committed award as a failed one, which would have an
+  // administrator pressing Approve a second time.
+  try {
+    const results = Array.isArray(response?.responses)
+      ? response.responses
+      : [];
 
-  await pruneDeadTokens(uid, dead);
+    const dead = [];
+    results.forEach((result, index) => {
+      if (result?.success) return;
+      const code = result?.error && result.error.code;
+      if (DEAD_TOKEN_CODES.has(code)) dead.push(tokens[index]);
+      else console.warn(`[push] Transient failure for ${uid}: ${code}`);
+    });
 
-  return {
-    sent: response.successCount,
-    failed: response.failureCount,
-    skipped: false,
-  };
+    await pruneDeadTokens(uid, dead);
+
+    return {
+      sent: typeof response?.successCount === 'number'
+        ? response.successCount
+        : 0,
+      failed: typeof response?.failureCount === 'number'
+        ? response.failureCount
+        : 0,
+      skipped: false,
+    };
+  } catch (err) {
+    // The summary is diagnostic; nothing downstream branches on it. Not throwing
+    // is the property that matters.
+    console.error(
+      `[push] Interpreting the send result for ${uid} failed:`,
+      err.message,
+    );
+    return { sent: 0, failed: tokens.length, skipped: false };
+  }
 }
 
 // ---------------------------------------------------------------------------

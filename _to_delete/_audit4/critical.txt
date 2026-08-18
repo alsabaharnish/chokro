@@ -1,0 +1,1987 @@
+=========== FILE: server/src/verify.js ===========
+/**
+ * Chokro — disposal verification (F2.5, F2.11, F2.12).
+ *
+ * The client writes a `pending` document and calls this. Everything that
+ * follows is server-side, because every input to it is something a client could
+ * lie about.
+ *
+ * The order matters. Cheap local checks run before anything that costs a
+ * network call, so an obviously-out-of-radius submission never spends a
+ * screening request.
+ *
+ * SCREENING IS OPTIONAL BY DESIGN.
+ * With no Gemini key configured, `screenImage` returns null, `decide` raises
+ * `screeningUnavailable`, and the submission routes to review. The pipeline is
+ * fully functional without a key — it just never uses the auto-approve lane.
+ * That is the same path a rate limit or an outage takes (§7.4), so the
+ * unconfigured case is not a special case.
+ */
+
+const { db } = require('./firebase');
+const { haversineDistance } = require('./geo');
+const policyModule = require('./pointsPolicy');
+const { findDuplicate, hashImage } = require('./phash');
+const { decide } = require('./decide');
+const { screenImage } = require('./screen');
+const { approveDisposal } = require('./award');
+
+/**
+ * How many of a user's previous hashes to compare against.
+ *
+ * Bounded because this is a Firestore read on every submission. Someone
+ * recycling a photograph will do it recently; a hash from four months ago
+ * matters less than the cost of fetching every one ever written.
+ */
+const HASH_HISTORY_LIMIT = 50;
+
+/** Perceptual hashes from this user's earlier submissions. */
+async function previousHashes(uid, excludeId) {
+  const snap = await db()
+    .collection('disposals')
+    .where('userId', '==', uid)
+    .orderBy('createdAt', 'desc')
+    .limit(HASH_HISTORY_LIMIT)
+    .get();
+
+  return snap.docs
+    .filter((doc) => doc.id !== excludeId)
+    .map((doc) => doc.data().photoHash)
+    .filter((hash) => typeof hash === 'string' && hash.length > 0);
+}
+
+/** Approved disposals for this user since UTC midnight. */
+async function approvedTodayCount(uid) {
+  const startOfDay = new Date();
+  startOfDay.setUTCHours(0, 0, 0, 0);
+
+  const snap = await db()
+    .collection('disposals')
+    .where('userId', '==', uid)
+    .where('createdAt', '>=', startOfDay)
+    .get();
+
+  return snap.docs.filter((doc) => {
+    const status = doc.data().status;
+    return status === 'autoApproved' || status === 'manualApproved';
+  }).length;
+}
+
+/**
+ * Verifies a pending submission and either credits it or routes it to review.
+ *
+ * @param {object} args
+ * @param {string} args.disposalId
+ * @param {string} args.callerUid  must own the submission
+ * @returns {Promise<object>} the outcome, safe to return to the client
+ */
+async function verifyDisposal({ disposalId, callerUid }) {
+  const firestore = db();
+  const disposalRef = firestore.collection('disposals').doc(disposalId);
+  const snap = await disposalRef.get();
+
+  if (!snap.exists) throw new Error('That submission no longer exists.');
+  const disposal = snap.data();
+
+  // A user may only verify their own submission. Without this, any signed-in
+  // account could trigger verification on anyone else's.
+  if (disposal.userId !== callerUid) {
+    throw new Error('That submission belongs to someone else.');
+  }
+
+  // Idempotence. A retry after a timeout must not re-credit — the client
+  // cannot tell a lost response from a lost request, so it will retry.
+  if (disposal.status !== 'pending') {
+    return {
+      disposalId,
+      status: disposal.status,
+      alreadyDecided: true,
+      pointsAwarded: disposal.pointsAwarded ?? 0,
+      flags: disposal.flags ?? [],
+    };
+  }
+
+  const binSnap = await firestore.collection('bins').doc(disposal.binId).get();
+  if (!binSnap.exists) throw new Error('That bin is no longer registered.');
+  const bin = binSnap.data();
+
+  // `active` is checked here, not only in the rules.
+  //
+  // Bins are never deleted — past disposals reference them, so `setBinActive`
+  // is the soft-delete substitute and `admin_bins_view` presents Close/Reopen as
+  // taking a bin out of service. Nothing on the server read the field, so a
+  // submission at a closed bin still auto-approved against its stale
+  // coordinates: the administrator's control changed a boolean the payout path
+  // ignored.
+  //
+  // `binIsOpen()` in the rules refuses the *create*, so this is the second line
+  // rather than the only one — but a submission created while the bin was open
+  // and verified after it closed reaches exactly here, and that is the case the
+  // rules cannot see.
+  if (bin.active === false) {
+    throw new Error('That bin is no longer in service.');
+  }
+
+  const configSnap = await firestore.collection('config').doc('points').get();
+  const policy = policyModule.fromDoc(
+    configSnap.exists ? configSnap.data() : null,
+  );
+
+  // ---- 1. Distance, recomputed from stored coordinates ----
+  //
+  // The client sent a `distanceMeters` too. It is display only. A modified app
+  // can put any number there, so nothing is trusted because the app calculated
+  // it (§7.1, F2.5).
+  const distanceMeters = haversineDistance(
+    disposal.capturedLat,
+    disposal.capturedLng,
+    bin.lat,
+    bin.lng,
+  );
+
+  // ---- 2. Perceptual hash and duplicate check ----
+  //
+  // `duplicateChecked` is tracked separately from `duplicate.isDuplicate`,
+  // because "no match found" and "could not look" are different answers and
+  // treating them alike is what let this pipeline pay out on an unchecked
+  // photograph.
+  let photoHash = null;
+  let duplicate = { isDuplicate: false, distance: null };
+  let duplicateChecked = false;
+
+  if (disposal.photoPublicId) {
+    try {
+      photoHash = await hashImage(disposal.photoPublicId);
+      const history = await previousHashes(disposal.userId, disposalId);
+      duplicate = findDuplicate(photoHash, history);
+
+      // Set last, and only here. `hashImage` can succeed and `previousHashes`
+      // still throw, which would leave a hash in hand and no comparison behind
+      // it — so `photoHash !== null` is not the same question.
+      duplicateChecked = true;
+    } catch (err) {
+      // Left false on purpose. `hashImage` throws on a missing cloud name, a
+      // non-200 from Cloudinary, an unexpected bit depth, an unknown scanline
+      // filter and any zlib failure; before `hashUnavailable` existed, every one
+      // of those produced a flagless submission that went straight down the
+      // auto-approve lane with the duplicate defence never having run.
+      console.error(`Hashing ${disposalId} failed:`, err.message);
+    }
+  }
+  // An empty `photoPublicId` skips the block entirely and lands here the same
+  // way: not checked, so flagged rather than assumed clean.
+
+  // ---- 3. Screening ----
+  const screening = await screenImage({
+    imageUrl: disposal.photoUrl,
+    declaredItemType: disposal.itemType,
+    declaredItemCount: disposal.declaredItemCount,
+  });
+
+  // ---- 4. Daily cap ----
+  const approvedToday = await approvedTodayCount(disposal.userId);
+
+  // ---- 5. Decide ----
+  const outcome = decide({
+    distanceMeters,
+    radiusMeters: bin.radiusMeters,
+    isDuplicate: duplicate.isDuplicate,
+    duplicateChecked,
+    declaredItemCount: disposal.declaredItemCount,
+    screening,
+    approvedToday,
+    dailyCap: policy.dailyDisposalCap,
+  });
+
+  // Screening output is recorded whatever the decision, so an administrator
+  // reviewing the item can see what the machine thought. `screenNotes` is
+  // admin-only: showing it to users would teach them how to game the screen.
+  const screeningFields = screening
+    ? {
+        screenConfidence: screening.confidence ?? null,
+        screenItemCount: screening.itemCount ?? null,
+        screenNotes: screening.notes ?? null,
+      }
+    : {
+        screenConfidence: null,
+        screenItemCount: null,
+        screenNotes: null,
+      };
+
+  if (outcome.decision === 'autoApprove') {
+    // Write the evidence before crediting, so an approved submission always
+    // carries the hash and distance that justified it.
+    await disposalRef.update({
+      photoHash,
+      distanceMeters,
+      ...screeningFields,
+    });
+
+    const result = await approveDisposal({
+      disposalId,
+      adminUid: null,
+      flags: [],
+    });
+
+    return {
+      disposalId,
+      status: 'autoApproved',
+      pointsAwarded: result.pointsAwarded,
+      balanceAfter: result.balanceAfter,
+      distanceMeters,
+      flags: [],
+    };
+  }
+
+  // Route to review. The document stays `pending` — the wallet is untouched
+  // and the user's history shows the submission as awaiting a decision.
+  await disposalRef.update({
+    photoHash,
+    distanceMeters,
+    flags: outcome.flags,
+    ...screeningFields,
+  });
+
+  return {
+    disposalId,
+    status: 'pending',
+    pointsAwarded: 0,
+    distanceMeters,
+    flags: outcome.flags,
+    reasons: outcome.reasons,
+  };
+}
+
+module.exports = {
+  HASH_HISTORY_LIMIT,
+  previousHashes,
+  approvedTodayCount,
+  verifyDisposal,
+};
+
+=========== FILE: server/src/decide.js ===========
+/**
+ * Chokro — the two-lane decision (F2.12).
+ *
+ * Every mechanical check produces flags. This module turns a set of flags into
+ * one of two outcomes: credit it now, or put it in front of a person.
+ *
+ * THE RULE THAT GOVERNS EVERYTHING HERE
+ * The system fails toward review, never toward payout. Any uncertainty — a low
+ * confidence score, a count that disagrees with the photograph, a screening
+ * service that could not be reached, an unrecognised anything — routes to an
+ * administrator. Auto-approval requires every check to have run *and* passed.
+ * "No flags" is not the same as "nothing was checked", and this module refuses
+ * to confuse them.
+ *
+ * Deliberately pure: no Firebase, no network, no clock. The whole decision is a
+ * function of its inputs, so every branch is unit-testable and the reasoning is
+ * inspectable in one file.
+ */
+
+/**
+ * The flag vocabulary (§6.1). Each carries a sentence for the reviewing
+ * administrator, so the queue explains itself rather than presenting a
+ * photograph with no context.
+ */
+const FLAGS = Object.freeze({
+  OUTSIDE_RADIUS: 'outsideRadius',
+  DUPLICATE_PHOTO: 'duplicatePhoto',
+  COUNT_MISMATCH: 'countMismatch',
+  LOW_CONFIDENCE: 'lowConfidence',
+  ITEM_TYPE_MISMATCH: 'itemTypeMismatch',
+  DAILY_CAP_REACHED: 'dailyCapReached',
+  SCREENING_UNAVAILABLE: 'screeningUnavailable',
+  HASH_UNAVAILABLE: 'hashUnavailable',
+});
+
+const FLAG_EXPLANATIONS = Object.freeze({
+  [FLAGS.OUTSIDE_RADIUS]:
+    'The phone was outside the bin\u2019s accepted radius when the photo was taken.',
+  [FLAGS.DUPLICATE_PHOTO]:
+    'This photograph closely matches one this user submitted before.',
+  [FLAGS.COUNT_MISMATCH]:
+    'The number of items declared does not match what the screen counted.',
+  [FLAGS.LOW_CONFIDENCE]:
+    'Automated screening was not confident about this photograph.',
+  [FLAGS.ITEM_TYPE_MISMATCH]:
+    'The declared waste type does not match what the screen identified.',
+  [FLAGS.DAILY_CAP_REACHED]:
+    'This user has already reached the daily limit of approved disposals.',
+  [FLAGS.SCREENING_UNAVAILABLE]:
+    'Automated screening could not be reached, so this was not checked.',
+  [FLAGS.HASH_UNAVAILABLE]:
+    'The photograph could not be fingerprinted, so it was not compared against ' +
+    'earlier submissions.',
+});
+
+/**
+ * Some flags mean "a person should look"; one means "this cannot be approved
+ * at all". The daily cap is the latter — approving past it would breach the
+ * policy no matter who pressed the button, so `award.js` throws on it.
+ */
+const BLOCKING_FLAGS = Object.freeze([FLAGS.DAILY_CAP_REACHED]);
+
+/** Below this, the screen's verdict is not trusted enough to auto-approve. */
+const CONFIDENCE_THRESHOLD = 0.75;
+
+/**
+ * Decides what happens to a submission.
+ *
+ * @param {object} input
+ * @param {number} input.distanceMeters      recomputed server-side, never trusted from the client
+ * @param {number} input.radiusMeters        from the bin document
+ * @param {boolean} input.isDuplicate        from findDuplicate
+ * @param {boolean} input.duplicateChecked   false when the hash could not be computed
+ * @param {number} input.declaredItemCount
+ * @param {object|null} input.screening      null when screening did not run
+ * @param {number} input.screening.confidence      0-1
+ * @param {number|null} input.screening.itemCount  null if the screen could not count
+ * @param {boolean} input.screening.itemTypeMatches
+ * @param {number} input.approvedToday
+ * @param {number} input.dailyCap
+ * @returns {{decision: 'autoApprove'|'review', flags: string[], reasons: string[]}}
+ */
+function decide({
+  distanceMeters,
+  radiusMeters,
+  isDuplicate = false,
+  // Defaults to false — "the check did not run" — which is the fail-closed
+  // reading. A caller that forgets to pass this gets a review, not a silent
+  // auto-approve. Mirrors `screening = null` above it.
+  duplicateChecked = false,
+  declaredItemCount,
+  screening = null,
+  approvedToday = 0,
+  dailyCap = 3,
+}) {
+  const flags = [];
+
+  // 1. Geofence. The authoritative check, recomputed from stored coordinates.
+  if (
+    typeof distanceMeters !== 'number' ||
+    Number.isNaN(distanceMeters) ||
+    typeof radiusMeters !== 'number' ||
+    distanceMeters > radiusMeters
+  ) {
+    flags.push(FLAGS.OUTSIDE_RADIUS);
+  }
+
+  // 2. Duplicate photograph, within this user's own history.
+  //
+  // Three states, not two, and conflating the first two is what made this
+  // pipeline pay out on unchecked photographs. `isDuplicate: false` means
+  // "compared against the user's history and found nothing"; it does NOT mean
+  // "could not compare". `hashImage` throws on a missing cloud name, a non-200
+  // from Cloudinary, an unexpected bit depth or a zlib error, and every one of
+  // those used to arrive here indistinguishable from a clean result — no flag,
+  // `flags.length === 0`, straight down the auto-approve lane with the duplicate
+  // defence never having run.
+  //
+  // Exactly the reasoning already applied to `screening === null` below, and the
+  // same danger.
+  if (!duplicateChecked) {
+    flags.push(FLAGS.HASH_UNAVAILABLE);
+  } else if (isDuplicate) {
+    flags.push(FLAGS.DUPLICATE_PHOTO);
+  }
+
+  // 3. Daily cap.
+  if (approvedToday >= dailyCap) {
+    flags.push(FLAGS.DAILY_CAP_REACHED);
+  }
+
+  // 4. Screening.
+  if (screening === null) {
+    // Not "no problems found" — not checked at all. Without this flag an
+    // outage would silently auto-approve everything, which is the single most
+    // dangerous failure mode this pipeline has.
+    flags.push(FLAGS.SCREENING_UNAVAILABLE);
+  } else {
+    const confidence =
+      typeof screening.confidence === 'number' ? screening.confidence : 0;
+
+    if (confidence < CONFIDENCE_THRESHOLD) {
+      flags.push(FLAGS.LOW_CONFIDENCE);
+    }
+
+    if (screening.itemTypeMatches === false) {
+      flags.push(FLAGS.ITEM_TYPE_MISMATCH);
+    }
+
+    // Counting objects in a photograph is unreliable, so a mismatch flags for
+    // review rather than rejecting. Auto-rejection on this signal would fire
+    // constantly on honest users (§7.4).
+    if (
+      typeof screening.itemCount === 'number' &&
+      typeof declaredItemCount === 'number' &&
+      screening.itemCount !== declaredItemCount
+    ) {
+      flags.push(FLAGS.COUNT_MISMATCH);
+    }
+  }
+
+  return {
+    decision: flags.length === 0 ? 'autoApprove' : 'review',
+    flags,
+    reasons: flags.map((f) => FLAG_EXPLANATIONS[f] || f),
+  };
+}
+
+/**
+ * Whether an administrator can approve despite these flags.
+ *
+ * Most flags are advisory — a person looked, and a person may decide the
+ * photograph is fine. The daily cap is not: approving past it breaches the
+ * policy regardless of who is asking.
+ */
+function isApprovable(flags = []) {
+  return !flags.some((flag) => BLOCKING_FLAGS.includes(flag));
+}
+
+/** The sentence shown beside a flag in the review queue. */
+function explain(flag) {
+  return FLAG_EXPLANATIONS[flag] || flag;
+}
+
+module.exports = {
+  FLAGS,
+  FLAG_EXPLANATIONS,
+  BLOCKING_FLAGS,
+  CONFIDENCE_THRESHOLD,
+  decide,
+  isApprovable,
+  explain,
+};
+
+=========== FILE: server/src/award.js ===========
+/**
+ * The one place in the system that writes a wallet balance.
+ *
+ * Every award — a disposal approved automatically, a disposal approved by an
+ * administrator, a self-reported claim, a completed purchase — passes through
+ * `creditWallet`. There is exactly one function that moves points, and it always
+ * writes a matching ledger entry in the same transaction.
+ *
+ * That single-path property is what makes NFR-4 true: every balance change has a
+ * corresponding `transactions` document, so a balance is always reconstructable
+ * from history. Two code paths that credit a balance would mean two places to
+ * forget the ledger write.
+ *
+ * Nothing here is reachable from a client. `firestore.rules` denies every client
+ * write to `wallets` and `transactions`, including an administrator's — proven
+ * by the tests in `rules_test/m2.rules.test.js`.
+ */
+
+const { db, admin, serverTimestamp } = require('./firebase');
+const policyModule = require('./pointsPolicy');
+// Push on a decision (F7.1). No cycle: award.js -> push.js -> firebase.js, and
+// push.js requires nothing else.
+const pushModule = require('./push');
+
+/** Valid `source` values for a ledger entry (§6). */
+const SOURCES = Object.freeze({
+  DISPOSAL: 'disposal',
+  CLAIM: 'claim',
+  PURCHASE: 'purchase',
+  REDEMPTION: 'redemption',
+});
+
+/**
+ * Credits or debits a wallet inside an existing transaction.
+ *
+ * Must be called with a transaction that has already performed all of its reads
+ * — Firestore requires every read in a transaction to precede every write.
+ *
+ * @param {FirebaseFirestore.Transaction} txn
+ * @param {object} args
+ * @param {string} args.uid
+ * @param {number} args.delta       positive to credit, negative to debit
+ * @param {string} args.source      one of SOURCES
+ * @param {string} args.refId       the disposal, claim or order this relates to
+ * @param {number} args.currentBalance  balance read earlier in this transaction
+ * @returns {number} the resulting balance
+ */
+function creditWalletInTransaction(
+  txn,
+  { uid, delta, source, refId, currentBalance },
+) {
+  if (!Object.values(SOURCES).includes(source)) {
+    throw new Error(`Unknown ledger source: ${source}`);
+  }
+  if (!Number.isInteger(delta) || delta === 0) {
+    throw new Error(`Ledger delta must be a non-zero integer, got: ${delta}`);
+  }
+
+  const balanceAfter = currentBalance + delta;
+
+  if (balanceAfter < 0) {
+    // A debit that would overdraw. Refusing here rather than clamping means a
+    // bug in a caller surfaces as a failed request instead of silently losing
+    // points, which would be far harder to notice.
+    throw new Error(
+      `Refusing to overdraw wallet ${uid}: balance ${currentBalance}, delta ${delta}`,
+    );
+  }
+
+  txn.update(db().collection('wallets').doc(uid), {
+    balance: balanceAfter,
+    updatedAt: serverTimestamp(),
+  });
+
+  // Ledger entry in the same transaction. Never one without the other.
+  txn.set(db().collection('transactions').doc(), {
+    userId: uid,
+    delta,
+    source,
+    refId,
+    balanceAfter,
+    createdAt: serverTimestamp(),
+  });
+
+  return balanceAfter;
+}
+
+/**
+ * Approves a pending disposal and credits the award.
+ *
+ * @param {object} args
+ * @param {string} args.disposalId
+ * @param {string|null} args.adminUid  null for an automatic approval
+ * @param {string[]|null} args.flags   why it went to review; null preserves the
+ *                                     flags already on the document
+ * @returns {Promise<object>} outcome summary
+ *
+ * The award is read from the live policy and **snapshotted onto the disposal**.
+ * An administrator lowering the disposal award later must not rewrite what past
+ * submissions were worth (§6.2).
+ */
+async function approveDisposal({ disposalId, adminUid = null, flags = null }) {
+  const firestore = db();
+  const disposalRef = firestore.collection('disposals').doc(disposalId);
+
+  const result = await firestore.runTransaction(async (txn) => {
+    // ---- reads first, all of them ----
+    const disposalSnap = await txn.get(disposalRef);
+    if (!disposalSnap.exists) {
+      throw new Error('That submission no longer exists.');
+    }
+
+    const disposal = disposalSnap.data();
+
+    if (disposal.status !== 'pending') {
+      // Idempotence guard. Two administrators pressing approve on the same
+      // queue item must not credit twice.
+      throw new Error(
+        `That submission has already been decided (${disposal.status}).`,
+      );
+    }
+
+    const uid = disposal.userId;
+    const walletRef = firestore.collection('wallets').doc(uid);
+    const walletSnap = await txn.get(walletRef);
+
+    if (!walletSnap.exists) {
+      throw new Error(`No wallet exists for user ${uid}.`);
+    }
+
+    const configSnap = await txn.get(
+      firestore.collection('config').doc('points'),
+    );
+    const policy = policyModule.fromDoc(
+      configSnap.exists ? configSnap.data() : null,
+    );
+
+    // Daily cap (§7.3): a second line of defence against multi-bin farming that
+    // the per-bin lockout cannot catch on its own.
+    const startOfDay = new Date();
+    startOfDay.setUTCHours(0, 0, 0, 0);
+
+    const approvedTodaySnap = await txn.get(
+      firestore
+        .collection('disposals')
+        .where('userId', '==', uid)
+        .where('createdAt', '>=', startOfDay),
+    );
+
+    const approvedToday = approvedTodaySnap.docs.filter((d) => {
+      const status = d.data().status;
+      return status === 'autoApproved' || status === 'manualApproved';
+    }).length;
+
+    if (approvedToday >= policy.dailyDisposalCap) {
+      throw new Error(
+        `This user has reached the daily limit of ${policy.dailyDisposalCap} ` +
+          'approved disposals.',
+      );
+    }
+
+    // ---- writes ----
+    const award = policy.disposalAward;
+    const balanceAfter = creditWalletInTransaction(txn, {
+      uid,
+      delta: award,
+      source: SOURCES.DISPOSAL,
+      refId: disposalId,
+      currentBalance: walletSnap.data().balance || 0,
+    });
+
+    txn.update(disposalRef, {
+      status: adminUid ? 'manualApproved' : 'autoApproved',
+      pointsAwarded: award,
+      // `flags ?? existing`, never a bare `flags`.
+      //
+      // The default used to be `[]`, and the review route passes none — so every
+      // manual decision overwrote the flags with an empty array and destroyed the
+      // record of why the submission reached the queue, at the exact moment a
+      // human acted on it. Reviewing the reviewer became impossible: the queue
+      // showed "outsideRadius, lowConfidence" and the approved document showed
+      // nothing.
+      //
+      // Preserving is the default now, so a caller that omits flags cannot erase
+      // them. `verifyDisposal` passes its own explicitly and still overwrites,
+      // which is correct — it is the pass that computed them.
+      flags: flags ?? disposal.flags ?? [],
+      reviewedBy: adminUid,
+      reviewedAt: adminUid ? serverTimestamp() : null,
+    });
+
+    // Open the per-bin lockout window (F2.6). Rules read this document to refuse
+    // a repeat submission at the same bin.
+    //
+    // `disposalId` is recorded so a later rejection can tell whether it owns this
+    // window — see the release in `rejectDisposal`. The document key is
+    // `{uid}_{binId}` and cannot carry it, because the rules have to be able to
+    // compose the key from those two values alone.
+    const lockoutId = `${uid}_${disposal.binId}`;
+    txn.set(firestore.collection('lockouts').doc(lockoutId), {
+      expiresAt: policyModule.lockoutExpiry(policy, new Date()),
+      userId: uid,
+      binId: disposal.binId,
+      disposalId,
+    });
+
+    // Dashboard counters, incremented here rather than by counting collections
+    // later (§6.3).
+    txn.set(
+      firestore.collection('stats').doc('platform'),
+      {
+        disposalsApproved: admin.firestore.FieldValue.increment(1),
+        pointsIssued: admin.firestore.FieldValue.increment(award),
+      },
+      { merge: true },
+    );
+
+    return {
+      disposalId,
+      userId: uid,
+      pointsAwarded: award,
+      balanceAfter,
+      status: adminUid ? 'manualApproved' : 'autoApproved',
+    };
+  });
+
+  // AFTER the commit, never inside it.
+  //
+  // Firestore retries a transaction body on contention, so a send inside one
+  // fires once per attempt — three copies of "50 points added" for one approval.
+  // The wallet write survives that because Firestore commits only one attempt;
+  // an HTTP call to FCM does not.
+  //
+  // The hook lives here rather than in the route handler because auto-approval
+  // reaches this function through `verifyDisposal`, so covering the decision
+  // function covers both paths and makes "one decision, one notification" an
+  // invariant of the thing that decides. `notifyDisposalApproved` swallows its
+  // own failures: by this line the balance is credited and the ledger written,
+  // and a dead token must not undo either.
+  await pushModule.notifyDisposalApproved({
+    userId: result.userId,
+    pointsAwarded: result.pointsAwarded,
+    status: result.status,
+  });
+
+  return result;
+}
+
+/**
+ * Rejects a pending disposal.
+ *
+ * No points, a mandatory reason recorded and shown to the user, and the bin
+ * lockout released so a legitimate retry is possible (§7.4).
+ */
+async function rejectDisposal({ disposalId, adminUid, reason, flags = null }) {
+  if (!reason || !reason.trim()) {
+    throw new Error('A rejection must record a reason.');
+  }
+
+  const firestore = db();
+  const disposalRef = firestore.collection('disposals').doc(disposalId);
+
+  // Captured from inside the transaction because the returned object cannot
+  // carry it: `server/test/server.test.js` compares that shape exactly, so
+  // adding `userId` to it would fail an existing test for a cosmetic gain.
+  //
+  // Retry-safe. A retried body reassigns this, and the value left standing
+  // belongs to the attempt Firestore actually committed.
+  let notifyUid = null;
+
+  const result = await firestore.runTransaction(async (txn) => {
+    const snap = await txn.get(disposalRef);
+    if (!snap.exists) {
+      throw new Error('That submission no longer exists.');
+    }
+
+    const disposal = snap.data();
+    notifyUid = disposal.userId;
+
+    if (disposal.status !== 'pending') {
+      throw new Error(
+        `That submission has already been decided (${disposal.status}).`,
+      );
+    }
+
+    // Read before any write — Firestore requires every read in a transaction to
+    // precede every write.
+    const lockoutRef = firestore
+      .collection('lockouts')
+      .doc(`${disposal.userId}_${disposal.binId}`);
+    const lockoutSnap = await txn.get(lockoutRef);
+
+    txn.update(disposalRef, {
+      status: 'rejected',
+      rejectionReason: reason.trim(),
+      // Preserved, not cleared — see the note in `approveDisposal`. A rejection
+      // is precisely the decision whose justification most needs to survive.
+      flags: flags ?? disposal.flags ?? [],
+      reviewedBy: adminUid,
+      reviewedAt: serverTimestamp(),
+      pointsAwarded: 0,
+    });
+
+    // Release the lockout, but ONLY if this submission is the one that opened it.
+    //
+    // The key is `{uid}_{binId}` with no disposal in it, so an unconditional
+    // delete released whatever window happened to be there. That is reachable:
+    // nothing opens a lockout at submission time, so a user can have two pending
+    // submissions at one bin — and then approving A opens the window while
+    // rejecting B deletes it, reopening the bin hours early and handing back a
+    // free submission that the approval was supposed to have spent.
+    //
+    // A rejected submission still should not cost six hours at that bin, which
+    // is why the release exists at all; it just must not release somebody else's.
+    if (lockoutSnap.exists && lockoutSnap.data().disposalId === disposalId) {
+      txn.delete(lockoutRef);
+    }
+
+    txn.set(
+      firestore.collection('stats').doc('platform'),
+      { disposalsRejected: admin.firestore.FieldValue.increment(1) },
+      { merge: true },
+    );
+
+    return { disposalId, status: 'rejected', reason: reason.trim() };
+  });
+
+  // §7.4 requires the reason to reach the user, and this is the only channel
+  // that reaches them without them opening the app. Sent after the commit for
+  // the same reasons as the approval above.
+  await pushModule.notifyDisposalRejected({
+    userId: notifyUid,
+    reason: result.reason,
+  });
+
+  return result;
+}
+
+module.exports = {
+  SOURCES,
+  creditWalletInTransaction,
+  approveDisposal,
+  rejectDisposal,
+};
+
+=========== FILE: server/src/index.js ===========
+/**
+ * Chokro trusted service — entry point.
+ *
+ *   GET  /health              no auth   — is the process alive?
+ *   GET  /whoami              auth      — token verification and Firestore reach
+ *   GET  /admin/ping          admin     — role gating
+ *   POST /photos/disposal     auth      — upload a disposal photograph
+ *
+ * Still to come (M2): /disposals/:id/verify, /disposals/:id/review,
+ * /config/points, and award.js — the single wallet-credit path.
+ */
+
+require('dotenv').config();
+
+const express = require('express');
+const cors = require('cors');
+
+const { initFirebase } = require('./firebase');
+const { requireAuth, requireAdmin } = require('./auth');
+const { uploadImage, MAX_BYTES } = require('./cloudinary');
+const { approveDisposal, rejectDisposal } = require('./award');
+const policyModule = require('./pointsPolicy');
+const binsModule = require('./bins');
+const { verifyDisposal } = require('./verify');
+const claimsModule = require('./claims');
+
+const app = express();
+
+// Render terminates TLS in front of the app; without this, request IPs and
+// protocol are wrong in logs.
+app.set('trust proxy', 1);
+
+// Base64 inflates a payload by about a third, so the ceiling here has to exceed
+// the image ceiling with room to spare.
+app.use(express.json({ limit: '12mb' }));
+
+/**
+ * CORS.
+ *
+ * The Flutter web build calls this service from a browser, so the origin has to
+ * be allowed explicitly. Android and iOS have no origin and are unaffected.
+ *
+ * ALLOWED_ORIGINS is a comma-separated list. Keep it to the hosting URL and
+ * localhost for development — a wildcard would let any page on the internet make
+ * authenticated calls with a token it tricked out of a user.
+ */
+const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
+  .split(',')
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin(origin, callback) {
+      // No origin: a native app, curl, or a same-origin request. Allowed.
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.includes(origin)) return callback(null, true);
+
+      // Refused, NOT an error.
+      //
+      // This used to `callback(new Error(...))`, which Express turned into a
+      // 500 carrying "Something went wrong. Check the server logs." An origin
+      // that is simply not on the list is not a server fault, and reporting it
+      // as one is actively misleading: the preflight failed with a 500 and no
+      // CORS header, so the browser blamed the network, the Flutter client
+      // reported "check your connection", and the actual cause — a port missing
+      // from ALLOWED_ORIGINS — was invisible from either end.
+      //
+      // Passing `false` omits the Access-Control-Allow-Origin header and lets
+      // the request complete normally. The browser then refuses it with the
+      // accurate message, naming the missing header.
+      //
+      // Logged unconditionally, because this line is how you find out which
+      // origin to add.
+      console.warn(
+        `[cors] refused origin ${origin}; ALLOWED_ORIGINS = ` +
+          `${allowedOrigins.join(', ') || '(empty)'}`,
+      );
+      return callback(null, false);
+    },
+  }),
+);
+
+// ---------------------------------------------------------------------------
+// Health and diagnostics
+// ---------------------------------------------------------------------------
+
+/**
+ * Liveness check. No authentication — Render pings this, and so will you when
+ * the free tier has put the service to sleep and you want it warm before a demo.
+ */
+app.get('/health', (req, res) => {
+  res.json({
+    ok: true,
+    service: 'chokro-server',
+    version: '0.3.0',
+    time: new Date().toISOString(),
+  });
+});
+
+/** Confirms the whole auth path end to end. */
+app.get('/whoami', requireAuth, (req, res) => {
+  res.json({
+    uid: req.user.uid,
+    role: req.user.role,
+    status: req.user.status,
+  });
+});
+
+/** Confirms role gating works, separately from authentication. */
+app.get('/admin/ping', requireAuth, requireAdmin, (req, res) => {
+  res.json({ ok: true, admin: req.user.uid });
+});
+
+// ---------------------------------------------------------------------------
+// Photo upload
+// ---------------------------------------------------------------------------
+
+/**
+ * Uploads a disposal photograph and returns its URL.
+ *
+ * The client compresses and strips EXIF before sending (§7.4); this endpoint
+ * validates what arrives rather than trusting that it happened.
+ *
+ * Note the uid comes from the verified token, never from the request body. A
+ * caller cannot upload into someone else's folder by asking nicely.
+ */
+app.post('/photos/disposal', requireAuth, async (req, res) => {
+  try {
+    const { imageBase64 } = req.body || {};
+
+    const result = await uploadImage({
+      base64: imageBase64,
+      uid: req.user.uid,
+      kind: 'disposals',
+    });
+
+    res.json({
+      photoUrl: result.url,
+      publicId: result.publicId,
+      bytes: result.bytes,
+    });
+  } catch (err) {
+    // decodeImage throws user-safe messages; anything else is ours to hide.
+    const isValidation =
+      typeof err.message === 'string' &&
+      (err.message.includes('image') || err.message.includes('too large'));
+
+    if (isValidation) {
+      return res.status(400).json({ error: 'bad_image', message: err.message });
+    }
+
+    console.error('Photo upload failed:', err.message);
+    return res.status(502).json({
+      error: 'upload_failed',
+      message: 'The photo could not be stored. Try again.',
+    });
+  }
+});
+
+/** Lets the client show a sensible limit without hard-coding it twice. */
+app.get('/photos/limits', (req, res) => {
+  res.json({ maxBytes: MAX_BYTES });
+});
+
+// ---------------------------------------------------------------------------
+// Disposal review (F2.8)
+// ---------------------------------------------------------------------------
+
+/**
+ * An administrator approves or rejects a pending submission.
+ *
+ * The admin's button calls this endpoint rather than writing Firestore directly,
+ * because there must be exactly one code path that credits a wallet. Rules deny
+ * an administrator every write to `wallets`, `transactions` and `disposals` —
+ * that is what makes "no client writes a balance" true without qualification.
+ *
+ * Body: { decision: 'approve' | 'reject', reason?: string }
+ */
+app.post('/disposals/:id/review', requireAuth, requireAdmin, async (req, res) => {
+  const { id } = req.params;
+  const { decision, reason } = req.body || {};
+
+  if (decision !== 'approve' && decision !== 'reject') {
+    return res.status(400).json({
+      error: 'bad_decision',
+      message: "decision must be 'approve' or 'reject'.",
+    });
+  }
+
+  try {
+    const result =
+      decision === 'approve'
+        ? await approveDisposal({ disposalId: id, adminUid: req.user.uid })
+        : await rejectDisposal({
+            disposalId: id,
+            adminUid: req.user.uid,
+            reason,
+          });
+
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    // These throws carry messages written for an administrator to read — an
+    // already-decided submission, a missing wallet, a daily cap reached.
+    console.error(`Review of ${id} failed:`, err.message);
+    return res.status(409).json({ error: 'review_failed', message: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Disposal verification (F2.5, F2.10, F2.11, F2.12)
+// ---------------------------------------------------------------------------
+
+/**
+ * Verifies a pending submission: recomputes the distance from stored
+ * coordinates, hashes the photograph, checks it against the user's own history,
+ * screens it, and either credits the award or routes it to the review queue.
+ *
+ * Called by the submitting user, not by an administrator. The caller must own
+ * the submission — verified inside verifyDisposal.
+ *
+ * Idempotent: a submission that has already been decided returns its existing
+ * outcome rather than being reconsidered. The client cannot distinguish a lost
+ * response from a lost request, so it will retry, and a retry must not credit
+ * twice.
+ */
+app.post('/disposals/:id/verify', requireAuth, async (req, res) => {
+  try {
+    const result = await verifyDisposal({
+      disposalId: req.params.id,
+      callerUid: req.user.uid,
+    });
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error(`Verification of ${req.params.id} failed:`, err.message);
+    return res.status(409).json({
+      error: 'verify_failed',
+      message: err.message,
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Claims (F6.1-F6.4)
+// ---------------------------------------------------------------------------
+
+/**
+ * A user's remaining claim allowance for the current ISO week.
+ *
+ * Read before composing a claim, so someone at their limit is told before they
+ * photograph something rather than after.
+ */
+app.get('/claims/quota', requireAuth, async (req, res) => {
+  try {
+    const status = await claimsModule.claimQuotaStatus(req.user.uid);
+    return res.json({ ok: true, ...status });
+  } catch (err) {
+    console.error('Claim quota lookup failed:', err.message);
+    return res.status(500).json({
+      error: 'quota_failed',
+      message: 'Could not read your claim allowance.',
+    });
+  }
+});
+
+/**
+ * Approves or rejects a claim.
+ *
+ * There is no automatic lane and no verify endpoint for claims: the
+ * auto-approve path exists only where mechanical checks can pass, and a
+ * self-reported action has none. Every claim is decided by a person.
+ *
+ * The weekly quota is enforced inside the approval transaction rather than at
+ * submission, and it increments on approval rather than submission — otherwise
+ * a user could exhaust their own week with rejected junk (§7.4).
+ */
+app.post('/claims/:id/review', requireAuth, requireAdmin, async (req, res) => {
+  const { decision, reason } = req.body || {};
+
+  if (decision !== 'approve' && decision !== 'reject') {
+    return res.status(400).json({
+      error: 'bad_decision',
+      message: "decision must be 'approve' or 'reject'.",
+    });
+  }
+
+  try {
+    const result =
+      decision === 'approve'
+        ? await claimsModule.approveClaim({
+            claimId: req.params.id,
+            adminUid: req.user.uid,
+          })
+        : await claimsModule.rejectClaim({
+            claimId: req.params.id,
+            adminUid: req.user.uid,
+            reason,
+          });
+
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    // These messages are written for an administrator to read: already
+    // decided, weekly quota reached, no wallet.
+    console.error(`Claim review of ${req.params.id} failed:`, err.message);
+    return res.status(409).json({ error: 'review_failed', message: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Bins (F2.1)
+// ---------------------------------------------------------------------------
+
+/**
+ * Registers a bin.
+ *
+ * Bins are server-owned because their coordinates and radius are inputs this
+ * service trusts when deciding a payout. The QR payload is allocated here too:
+ * it has to be unique, and a client cannot guarantee that.
+ */
+app.post('/bins', requireAuth, requireAdmin, async (req, res) => {
+  const { label, lat, lng, radiusMeters } = req.body || {};
+
+  const problems = binsModule.validateBin({ label, lat, lng, radiusMeters });
+  if (problems.length > 0) {
+    return res.status(400).json({ error: 'invalid_bin', problems });
+  }
+
+  try {
+    const bin = await binsModule.createBin({
+      label,
+      lat,
+      lng,
+      radiusMeters,
+      adminUid: req.user.uid,
+    });
+    return res.status(201).json({ ok: true, bin });
+  } catch (err) {
+    console.error('Bin registration failed:', err.message);
+    return res.status(409).json({ error: 'bin_failed', message: err.message });
+  }
+});
+
+/**
+ * Takes a bin in or out of service.
+ *
+ * Never deletes: past disposals reference their bin, and a dangling reference
+ * breaks a user's history and an administrator's ability to review it.
+ */
+app.post('/bins/:id/active', requireAuth, requireAdmin, async (req, res) => {
+  const { active } = req.body || {};
+
+  if (typeof active !== 'boolean') {
+    return res.status(400).json({
+      error: 'bad_request',
+      message: 'active must be true or false.',
+    });
+  }
+
+  try {
+    const result = await binsModule.setBinActive({
+      binId: req.params.id,
+      active,
+      adminUid: req.user.uid,
+    });
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error(`Bin ${req.params.id} update failed:`, err.message);
+    return res.status(409).json({ error: 'bin_failed', message: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Points policy (F3.3)
+// ---------------------------------------------------------------------------
+
+/** Current policy, with defaults filled in for anything the document omits. */
+/**
+ * Reads the points policy, with the provenance of the last change (F3.3).
+ *
+ * The policy numbers are returned at the top level, exactly as before — the
+ * Flutter client's `PointsPolicy.fromJson` reads the keys it knows and ignores
+ * the rest, so the three extra fields are additive and no existing caller
+ * changes.
+ *
+ * The provenance is the point. `POST /config/points` has always recorded
+ * `updatedAt` and `updatedBy`, and `policyModule.fromDoc` strips both because
+ * `validate()` depends on an exact key set — so nothing ever surfaced them. This
+ * is a setting that defines the economy and that any administrator can change,
+ * and an administrator opening the editor could not see whether they were looking
+ * at someone's deliberate settings from this morning or at untouched defaults.
+ *
+ * `updatedByName` is resolved here rather than on the client because the server
+ * already holds Admin SDK access; a uid is not something to show a person.
+ */
+app.get('/config/points', requireAuth, async (req, res) => {
+  const { db } = require('./firebase');
+  const snap = await db().collection('config').doc('points').get();
+  const data = snap.exists ? snap.data() : null;
+
+  const policy = policyModule.fromDoc(data);
+
+  // No document means nothing has ever been saved and these are the defaults
+  // from §7.3. Reported as nulls rather than invented values.
+  let updatedAt = null;
+  let updatedBy = null;
+  let updatedByName = null;
+
+  if (data) {
+    updatedAt = data.updatedAt?.toDate?.()?.toISOString() ?? null;
+    updatedBy = data.updatedBy ?? null;
+
+    if (updatedBy) {
+      try {
+        const editor = await db().collection('users').doc(updatedBy).get();
+        updatedByName = editor.exists ? editor.data().name || null : null;
+      } catch (err) {
+        // A name is a convenience. Failing to resolve it must not fail the
+        // policy read, which every award decision on the client depends on.
+        console.error('Could not resolve the policy editor name:', err.message);
+      }
+    }
+  }
+
+  res.json({ ...policy, updatedAt, updatedBy, updatedByName });
+});
+
+/**
+ * Writes the points policy after validation.
+ *
+ * Rules cannot express the invariant that matters here — that the claim award
+ * stays below the disposal award — so the write goes where that check can run.
+ */
+app.post('/config/points', requireAuth, requireAdmin, async (req, res) => {
+  const { db, serverTimestamp } = require('./firebase');
+
+  // `fromRequest`, NOT `fromDoc`. The forgiving reader turned a body of `{}`
+  // into a complete policy of defaults that validated cleanly and overwrote the
+  // whole live economy — see the note on `fromRequest`.
+  const { policy: proposed, problems: shapeProblems } =
+    policyModule.fromRequest(req.body);
+
+  const problems = [...shapeProblems, ...policyModule.validate(proposed)];
+
+  if (problems.length > 0) {
+    return res.status(400).json({ error: 'invalid_policy', problems });
+  }
+
+  // A full overwrite is deliberate and is only safe because `fromRequest` has
+  // just guaranteed all nine fields are present — the editor always sends the
+  // complete policy. A merge would let a partial payload leave the document in a
+  // combination nothing validated as a whole.
+
+  await db()
+    .collection('config')
+    .doc('points')
+    .set({ ...proposed, updatedAt: serverTimestamp(), updatedBy: req.user.uid });
+
+  return res.json({ ok: true, policy: proposed });
+});
+
+// ---------------------------------------------------------------------------
+// Fallbacks
+// ---------------------------------------------------------------------------
+
+app.use((req, res) => {
+  res.status(404).json({ error: 'not_found', path: req.path });
+});
+
+// Express error handler. Four arguments is what marks it as one — do not remove
+// `next` even though it is unused.
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err);
+  res.status(500).json({
+    error: 'internal',
+    message: 'Something went wrong. Check the server logs.',
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Startup
+// ---------------------------------------------------------------------------
+
+const port = process.env.PORT || 8787;
+
+// Fail loudly at boot rather than on the first request. A missing service
+// account should stop the deploy, not surface later as a mysterious 500.
+try {
+  initFirebase();
+} catch (err) {
+  console.error('FATAL:', err.message);
+  process.exit(1);
+}
+
+app.listen(port, () => {
+  console.log(`chokro-server listening on ${port}`);
+
+  if (allowedOrigins.length === 0) {
+    console.warn(
+      'ALLOWED_ORIGINS is empty — browser calls will be refused. Set it to ' +
+        'your hosting URL before testing the web build.',
+    );
+  }
+
+  if (!process.env.CLOUDINARY_CLOUD_NAME) {
+    console.warn(
+      'Cloudinary is not configured — photo uploads will fail. Set ' +
+        'CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY and CLOUDINARY_API_SECRET.',
+    );
+  }
+});
+
+=========== FILE: server/src/pointsPolicy.js ===========
+/**
+ * Points policy — Node port of `lib/core/points_policy.dart` (§7.3).
+ *
+ * The client reads the policy to display "this is worth 50 points". The server
+ * reads it to decide what to actually credit, and is the only side whose reading
+ * matters. Both parse the same `config/points` document with the same per-field
+ * fallbacks, so a malformed document degrades identically on both.
+ *
+ * Reads are forgiving; writes are strict. `validate()` runs here before any
+ * policy is persisted, because Firestore rules cannot express a cross-field
+ * invariant like "the claim award must stay below the disposal award".
+ */
+
+const DEFAULTS = Object.freeze({
+  disposalAward: 50,
+  claimAward: 15,
+  claimQuotaPerWeek: 3,
+  purchaseAwardPercent: 5,
+  redemptionPointsPerBlock: 100,
+  redemptionTakaPerBlock: 10,
+  maxRedemptionPercentOfSubtotal: 50,
+  lockoutHours: 6,
+  dailyDisposalCap: 3,
+});
+
+function readInt(source, key) {
+  const value = source ? source[key] : undefined;
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+  return DEFAULTS[key];
+}
+
+/**
+ * Builds a policy from a `config/points` document.
+ * Missing, null or wrongly-typed fields fall back to their defaults rather than
+ * throwing — a broken config must never be able to take the service down.
+ */
+function fromDoc(data) {
+  const source = data || {};
+  const policy = {};
+  for (const key of Object.keys(DEFAULTS)) {
+    policy[key] = readInt(source, key);
+  }
+  return policy;
+}
+
+function defaults() {
+  return { ...DEFAULTS };
+}
+
+/**
+ * Builds a policy from a client request, STRICTLY.
+ *
+ * The counterpart to `fromDoc`, and the distinction is the whole point. This
+ * module's own comment says "reads are forgiving, writes are strict" — but the
+ * write path called `fromDoc`, the forgiving reader, whose contract is that a
+ * missing or wrongly-typed field silently becomes its default.
+ *
+ * The consequence: `POST /config/points` with a body of `{}` produced a complete
+ * policy of pure defaults, passed `validate()` cleanly because defaults are
+ * valid, and overwrote the entire live economy. An empty request, a truncated
+ * one, or a client that sent strings instead of numbers would silently reset
+ * every award and quota an administrator had tuned.
+ *
+ * Every field must be present and numeric. Defaults are still filled in for the
+ * offending keys so `validate()` has a complete object to reason about, but the
+ * problems are reported and the caller must refuse the write.
+ *
+ * @returns {{policy: object, problems: string[]}}
+ */
+function fromRequest(body) {
+  const source = body && typeof body === 'object' ? body : {};
+  const problems = [];
+  const policy = {};
+
+  for (const key of Object.keys(DEFAULTS)) {
+    const value = source[key];
+
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      problems.push(`${key} is required and must be a number.`);
+      policy[key] = DEFAULTS[key];
+    } else {
+      policy[key] = Math.trunc(value);
+    }
+  }
+
+  return { policy, problems };
+}
+
+/**
+ * Human-readable problems with a policy. Empty array means it is safe to save.
+ *
+ * The load-bearing rule is the last one: award value must track verification
+ * strength. A claim rests on an administrator's reading of a photograph; a
+ * disposal is geofenced, time-locked and hash-checked. If a claim ever pays more
+ * than a disposal, users optimise into the weaker route and the whole
+ * verification design stops meaning anything.
+ */
+function validate(policy) {
+  const problems = [];
+
+  const positive = (label, value) => {
+    if (!(value > 0)) problems.push(`${label} must be greater than zero.`);
+  };
+
+  positive('Disposal award', policy.disposalAward);
+  positive('Claim award', policy.claimAward);
+  positive('Claim quota per week', policy.claimQuotaPerWeek);
+  positive('Redemption points per block', policy.redemptionPointsPerBlock);
+  positive('Redemption taka per block', policy.redemptionTakaPerBlock);
+  positive('Lockout window', policy.lockoutHours);
+  positive('Daily disposal cap', policy.dailyDisposalCap);
+
+  if (policy.purchaseAwardPercent < 0 || policy.purchaseAwardPercent > 100) {
+    problems.push('Purchase award percent must be between 0 and 100.');
+  }
+  if (
+    policy.maxRedemptionPercentOfSubtotal < 0 ||
+    policy.maxRedemptionPercentOfSubtotal > 100
+  ) {
+    problems.push('Max redemption percent must be between 0 and 100.');
+  }
+  if (policy.lockoutHours > 24 * 7) {
+    problems.push('Lockout window may not exceed one week.');
+  }
+  if (policy.claimAward >= policy.disposalAward) {
+    problems.push(
+      `Claim award (${policy.claimAward}) must be lower than disposal award ` +
+        `(${policy.disposalAward}): the weaker verification route must pay less.`,
+    );
+  }
+
+  return problems;
+}
+
+/** Points required to buy one taka of value. With the defaults, 10. */
+function pointsPerTaka(policy) {
+  const ratio = Math.trunc(
+    policy.redemptionPointsPerBlock / policy.redemptionTakaPerBlock,
+  );
+  return ratio < 1 ? 1 : ratio;
+}
+
+/** Taka value of a points amount, rounded down. */
+function takaForPoints(policy, points) {
+  if (points <= 0) return 0;
+  return Math.trunc(points / pointsPerTaka(policy));
+}
+
+/** Points credited when an order is confirmed received. */
+function purchaseAward(policy, payable) {
+  if (payable <= 0) return 0;
+  return Math.trunc((payable * policy.purchaseAwardPercent) / 100);
+}
+
+/** When a lockout opened at [from] (a Date) expires. */
+function lockoutExpiry(policy, from) {
+  return new Date(from.getTime() + policy.lockoutHours * 60 * 60 * 1000);
+}
+
+/** ISO week key, e.g. `2026-W31`. Mirrors IsoWeek in the Dart implementation. */
+function isoWeekKey(date) {
+  const utc = new Date(
+    Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
+  );
+  // ISO weekday: Monday 1 … Sunday 7.
+  const weekday = utc.getUTCDay() === 0 ? 7 : utc.getUTCDay();
+  const thursday = new Date(utc);
+  thursday.setUTCDate(utc.getUTCDate() + 4 - weekday);
+
+  const firstOfYear = new Date(Date.UTC(thursday.getUTCFullYear(), 0, 1));
+  const week =
+    Math.floor((thursday - firstOfYear) / (7 * 24 * 60 * 60 * 1000)) + 1;
+
+  return `${thursday.getUTCFullYear()}-W${String(week).padStart(2, '0')}`;
+}
+
+module.exports = {
+  fromRequest,
+  DEFAULTS,
+  defaults,
+  fromDoc,
+  validate,
+  pointsPerTaka,
+  takaForPoints,
+  purchaseAward,
+  lockoutExpiry,
+  isoWeekKey,
+};
+
+=========== FILE: server/src/firebase.js ===========
+/**
+ * Firebase Admin SDK setup.
+ *
+ * The Admin SDK bypasses Firestore security rules entirely. That is the whole
+ * reason this service exists: rules can check *who* is asking, but they cannot
+ * check whether a photograph was screened, so the one actor allowed to write a
+ * wallet balance has to sit outside them.
+ *
+ * It also means the credentials loaded here are the most dangerous thing in the
+ * project. Anyone holding this key can read and rewrite every wallet in the
+ * database, and no rule will stop them. The key is therefore read from an
+ * environment variable and never from a file in the repository.
+ *
+ * FORMAT: FIREBASE_SERVICE_ACCOUNT accepts either
+ *   (a) base64 of the service account JSON — preferred, and what Render uses, or
+ *   (b) the raw JSON on one line — convenient locally.
+ *
+ * Base64 exists as an option because the raw JSON carries braces, quotes and
+ * backslash-escaped newlines, all of which web forms and shell pipelines find
+ * ways to mangle. Base64 is a single unbroken run of [A-Za-z0-9+/=] with nothing
+ * for anything in the chain to interpret.
+ */
+
+const admin = require('firebase-admin');
+
+let app;
+
+/** Parses the credential from either supported encoding. */
+function parseServiceAccount(raw) {
+  const trimmed = raw.trim();
+
+  // Raw JSON: starts with a brace.
+  if (trimmed.startsWith('{')) {
+    return JSON.parse(trimmed);
+  }
+
+  // Otherwise assume base64. Strip any whitespace a form or shell introduced.
+  const cleaned = trimmed.replace(/\s+/g, '');
+  const decoded = Buffer.from(cleaned, 'base64').toString('utf8');
+  return JSON.parse(decoded);
+}
+
+function initFirebase() {
+  if (app) return app;
+
+  const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (!raw) {
+    throw new Error(
+      'FIREBASE_SERVICE_ACCOUNT is not set. Set it to the base64 of the ' +
+        'service account JSON (locally, in server/.env).',
+    );
+  }
+
+  let serviceAccount;
+  try {
+    serviceAccount = parseServiceAccount(raw);
+  } catch (err) {
+    // Deliberately reports shape, never content. Length and first character are
+    // enough to tell a truncated paste from a wrong-format one, and neither
+    // leaks any part of the key into the logs.
+    const trimmed = raw.trim();
+
+    // `err.message` is deliberately NOT interpolated, and the comment above used
+    // to claim this already. `JSON.parse` embeds a fragment of the offending
+    // input in its own message — and on the base64 branch the text being parsed
+    // is the *decoded service-account JSON*, so the private key could appear
+    // verbatim in a log line. `index.js` prints this at boot behind `FATAL:`,
+    // which on Render means it lands in a log aggregator.
+    //
+    // Only the error's class is safe to report, and it is enough to tell a
+    // malformed paste from a truncated one when combined with the length below.
+    throw new Error(
+      'FIREBASE_SERVICE_ACCOUNT could not be parsed. ' +
+        `Length: ${trimmed.length}. Starts with: "${trimmed.slice(0, 1)}". ` +
+        'Expected either base64 (a long run of letters and digits) or raw ' +
+        'JSON starting with "{". A length far below 2000 means the value was ' +
+        `truncated. Failure type: ${err.name || 'Error'}.`,
+    );
+  }
+
+  if (!serviceAccount.private_key || !serviceAccount.client_email) {
+    throw new Error(
+      'FIREBASE_SERVICE_ACCOUNT parsed, but is missing private_key or ' +
+        'client_email. This does not look like a service account file.',
+    );
+  }
+
+  // Some .env formats and dashboards turn the literal "\n" sequences inside the
+  // private key into something else. Restoring them here is less error-prone
+  // than asking a human to paste a multi-line PEM into a single-line field.
+  if (typeof serviceAccount.private_key === 'string') {
+    serviceAccount.private_key = serviceAccount.private_key.replace(
+      /\\n/g,
+      '\n',
+    );
+  }
+
+  app = admin.initializeApp({
+    credential: admin.credential.cert(serviceAccount),
+    storageBucket: process.env.FIREBASE_STORAGE_BUCKET || undefined,
+  });
+
+  console.log(`Firebase Admin initialised for ${serviceAccount.project_id}.`);
+
+  return app;
+}
+
+function db() {
+  initFirebase();
+  return admin.firestore();
+}
+
+function auth() {
+  initFirebase();
+  return admin.auth();
+}
+
+function bucket() {
+  initFirebase();
+  return admin.storage().bucket();
+}
+
+/**
+ * Cloud Messaging, for push on a decision (F7.1).
+ *
+ * Exists so the send path does not depend on something else having initialised
+ * the app first. `admin.messaging()` called on an uninitialised app throws, and
+ * `push.js` previously reached for it directly — which worked only because
+ * `tokensFor` happens to call `db()` a few lines earlier. That is a real
+ * ordering dependency hiding inside an unrelated function, and reordering the
+ * two statements would have broken sending with an error about credentials.
+ *
+ * `firebase-admin ^13` already ships messaging, so this adds no dependency.
+ */
+function messaging() {
+  initFirebase();
+  return admin.messaging();
+}
+
+/** Server timestamp sentinel — never a clock value this process authored. */
+const serverTimestamp = () => admin.firestore.FieldValue.serverTimestamp();
+
+/** Atomic counter increment, for the stats document. */
+const increment = (n) => admin.firestore.FieldValue.increment(n);
+
+module.exports = {
+  admin,
+  initFirebase,
+  db,
+  auth,
+  bucket,
+  messaging,
+  serverTimestamp,
+  increment,
+};
+
+=========== FILE: server/src/phash.js ===========
+/**
+ * Chokro — perceptual hashing for duplicate detection (F2.11).
+ *
+ * WHY NO IMAGE LIBRARY
+ * A perceptual hash needs the image decoded to an 8x8 grayscale grid. The usual
+ * way is `sharp`, a native binary that inflates the build and is memory-hungry
+ * on a free Render instance. But Cloudinary already holds the image and can
+ * return exactly that grid through a URL transform, so the decoding happens
+ * upstream and this module works on 64 bytes of pixel values. One fewer
+ * dependency, and nothing native to compile.
+ *
+ * WHY PERCEPTUAL, NOT CRYPTOGRAPHIC
+ * A SHA of the bytes changes completely when a photograph is recompressed,
+ * resized, or re-saved by a different camera app. Two submissions of the same
+ * photograph would hash differently and the check would never fire. A
+ * perceptual hash describes what the image *looks like*, so it survives that.
+ *
+ * WHY THE SERVER COMPUTES IT
+ * A client-supplied fingerprint is worthless: a modified app would send a fresh
+ * random value every time and the check would never fire. `firestore.rules`
+ * rejects a `photoHash` key on creation for exactly this reason (§7.4).
+ *
+ * LIMITATION, to be stated in the term paper: hashes are compared within one
+ * user's own history only. Detecting a photograph shared between two accounts
+ * needs a global hash index, which is deferred (§7.2).
+ */
+
+const HASH_SIZE = 8; // 8x8 grid -> 64 bits
+const PIXEL_COUNT = HASH_SIZE * HASH_SIZE;
+
+/**
+ * The Cloudinary URL that yields the grid this module hashes.
+ *
+ * Transform chain: resize to 8x8 ignoring aspect ratio, drop colour, emit PNG.
+ * `f_png` matters — a JPEG at 8x8 would add compression artefacts to the very
+ * pixels being compared.
+ *
+ * @param {string} publicId  Cloudinary public_id from the upload result
+ * @param {string} cloudName
+ */
+function hashSourceUrl(publicId, cloudName) {
+  const transform = `c_scale,w_${HASH_SIZE},h_${HASH_SIZE},e_grayscale,f_png`;
+  return `https://res.cloudinary.com/${cloudName}/image/upload/${transform}/${publicId}.png`;
+}
+
+/**
+ * Computes a 64-bit average hash from 64 grayscale pixel values.
+ *
+ * Each bit says whether that pixel is brighter than the image's mean. Returned
+ * as 16 hex characters.
+ *
+ * Pure: given the same pixels it always returns the same string, which is what
+ * makes it testable without a network or an image.
+ *
+ * @param {number[]} pixels  exactly 64 values, 0-255
+ */
+function averageHash(pixels) {
+  if (!Array.isArray(pixels) || pixels.length !== PIXEL_COUNT) {
+    throw new Error(`Expected ${PIXEL_COUNT} pixel values, got ${pixels?.length}`);
+  }
+
+  const mean = pixels.reduce((sum, p) => sum + p, 0) / PIXEL_COUNT;
+
+  let hash = '';
+  for (let nibble = 0; nibble < PIXEL_COUNT / 4; nibble += 1) {
+    let value = 0;
+    for (let bit = 0; bit < 4; bit += 1) {
+      value <<= 1;
+      if (pixels[nibble * 4 + bit] > mean) value |= 1;
+    }
+    hash += value.toString(16);
+  }
+
+  return hash;
+}
+
+/**
+ * Differing bits between two hashes. 0 means identical, 64 means opposite.
+ *
+ * @returns {number}
+ */
+function hammingDistance(hashA, hashB) {
+  if (typeof hashA !== 'string' || typeof hashB !== 'string') {
+    throw new Error('Both hashes must be strings.');
+  }
+  if (hashA.length !== hashB.length) {
+    throw new Error('Hashes must be the same length to compare.');
+  }
+
+  let distance = 0;
+  for (let i = 0; i < hashA.length; i += 1) {
+    let diff = parseInt(hashA[i], 16) ^ parseInt(hashB[i], 16);
+    while (diff) {
+      distance += diff & 1;
+      diff >>= 1;
+    }
+  }
+  return distance;
+}
+
+/**
+ * Below this Hamming distance, two images are treated as the same photograph.
+ *
+ * 5 of 64 bits is deliberately conservative. A false positive here does not
+ * reject anything — it flags for review, where a person looks at both images.
+ * A false negative silently lets a duplicate through. So the threshold errs
+ * toward flagging, consistent with failing toward review everywhere else.
+ */
+const DUPLICATE_THRESHOLD = 5;
+
+/**
+ * Whether [candidate] matches any hash in [previous].
+ *
+ * @param {string} candidate
+ * @param {string[]} previous  hashes from this user's own earlier submissions
+ * @returns {{isDuplicate: boolean, matchedHash: string|null, distance: number|null}}
+ */
+function findDuplicate(candidate, previous, threshold = DUPLICATE_THRESHOLD) {
+  if (!candidate || !Array.isArray(previous)) {
+    return { isDuplicate: false, matchedHash: null, distance: null };
+  }
+
+  let best = null;
+  let bestDistance = Infinity;
+
+  for (const hash of previous) {
+    if (typeof hash !== 'string' || hash.length !== candidate.length) continue;
+    const distance = hammingDistance(candidate, hash);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      best = hash;
+    }
+  }
+
+  if (best === null) {
+    return { isDuplicate: false, matchedHash: null, distance: null };
+  }
+
+  return {
+    isDuplicate: bestDistance <= threshold,
+    matchedHash: best,
+    distance: bestDistance,
+  };
+}
+
+/**
+ * Fetches the 8x8 grayscale PNG and hashes it.
+ *
+ * The only I/O in this module. Throws on any failure rather than returning a
+ * sentinel — the caller treats an unavailable hash as a reason to route to
+ * review, never as a reason to approve.
+ */
+async function hashImage(publicId, cloudName = process.env.CLOUDINARY_CLOUD_NAME) {
+  if (!cloudName) throw new Error('CLOUDINARY_CLOUD_NAME is not set.');
+
+  const url = hashSourceUrl(publicId, cloudName);
+  const response = await fetch(url);
+
+  if (!response.ok) {
+    throw new Error(`Could not fetch the hash source (${response.status}).`);
+  }
+
+  const buffer = Buffer.from(await response.arrayBuffer());
+  return averageHash(extractPixels(buffer));
+}
+
+/**
+ * Reads 64 grayscale values from an 8x8 PNG.
+ *
+ * A minimal decoder for exactly the PNG Cloudinary returns: 8x8, no
+ * interlacing, one IDAT stream. `zlib` is built into Node, so this needs no
+ * dependency. Anything unexpected throws, and the caller routes to review.
+ */
+function extractPixels(buffer) {
+  const zlib = require('zlib');
+
+  const SIGNATURE = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+  if (!SIGNATURE.every((byte, i) => buffer[i] === byte)) {
+    throw new Error('Hash source is not a PNG.');
+  }
+
+  let offset = 8;
+  let width = 0;
+  let height = 0;
+  let colourType = 0;
+  let bitDepth = 0;
+  const idat = [];
+
+  while (offset < buffer.length) {
+    const length = buffer.readUInt32BE(offset);
+    const type = buffer.toString('ascii', offset + 4, offset + 8);
+    const data = buffer.subarray(offset + 8, offset + 8 + length);
+
+    if (type === 'IHDR') {
+      width = data.readUInt32BE(0);
+      height = data.readUInt32BE(4);
+      bitDepth = data[8];
+      colourType = data[9];
+      if (data[12] !== 0) throw new Error('Interlaced PNG is not supported.');
+    } else if (type === 'IDAT') {
+      idat.push(data);
+    } else if (type === 'IEND') {
+      break;
+    }
+
+    offset += 12 + length; // length + type + data + CRC
+  }
+
+  if (width !== HASH_SIZE || height !== HASH_SIZE) {
+    throw new Error(`Hash source is ${width}x${height}, expected 8x8.`);
+  }
+  if (bitDepth !== 8) {
+    throw new Error(`Unsupported bit depth: ${bitDepth}`);
+  }
+
+  // 0 = grayscale, 2 = RGB, 4 = grayscale+alpha, 6 = RGBA. Cloudinary's
+  // e_grayscale may still emit RGB, so every channel layout is handled.
+  const channels = { 0: 1, 2: 3, 4: 2, 6: 4 }[colourType];
+  if (!channels) throw new Error(`Unsupported colour type: ${colourType}`);
+
+  const raw = zlib.inflateSync(Buffer.concat(idat));
+  const stride = width * channels;
+
+  // Undo the per-scanline filters, all five of them.
+  //
+  // This used to throw on anything but filter 0, and that was a real defect
+  // rather than a missing nicety. Cloudinary's encoder picks a filter per
+  // scanline based on content: the 8x8 grayscale of a plain upload happens to
+  // come back all-zero, but the same transform over a source that has been
+  // through another transform first comes back with filter 1 (Sub) on row 0.
+  //
+  // The failure was silent and content-dependent. `hashImage` threw,
+  // `verifyDisposal` caught it and logged, and the submission continued with
+  // `isDuplicate: false` — so duplicate detection quietly did not exist for
+  // those photographs, and it would have passed every test written against a
+  // plain fixture. Filter support is about twenty lines; guessing which photos
+  // were being skipped is not possible after the fact.
+  //
+  // Per the PNG specification each byte is reconstructed from its left
+  // neighbour (a), the byte above (b) and the byte above-left (c), all taken
+  // from already-reconstructed data.
+  const recon = Buffer.alloc(height * stride);
+
+  for (let y = 0; y < height; y += 1) {
+    const filter = raw[y * (stride + 1)];
+    const src = y * (stride + 1) + 1;
+    const dst = y * stride;
+    const up = dst - stride;
+
+    for (let i = 0; i < stride; i += 1) {
+      const x = raw[src + i];
+      const a = i >= channels ? recon[dst + i - channels] : 0;
+      const b = y > 0 ? recon[up + i] : 0;
+      const c = y > 0 && i >= channels ? recon[up + i - channels] : 0;
+
+      let value;
+      switch (filter) {
+        case 0: // None
+          value = x;
+          break;
+        case 1: // Sub
+          value = x + a;
+          break;
+        case 2: // Up
+          value = x + b;
+          break;
+        case 3: // Average
+          value = x + Math.floor((a + b) / 2);
+          break;
+        case 4: // Paeth
+          value = x + paeth(a, b, c);
+          break;
+        default:
+          throw new Error(`Unknown PNG filter ${filter} on row ${y}.`);
+      }
+
+      // & 0xff, because reconstruction is defined modulo 256.
+      recon[dst + i] = value & 0xff;
+    }
+  }
+
+  const pixels = [];
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      // Grayscale, so the first channel is the value. For RGB the channels are
+      // already equal after e_grayscale.
+      pixels.push(recon[y * stride + x * channels]);
+    }
+  }
+
+  return pixels;
+}
+
+/**
+ * The PNG Paeth predictor: whichever of a, b or c is closest to a + b - c.
+ *
+ * Spec'd exactly this way, ties resolved toward a then b, and getting the tie
+ * order wrong produces an image that decodes to plausible-looking garbage rather
+ * than an error.
+ */
+function paeth(a, b, c) {
+  const p = a + b - c;
+  const pa = Math.abs(p - a);
+  const pb = Math.abs(p - b);
+  const pc = Math.abs(p - c);
+  if (pa <= pb && pa <= pc) return a;
+  if (pb <= pc) return b;
+  return c;
+}
+
+module.exports = {
+  HASH_SIZE,
+  PIXEL_COUNT,
+  DUPLICATE_THRESHOLD,
+  hashSourceUrl,
+  averageHash,
+  hammingDistance,
+  findDuplicate,
+  extractPixels,
+  hashImage,
+};
+

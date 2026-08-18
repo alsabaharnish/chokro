@@ -10,6 +10,7 @@ import '../../core/theme.dart';
 import '../../models/disposal_model.dart';
 import '../shared/app_shell.dart';
 import '../shared/rejection_reason_dialog.dart';
+import '../shared/error_retry.dart';
 
 /// Administrator review queue (F2.7, F2.8).
 ///
@@ -46,7 +47,11 @@ class AdminDisposalsView extends ConsumerWidget {
       title: 'Review queue',
       child: pending.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (err, _) => _QueueError(error: err, theme: theme),
+        error: (err, _) => ErrorRetry(
+          error: err,
+          title: 'The review queue',
+          onRetry: () => ref.invalidate(pendingDisposalsProvider),
+        ),
         data: (disposals) {
           if (disposals.isEmpty) {
             return Center(
@@ -306,49 +311,15 @@ class _Fact extends StatelessWidget {
   }
 }
 
-class _QueueError extends StatelessWidget {
-  final Object error;
-  final ThemeData theme;
-
-  const _QueueError({required this.error, required this.theme});
-
-  @override
-  Widget build(BuildContext context) {
-    // A missing composite index is the overwhelmingly likely cause the first
-    // time this screen runs: the query filters on status and orders by
-    // createdAt, which Firestore cannot serve from single-field indexes.
-    final text = error.toString();
-    final needsIndex = text.contains('index');
-
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.error_outline, size: 48, color: theme.colorScheme.error),
-            const SizedBox(height: 16),
-            Text(
-              needsIndex
-                  ? 'This query needs a Firestore composite index. Open the '
-                      'console link in the debug output to create it — it takes '
-                      'about a minute to build.'
-                  : 'Could not load the queue.',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodyMedium,
-            ),
-            const SizedBox(height: 12),
-            Text(
-              text,
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
+// `_QueueError` was deleted in favour of the shared `ErrorRetry`.
+//
+// It knew something worth keeping — that a missing composite index is the
+// overwhelmingly likely cause the first time this screen runs — but it detected
+// that by substring-matching `error.toString()` for 'index', and it printed the
+// raw exception underneath. That knowledge now lives in `friendlyErrorMessage`,
+// keyed on Firestore's actual `failed-precondition` code rather than on the
+// wording of a message. It also had no retry, which was the other half of the
+// problem: the queue is the screen an administrator sits on all shift.
 
 /// One line describing how this submitter has fared before (F2.7).
 class _SubmitterRecordLine extends StatelessWidget {

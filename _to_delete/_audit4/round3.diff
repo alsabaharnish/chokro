@@ -1,0 +1,759 @@
+diff --git a/lib/controllers/auth_controller.dart b/lib/controllers/auth_controller.dart
+index 2808c2f..b3d3b60 100644
+--- a/lib/controllers/auth_controller.dart
++++ b/lib/controllers/auth_controller.dart
+@@ -128,6 +128,22 @@ class AuthController extends AsyncNotifier<void> {
+     });
+   }
+ 
++  /// Sends a password-reset email (F1.1).
++  ///
++  /// Succeeds silently whether or not the address is registered. Firebase does
++  /// not say, and the view must not imply it either: a form that answered "no
++  /// such account" would let anyone test which email addresses hold accounts,
++  /// which is the same leak `authErrorMessage` avoids by keeping the three
++  /// credential failures indistinguishable at sign-in.
++  ///
++  /// `invalid-email` is still reported, because that is about the text typed
++  /// rather than about who exists.
++  Future<void> sendPasswordReset(String email) async {
++    await _guard(() async {
++      await ref.read(authServiceProvider).sendPasswordReset(email);
++    });
++  }
++
+   /// Signs out, retiring this device's push registration first (F7.1).
+   ///
+   /// The order is the whole point, and getting it wrong fails silently.
+diff --git a/lib/controllers/seller_application_controller.dart b/lib/controllers/seller_application_controller.dart
+index 9d5b226..89ef8ab 100644
+--- a/lib/controllers/seller_application_controller.dart
++++ b/lib/controllers/seller_application_controller.dart
+@@ -34,7 +34,7 @@ class SellerApplicationController extends AsyncNotifier<void> {
+         businessName: businessName,
+         description: description,
+         status: AppConstants.statusPending,
+-        createdAt: DateTime.now(),
++        // createdAt omitted: the service supplies a server timestamp (§6).
+       );
+ 
+       await ref.read(userServiceProvider).submitSellerApplication(app);
+diff --git a/lib/models/disposal_model.dart b/lib/models/disposal_model.dart
+index 8c76be7..62343dd 100644
+--- a/lib/models/disposal_model.dart
++++ b/lib/models/disposal_model.dart
+@@ -130,7 +130,18 @@ enum DisposalFlag {
+ 
+   /// The AI service could not be reached or errored. Fail toward review, never
+   /// toward payout.
+-  screeningUnavailable;
++  screeningUnavailable,
++
++  /// The photograph's perceptual hash could not be computed, so it was never
++  /// compared against this user's earlier submissions (F2.11).
++  ///
++  /// Distinct from [duplicatePhoto] and from its absence. "No match found" and
++  /// "could not look" are different answers, and treating them alike is what let
++  /// a submission take the auto-approve lane with the duplicate defence never
++  /// having run — the hash step threw, nothing was flagged, `flags.length == 0`,
++  /// and it paid out. Fail toward review, exactly like
++  /// [screeningUnavailable].
++  hashUnavailable;
+ 
+   static DisposalFlag? fromName(String? name) {
+     for (final flag in DisposalFlag.values) {
+@@ -154,6 +165,9 @@ enum DisposalFlag {
+         return 'Declared material was not detected in the photo.';
+       case DisposalFlag.dailyCapReached:
+         return 'User has reached the daily approved-disposal cap.';
++      case DisposalFlag.hashUnavailable:
++        return 'The photo could not be fingerprinted, so it was not compared '
++            'against earlier submissions.';
+       case DisposalFlag.screeningUnavailable:
+         return 'Automated screening was unavailable; not yet checked.';
+     }
+@@ -304,6 +318,14 @@ class DisposalModel {
+   /// `FieldValue.serverTimestamp()` (§7.4). [photoHash], [screenConfidence],
+   /// [screenItemCount], [screenNotes], [pointsAwarded] and [status] transitions
+   /// are written by the trusted server, not by this map from the client.
++  /// Full serialisation, INCLUDING server-owned fields.
++  ///
++  /// Not the write path, and must never become one. `createPendingDisposal` uses
++  /// [toCreateJson], which omits `pointsAwarded`, `photoHash`, `screenConfidence`
++  /// and the rest by construction — the create rule uses `hasOnly`, so a document
++  /// carrying any of them is refused outright.
++  ///
++  /// This exists for the round-trip test that proves [fromJson] and this agree.
+   Map<String, dynamic> toJson() => <String, dynamic>{
+         'userId': userId,
+         'binId': binId,
+diff --git a/lib/models/seller_application_model.dart b/lib/models/seller_application_model.dart
+index 99a7c93..f99fa4a 100644
+--- a/lib/models/seller_application_model.dart
++++ b/lib/models/seller_application_model.dart
+@@ -7,7 +7,12 @@ class SellerApplicationModel {
+   final String businessName;
+   final String description;
+   final String status;
+-  final DateTime createdAt;
++  /// Server time the application was submitted.
++  ///
++  /// Nullable because it is written with `FieldValue.serverTimestamp()` per §6 —
++  /// this model was the last one still stamping the device clock — and Firestore
++  /// resolves that on the server, so the local echo carries null briefly.
++  final DateTime? createdAt;
+   final String? reviewedBy;
+   final DateTime? reviewedAt;
+   final String? reason;
+@@ -18,7 +23,7 @@ class SellerApplicationModel {
+     required this.businessName,
+     required this.description,
+     required this.status,
+-    required this.createdAt,
++    this.createdAt,
+     this.reviewedBy,
+     this.reviewedAt,
+     this.reason,
+@@ -35,7 +40,10 @@ class SellerApplicationModel {
+       businessName: data['businessName'] as String,
+       description: data['description'] as String,
+       status: data['status'] as String,
+-      createdAt: (data['createdAt'] as Timestamp).toDate(),
++      // Nullable-tolerant: `createdAt` is a pending server timestamp for one
++      // round trip after the write, and the old unchecked cast threw on exactly
++      // the document it had just created.
++      createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
+       reviewedBy: data['reviewedBy'] as String?,
+       reviewedAt: data['reviewedAt'] != null
+           ? (data['reviewedAt'] as Timestamp).toDate()
+@@ -49,7 +57,9 @@ class SellerApplicationModel {
+         'businessName': businessName,
+         'description': description,
+         'status': status,
+-        'createdAt': Timestamp.fromDate(createdAt),
++        // Omitted deliberately; the service supplies
++        // `FieldValue.serverTimestamp()`. Writing the device clock here let a
++        // phone with a skewed clock date its own application (§6).
+         if (reviewedBy != null) 'reviewedBy': reviewedBy,
+         if (reviewedAt != null) 'reviewedAt': Timestamp.fromDate(reviewedAt!),
+         if (reason != null) 'reason': reason,
+diff --git a/lib/models/transaction_model.dart b/lib/models/transaction_model.dart
+index e43d4f8..2add2e3 100644
+--- a/lib/models/transaction_model.dart
++++ b/lib/models/transaction_model.dart
+@@ -129,14 +129,14 @@ class TransactionModel {
+     );
+   }
+ 
+-  Map<String, dynamic> toMap() => <String, dynamic>{
+-        'userId': userId,
+-        'delta': delta,
+-        'source': source.wireValue,
+-        'refId': refId,
+-        'balanceAfter': balanceAfter,
+-        'createdAt': createdAt,
+-      };
++  // `toMap()` was deleted rather than kept.
++  //
++  // Zero callers in `lib/`, in `test/` and on the server, and it was actively
++  // misleading: no client may ever write a `transactions` document — the rules
++  // refuse it to an administrator as flatly as to a buyer — so a serialiser for
++  // one could only ever have been used by mistake. Every ledger entry is written
++  // by `award.js` inside the same transaction that moves the balance, which is
++  // what makes "no client writes a balance" true without qualification.
+ 
+   @override
+   String toString() =>
+diff --git a/lib/services/auth_service.dart b/lib/services/auth_service.dart
+index f0be49b..5b13518 100644
+--- a/lib/services/auth_service.dart
++++ b/lib/services/auth_service.dart
+@@ -26,4 +26,20 @@ class AuthService {
+       );
+ 
+   Future<void> signOut() => _auth.signOut();
++
++  /// Sends a password-reset email (F1.1).
++  ///
++  /// The only in-app recovery path there is. Without it a forgotten password is
++  /// terminal — there is no other route back into an account, and
++  /// `core/auth_errors.dart` was already carrying a `requires-recent-login`
++  /// message for a feature nothing implemented.
++  ///
++  /// Firebase deliberately does **not** report whether the address is registered,
++  /// and this does not attempt to find out. Telling a caller "no account exists
++  /// with that email" turns the reset form into an account-enumeration oracle —
++  /// the same reason `authErrorMessage` keeps the three credential failures
++  /// indistinguishable at sign-in. The caller shows the same confirmation either
++  /// way.
++  Future<void> sendPasswordReset(String email) =>
++      _auth.sendPasswordResetEmail(email: email.trim());
+ }
+diff --git a/lib/services/photo_upload_service.dart b/lib/services/photo_upload_service.dart
+index 8008d04..b20d6b7 100644
+--- a/lib/services/photo_upload_service.dart
++++ b/lib/services/photo_upload_service.dart
+@@ -89,9 +89,16 @@ class PhotoUploadService {
+       }
+       return UploadedPhoto(
+         url: url,
+-        // Absent only from an older server build. An empty id means the hash
+-        // step is skipped and the submission routes to review — degraded, but
+-        // never wrongly approved.
++        // Absent only from an older server build.
++        //
++        // An empty id means `verifyDisposal` skips the hash step entirely. That
++        // now routes to review rather than approving: it leaves
++        // `duplicateChecked` false, `decide()` raises `hashUnavailable`, and a
++        // flagged submission cannot take the auto-approve lane.
++        //
++        // This comment previously asserted the same outcome while nothing
++        // implemented it — the skipped check produced no flag at all, so an
++        // empty id auto-approved with the duplicate defence never having run.
+         publicId: (body['publicId'] as String?) ?? '',
+       );
+     }
+diff --git a/lib/services/user_service.dart b/lib/services/user_service.dart
+index bd520ac..f83ad94 100644
+--- a/lib/services/user_service.dart
++++ b/lib/services/user_service.dart
+@@ -118,8 +118,17 @@ class UserService {
+ 
+   // ── seller applications ───────────────────────────────────────────────────
+ 
++  /// Files a seller application (F1.2).
++  ///
++  /// `createdAt` is supplied here with `FieldValue.serverTimestamp()`. The model
++  /// used to stamp `Timestamp.fromDate(DateTime.now())` from the device — it was
++  /// the last model still doing so — which let a phone with a skewed clock date
++  /// its own application, and an administrator sorts the queue by that field.
+   Future<void> submitSellerApplication(SellerApplicationModel app) =>
+-      _db.collection('sellerApplications').add(app.toFirestore());
++      _db.collection('sellerApplications').add({
++        ...app.toFirestore(),
++        'createdAt': FieldValue.serverTimestamp(),
++      });
+ 
+   Stream<List<SellerApplicationModel>> watchPendingApplications() =>
+       _db
+@@ -159,7 +168,19 @@ class UserService {
+       // find the userId from the application first
+       final appDoc =
+           await _db.collection('sellerApplications').doc(appId).get();
+-      final userId = appDoc.data()!['userId'] as String;
++
++      // Checked rather than force-unwrapped. `appDoc.data()!['userId'] as String`
++      // threw a raw type error on a deleted application or a document missing the
++      // field, in the middle of a batch that also flips a role — so an
++      // administrator pressing Approve got an unhandled exception instead of a
++      // message, with no indication whether anything had been written.
++      final userId = appDoc.data()?['userId'];
++      if (userId is! String || userId.isEmpty) {
++        throw StateError(
++          'That application no longer names a user, so no role was changed.',
++        );
++      }
++
+       batch.update(
+         _db.collection('users').doc(userId),
+         {'role': AppConstants.roleSeller},
+diff --git a/lib/views/admin/admin_applications_view.dart b/lib/views/admin/admin_applications_view.dart
+index 30b11cb..7b18a85 100644
+--- a/lib/views/admin/admin_applications_view.dart
++++ b/lib/views/admin/admin_applications_view.dart
+@@ -114,7 +114,9 @@ class AdminApplicationsView extends ConsumerWidget {
+                               style: theme.textTheme.titleLarge),
+                           const SizedBox(height: 4),
+                           Text(
+-                            'Submitted ${dateFormat.format(app.createdAt)}',
++                            // Null for one round trip after the write, now that
++                            // `createdAt` comes from the server per §6.
++                            'Submitted ${app.createdAt == null ? 'just now' : dateFormat.format(app.createdAt!)}',
+                             style: theme.textTheme.bodySmall?.copyWith(
+                               color: theme.colorScheme.onSurfaceVariant,
+                             ),
+diff --git a/lib/views/auth/login_view.dart b/lib/views/auth/login_view.dart
+index d849eac..c371dcc 100644
+--- a/lib/views/auth/login_view.dart
++++ b/lib/views/auth/login_view.dart
+@@ -32,6 +32,83 @@ class _LoginViewState extends ConsumerState<LoginView> {
+     super.dispose();
+   }
+ 
++  /// Sends a password-reset email (F1.1).
++  ///
++  /// Confirms the same way whether or not the address has an account. Firebase
++  /// does not report which, and this must not imply it either — a form that
++  /// answered "no such account" would let anyone test which email addresses hold
++  /// accounts. That is the same leak `authErrorMessage` avoids by keeping the
++  /// three credential failures indistinguishable, and it would be a poor place to
++  /// undo it.
++  ///
++  /// The email field is validated first, and reused, so someone who has already
++  /// typed their address does not type it twice.
++  Future<void> _forgotPassword() async {
++    FocusScope.of(context).unfocus();
++
++    final email = _emailController.text.trim();
++    final invalid = validateEmail(email);
++
++    if (invalid != null) {
++      final scheme = Theme.of(context).colorScheme;
++      ScaffoldMessenger.of(context)
++        ..hideCurrentSnackBar()
++        ..showSnackBar(
++          SnackBar(
++            content: Text('Enter your email address first — $invalid.'),
++            backgroundColor: scheme.errorContainer,
++          ),
++        );
++      return;
++    }
++
++    final confirmed = await showDialog<bool>(
++      context: context,
++      builder: (context) => AlertDialog(
++        title: const Text('Reset your password?'),
++        content: Text(
++          'We will email a reset link to $email. Open it on this device and '
++          'choose a new password.',
++        ),
++        actions: [
++          TextButton(
++            onPressed: () => Navigator.of(context).pop(false),
++            child: const Text('Cancel'),
++          ),
++          FilledButton(
++            onPressed: () => Navigator.of(context).pop(true),
++            child: const Text('Send link'),
++          ),
++        ],
++      ),
++    );
++
++    if (confirmed != true || !mounted) return;
++
++    await ref.read(authControllerProvider.notifier).sendPasswordReset(email);
++    if (!mounted) return;
++
++    final error = ref.read(authControllerProvider).error;
++    final scheme = Theme.of(context).colorScheme;
++
++    ScaffoldMessenger.of(context)
++      ..hideCurrentSnackBar()
++      ..showSnackBar(
++        SnackBar(
++          // A malformed address is worth reporting — that is about the text
++          // typed, not about who exists. Anything else confirms, including the
++          // case where no account has that address.
++          content: Text(
++            error == null
++                ? 'If an account exists for $email, a reset link is on its way.'
++                : (error is AuthFailure ? error.message : authErrorMessage(null)),
++          ),
++          backgroundColor: error == null ? null : scheme.errorContainer,
++          showCloseIcon: true,
++        ),
++      );
++  }
++
+   Future<void> _submit() async {
+     // Dismiss the keyboard first: the error snackbar appears at the bottom of
+     // the screen, and an open keyboard covered it entirely on a small phone.
+@@ -174,6 +251,10 @@ class _LoginViewState extends ConsumerState<LoginView> {
+                             : const Text('Sign In'),
+                       ),
+                       const SizedBox(height: AppTheme.gapSm),
++                      TextButton(
++                        onPressed: isLoading ? null : _forgotPassword,
++                        child: const Text('Forgot your password?'),
++                      ),
+                       TextButton(
+                         onPressed: isLoading ? null : () => context.go('/register'),
+                         child: const Text("Don't have an account? Register"),
+diff --git a/pubspec.yaml b/pubspec.yaml
+index 240b5c1..6b4e22c 100644
+--- a/pubspec.yaml
++++ b/pubspec.yaml
+@@ -34,9 +34,9 @@ dependencies:
+   # The following adds the Cupertino Icons font to your application.
+   # Use with the CupertinoIcons class for iOS style icons.
+   cupertino_icons: ^1.0.8
+-  firebase_core: ^4.12.1
+-  firebase_auth: ^6.5.6
+-  cloud_firestore: ^6.7.1
++  firebase_core: ^4.13.0
++  firebase_auth: ^6.5.7
++  cloud_firestore: ^6.8.0
+   flutter_riverpod: ^3.4.1
+   riverpod_annotation: ^4.0.5
+   go_router: ^17.3.0
+diff --git a/server/src/award.js b/server/src/award.js
+index 3699dd8..eb89f3d 100644
+--- a/server/src/award.js
++++ b/server/src/award.js
+@@ -91,14 +91,15 @@ function creditWalletInTransaction(
+  * @param {object} args
+  * @param {string} args.disposalId
+  * @param {string|null} args.adminUid  null for an automatic approval
+- * @param {string[]} args.flags        why it went to review, if it did
++ * @param {string[]|null} args.flags   why it went to review; null preserves the
++ *                                     flags already on the document
+  * @returns {Promise<object>} outcome summary
+  *
+  * The award is read from the live policy and **snapshotted onto the disposal**.
+  * An administrator lowering the disposal award later must not rewrite what past
+  * submissions were worth (§6.2).
+  */
+-async function approveDisposal({ disposalId, adminUid = null, flags = [] }) {
++async function approveDisposal({ disposalId, adminUid = null, flags = null }) {
+   const firestore = db();
+   const disposalRef = firestore.collection('disposals').doc(disposalId);
+ 
+@@ -171,18 +172,36 @@ async function approveDisposal({ disposalId, adminUid = null, flags = [] }) {
+     txn.update(disposalRef, {
+       status: adminUid ? 'manualApproved' : 'autoApproved',
+       pointsAwarded: award,
+-      flags,
++      // `flags ?? existing`, never a bare `flags`.
++      //
++      // The default used to be `[]`, and the review route passes none — so every
++      // manual decision overwrote the flags with an empty array and destroyed the
++      // record of why the submission reached the queue, at the exact moment a
++      // human acted on it. Reviewing the reviewer became impossible: the queue
++      // showed "outsideRadius, lowConfidence" and the approved document showed
++      // nothing.
++      //
++      // Preserving is the default now, so a caller that omits flags cannot erase
++      // them. `verifyDisposal` passes its own explicitly and still overwrites,
++      // which is correct — it is the pass that computed them.
++      flags: flags ?? disposal.flags ?? [],
+       reviewedBy: adminUid,
+       reviewedAt: adminUid ? serverTimestamp() : null,
+     });
+ 
+     // Open the per-bin lockout window (F2.6). Rules read this document to refuse
+     // a repeat submission at the same bin.
++    //
++    // `disposalId` is recorded so a later rejection can tell whether it owns this
++    // window — see the release in `rejectDisposal`. The document key is
++    // `{uid}_{binId}` and cannot carry it, because the rules have to be able to
++    // compose the key from those two values alone.
+     const lockoutId = `${uid}_${disposal.binId}`;
+     txn.set(firestore.collection('lockouts').doc(lockoutId), {
+       expiresAt: policyModule.lockoutExpiry(policy, new Date()),
+       userId: uid,
+       binId: disposal.binId,
++      disposalId,
+     });
+ 
+     // Dashboard counters, incremented here rather than by counting collections
+@@ -233,7 +252,7 @@ async function approveDisposal({ disposalId, adminUid = null, flags = [] }) {
+  * No points, a mandatory reason recorded and shown to the user, and the bin
+  * lockout released so a legitimate retry is possible (§7.4).
+  */
+-async function rejectDisposal({ disposalId, adminUid, reason, flags = [] }) {
++async function rejectDisposal({ disposalId, adminUid, reason, flags = null }) {
+   if (!reason || !reason.trim()) {
+     throw new Error('A rejection must record a reason.');
+   }
+@@ -264,19 +283,38 @@ async function rejectDisposal({ disposalId, adminUid, reason, flags = [] }) {
+       );
+     }
+ 
++    // Read before any write — Firestore requires every read in a transaction to
++    // precede every write.
++    const lockoutRef = firestore
++      .collection('lockouts')
++      .doc(`${disposal.userId}_${disposal.binId}`);
++    const lockoutSnap = await txn.get(lockoutRef);
++
+     txn.update(disposalRef, {
+       status: 'rejected',
+       rejectionReason: reason.trim(),
+-      flags,
++      // Preserved, not cleared — see the note in `approveDisposal`. A rejection
++      // is precisely the decision whose justification most needs to survive.
++      flags: flags ?? disposal.flags ?? [],
+       reviewedBy: adminUid,
+       reviewedAt: serverTimestamp(),
+       pointsAwarded: 0,
+     });
+ 
+-    // Release the lockout: a rejected submission should not also cost the user
+-    // six hours at that bin.
+-    const lockoutId = `${disposal.userId}_${disposal.binId}`;
+-    txn.delete(firestore.collection('lockouts').doc(lockoutId));
++    // Release the lockout, but ONLY if this submission is the one that opened it.
++    //
++    // The key is `{uid}_{binId}` with no disposal in it, so an unconditional
++    // delete released whatever window happened to be there. That is reachable:
++    // nothing opens a lockout at submission time, so a user can have two pending
++    // submissions at one bin — and then approving A opens the window while
++    // rejecting B deletes it, reopening the bin hours early and handing back a
++    // free submission that the approval was supposed to have spent.
++    //
++    // A rejected submission still should not cost six hours at that bin, which
++    // is why the release exists at all; it just must not release somebody else's.
++    if (lockoutSnap.exists && lockoutSnap.data().disposalId === disposalId) {
++      txn.delete(lockoutRef);
++    }
+ 
+     txn.set(
+       firestore.collection('stats').doc('platform'),
+diff --git a/server/src/decide.js b/server/src/decide.js
+index fef18cf..69f3cb8 100644
+--- a/server/src/decide.js
++++ b/server/src/decide.js
+@@ -30,6 +30,7 @@ const FLAGS = Object.freeze({
+   ITEM_TYPE_MISMATCH: 'itemTypeMismatch',
+   DAILY_CAP_REACHED: 'dailyCapReached',
+   SCREENING_UNAVAILABLE: 'screeningUnavailable',
++  HASH_UNAVAILABLE: 'hashUnavailable',
+ });
+ 
+ const FLAG_EXPLANATIONS = Object.freeze({
+@@ -47,6 +48,9 @@ const FLAG_EXPLANATIONS = Object.freeze({
+     'This user has already reached the daily limit of approved disposals.',
+   [FLAGS.SCREENING_UNAVAILABLE]:
+     'Automated screening could not be reached, so this was not checked.',
++  [FLAGS.HASH_UNAVAILABLE]:
++    'The photograph could not be fingerprinted, so it was not compared against ' +
++    'earlier submissions.',
+ });
+ 
+ /**
+@@ -66,6 +70,7 @@ const CONFIDENCE_THRESHOLD = 0.75;
+  * @param {number} input.distanceMeters      recomputed server-side, never trusted from the client
+  * @param {number} input.radiusMeters        from the bin document
+  * @param {boolean} input.isDuplicate        from findDuplicate
++ * @param {boolean} input.duplicateChecked   false when the hash could not be computed
+  * @param {number} input.declaredItemCount
+  * @param {object|null} input.screening      null when screening did not run
+  * @param {number} input.screening.confidence      0-1
+@@ -79,6 +84,10 @@ function decide({
+   distanceMeters,
+   radiusMeters,
+   isDuplicate = false,
++  // Defaults to false — "the check did not run" — which is the fail-closed
++  // reading. A caller that forgets to pass this gets a review, not a silent
++  // auto-approve. Mirrors `screening = null` above it.
++  duplicateChecked = false,
+   declaredItemCount,
+   screening = null,
+   approvedToday = 0,
+@@ -97,7 +106,21 @@ function decide({
+   }
+ 
+   // 2. Duplicate photograph, within this user's own history.
+-  if (isDuplicate) {
++  //
++  // Three states, not two, and conflating the first two is what made this
++  // pipeline pay out on unchecked photographs. `isDuplicate: false` means
++  // "compared against the user's history and found nothing"; it does NOT mean
++  // "could not compare". `hashImage` throws on a missing cloud name, a non-200
++  // from Cloudinary, an unexpected bit depth or a zlib error, and every one of
++  // those used to arrive here indistinguishable from a clean result — no flag,
++  // `flags.length === 0`, straight down the auto-approve lane with the duplicate
++  // defence never having run.
++  //
++  // Exactly the reasoning already applied to `screening === null` below, and the
++  // same danger.
++  if (!duplicateChecked) {
++    flags.push(FLAGS.HASH_UNAVAILABLE);
++  } else if (isDuplicate) {
+     flags.push(FLAGS.DUPLICATE_PHOTO);
+   }
+ 
+diff --git a/server/src/firebase.js b/server/src/firebase.js
+index 4c6fc03..7869049 100644
+--- a/server/src/firebase.js
++++ b/server/src/firebase.js
+@@ -59,12 +59,22 @@ function initFirebase() {
+     // enough to tell a truncated paste from a wrong-format one, and neither
+     // leaks any part of the key into the logs.
+     const trimmed = raw.trim();
++
++    // `err.message` is deliberately NOT interpolated, and the comment above used
++    // to claim this already. `JSON.parse` embeds a fragment of the offending
++    // input in its own message — and on the base64 branch the text being parsed
++    // is the *decoded service-account JSON*, so the private key could appear
++    // verbatim in a log line. `index.js` prints this at boot behind `FATAL:`,
++    // which on Render means it lands in a log aggregator.
++    //
++    // Only the error's class is safe to report, and it is enough to tell a
++    // malformed paste from a truncated one when combined with the length below.
+     throw new Error(
+       'FIREBASE_SERVICE_ACCOUNT could not be parsed. ' +
+         `Length: ${trimmed.length}. Starts with: "${trimmed.slice(0, 1)}". ` +
+         'Expected either base64 (a long run of letters and digits) or raw ' +
+         'JSON starting with "{". A length far below 2000 means the value was ' +
+-        `truncated. Underlying error: ${err.message}`,
++        `truncated. Failure type: ${err.name || 'Error'}.`,
+     );
+   }
+ 
+diff --git a/server/src/index.js b/server/src/index.js
+index 63660c9..dbad069 100644
+--- a/server/src/index.js
++++ b/server/src/index.js
+@@ -433,13 +433,23 @@ app.get('/config/points', requireAuth, async (req, res) => {
+ app.post('/config/points', requireAuth, requireAdmin, async (req, res) => {
+   const { db, serverTimestamp } = require('./firebase');
+ 
+-  const proposed = policyModule.fromDoc(req.body || {});
+-  const problems = policyModule.validate(proposed);
++  // `fromRequest`, NOT `fromDoc`. The forgiving reader turned a body of `{}`
++  // into a complete policy of defaults that validated cleanly and overwrote the
++  // whole live economy — see the note on `fromRequest`.
++  const { policy: proposed, problems: shapeProblems } =
++    policyModule.fromRequest(req.body);
++
++  const problems = [...shapeProblems, ...policyModule.validate(proposed)];
+ 
+   if (problems.length > 0) {
+     return res.status(400).json({ error: 'invalid_policy', problems });
+   }
+ 
++  // A full overwrite is deliberate and is only safe because `fromRequest` has
++  // just guaranteed all nine fields are present — the editor always sends the
++  // complete policy. A merge would let a partial payload leave the document in a
++  // combination nothing validated as a whole.
++
+   await db()
+     .collection('config')
+     .doc('points')
+diff --git a/server/src/pointsPolicy.js b/server/src/pointsPolicy.js
+index 482209e..1e7dea8 100644
+--- a/server/src/pointsPolicy.js
++++ b/server/src/pointsPolicy.js
+@@ -49,6 +49,45 @@ function defaults() {
+   return { ...DEFAULTS };
+ }
+ 
++/**
++ * Builds a policy from a client request, STRICTLY.
++ *
++ * The counterpart to `fromDoc`, and the distinction is the whole point. This
++ * module's own comment says "reads are forgiving, writes are strict" — but the
++ * write path called `fromDoc`, the forgiving reader, whose contract is that a
++ * missing or wrongly-typed field silently becomes its default.
++ *
++ * The consequence: `POST /config/points` with a body of `{}` produced a complete
++ * policy of pure defaults, passed `validate()` cleanly because defaults are
++ * valid, and overwrote the entire live economy. An empty request, a truncated
++ * one, or a client that sent strings instead of numbers would silently reset
++ * every award and quota an administrator had tuned.
++ *
++ * Every field must be present and numeric. Defaults are still filled in for the
++ * offending keys so `validate()` has a complete object to reason about, but the
++ * problems are reported and the caller must refuse the write.
++ *
++ * @returns {{policy: object, problems: string[]}}
++ */
++function fromRequest(body) {
++  const source = body && typeof body === 'object' ? body : {};
++  const problems = [];
++  const policy = {};
++
++  for (const key of Object.keys(DEFAULTS)) {
++    const value = source[key];
++
++    if (typeof value !== 'number' || !Number.isFinite(value)) {
++      problems.push(`${key} is required and must be a number.`);
++      policy[key] = DEFAULTS[key];
++    } else {
++      policy[key] = Math.trunc(value);
++    }
++  }
++
++  return { policy, problems };
++}
++
+ /**
+  * Human-readable problems with a policy. Empty array means it is safe to save.
+  *
+@@ -138,6 +177,7 @@ function isoWeekKey(date) {
+ }
+ 
+ module.exports = {
++  fromRequest,
+   DEFAULTS,
+   defaults,
+   fromDoc,
+diff --git a/server/src/verify.js b/server/src/verify.js
+index e69edc4..418003e 100644
+--- a/server/src/verify.js
++++ b/server/src/verify.js
+@@ -104,6 +104,23 @@ async function verifyDisposal({ disposalId, callerUid }) {
+   if (!binSnap.exists) throw new Error('That bin is no longer registered.');
+   const bin = binSnap.data();
+ 
++  // `active` is checked here, not only in the rules.
++  //
++  // Bins are never deleted — past disposals reference them, so `setBinActive`
++  // is the soft-delete substitute and `admin_bins_view` presents Close/Reopen as
++  // taking a bin out of service. Nothing on the server read the field, so a
++  // submission at a closed bin still auto-approved against its stale
++  // coordinates: the administrator's control changed a boolean the payout path
++  // ignored.
++  //
++  // `binIsOpen()` in the rules refuses the *create*, so this is the second line
++  // rather than the only one — but a submission created while the bin was open
++  // and verified after it closed reaches exactly here, and that is the case the
++  // rules cannot see.
++  if (bin.active === false) {
++    throw new Error('That bin is no longer in service.');
++  }
++
+   const configSnap = await firestore.collection('config').doc('points').get();
+   const policy = policyModule.fromDoc(
+     configSnap.exists ? configSnap.data() : null,
+@@ -122,21 +139,36 @@ async function verifyDisposal({ disposalId, callerUid }) {
+   );
+ 
+   // ---- 2. Perceptual hash and duplicate check ----
++  //
++  // `duplicateChecked` is tracked separately from `duplicate.isDuplicate`,
++  // because "no match found" and "could not look" are different answers and
++  // treating them alike is what let this pipeline pay out on an unchecked
++  // photograph.
+   let photoHash = null;
+   let duplicate = { isDuplicate: false, distance: null };
++  let duplicateChecked = false;
+ 
+   if (disposal.photoPublicId) {
+     try {
+       photoHash = await hashImage(disposal.photoPublicId);
+       const history = await previousHashes(disposal.userId, disposalId);
+       duplicate = findDuplicate(photoHash, history);
++
++      // Set last, and only here. `hashImage` can succeed and `previousHashes`
++      // still throw, which would leave a hash in hand and no comparison behind
++      // it — so `photoHash !== null` is not the same question.
++      duplicateChecked = true;
+     } catch (err) {
+-      // A hash that could not be computed is not a duplicate and not a pass.
+-      // Screening below will still run; the absent hash simply means this
+-      // particular check found nothing, which is recorded honestly.
++      // Left false on purpose. `hashImage` throws on a missing cloud name, a
++      // non-200 from Cloudinary, an unexpected bit depth, an unknown scanline
++      // filter and any zlib failure; before `hashUnavailable` existed, every one
++      // of those produced a flagless submission that went straight down the
++      // auto-approve lane with the duplicate defence never having run.
+       console.error(`Hashing ${disposalId} failed:`, err.message);
+     }
+   }
++  // An empty `photoPublicId` skips the block entirely and lands here the same
++  // way: not checked, so flagged rather than assumed clean.
+ 
+   // ---- 3. Screening ----
+   const screening = await screenImage({
+@@ -153,6 +185,7 @@ async function verifyDisposal({ disposalId, callerUid }) {
+     distanceMeters,
+     radiusMeters: bin.radiusMeters,
+     isDuplicate: duplicate.isDuplicate,
++    duplicateChecked,
+     declaredItemCount: disposal.declaredItemCount,
+     screening,
+     approvedToday,

@@ -5,6 +5,7 @@ import '../../controllers/ledger_controller.dart';
 import '../../core/label_format.dart';
 import '../../models/transaction_model.dart';
 import '../shared/app_shell.dart';
+import '../shared/error_retry.dart';
 
 /// The wallet, told as a ledger (F3.2, NFR-4).
 ///
@@ -30,7 +31,8 @@ class WalletLedgerView extends ConsumerWidget {
           constraints: const BoxConstraints(maxWidth: _maxContentWidth),
           child: async.when(
             loading: () => const Center(child: CircularProgressIndicator()),
-            error: (error, _) => _LedgerError(
+            error: (error, _) => ErrorRetry(
+              title: 'The ledger',
               error: error,
               onRetry: () => ref.invalidate(ledgerProvider),
             ),
@@ -248,40 +250,9 @@ class _LedgerEmpty extends StatelessWidget {
   }
 }
 
-class _LedgerError extends StatelessWidget {
-  const _LedgerError({required this.error, required this.onRetry});
-
-  final Object error;
-  final VoidCallback onRetry;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.cloud_off_outlined,
-              size: 40,
-              color: theme.colorScheme.error,
-            ),
-            const SizedBox(height: 14),
-            Text('The ledger did not load', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 6),
-            Text(
-              '$error',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-            ),
-            const SizedBox(height: 16),
-            FilledButton.tonal(onPressed: onRetry, child: const Text('Try again')),
-          ],
-        ),
-      ),
-    );
-  }
-}
+// The private error widget here was replaced by the shared `ErrorRetry`.
+//
+// Four screens had grown the same icon-title-detail-retry layout, and all four
+// printed the raw exception as the detail — `'$error'` renders as
+// `[cloud_firestore/permission-denied] Missing or insufficient permissions.`
+// `ErrorRetry` interprets it through `friendlyErrorMessage` instead.

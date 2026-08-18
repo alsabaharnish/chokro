@@ -6,6 +6,8 @@ import '../../controllers/current_user_provider.dart';
 import '../../core/label_format.dart';
 import '../../models/user_model.dart';
 import '../shared/app_shell.dart';
+import '../shared/error_retry.dart';
+import '../../core/network_errors.dart';
 
 /// Administrator account management (F5.2) with temporary suspension (F5.3).
 ///
@@ -136,7 +138,7 @@ class _AdminUsersViewState extends ConsumerState<AdminUsersView> {
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('That did not work: $error')),
+        SnackBar(content: Text(friendlyErrorMessage(error))),
       );
     }
   }
@@ -154,11 +156,10 @@ class _AdminUsersViewState extends ConsumerState<AdminUsersView> {
               const BoxConstraints(maxWidth: AdminUsersView._maxContentWidth),
           child: async.when(
             loading: () => const Center(child: CircularProgressIndicator()),
-            error: (error, _) => Center(
-              child: Padding(
-                padding: const EdgeInsets.all(32),
-                child: Text('Accounts did not load: $error'),
-              ),
+            error: (error, _) => ErrorRetry(
+              error: error,
+              title: 'Accounts',
+              onRetry: () => ref.invalidate(allUsersProvider),
             ),
             data: (users) {
               final visible = _visible(users);

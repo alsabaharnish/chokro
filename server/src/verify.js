@@ -10,7 +10,7 @@
  * screening request.
  *
  * SCREENING IS OPTIONAL BY DESIGN.
- * With no Gemini key configured, `screenImage` returns null, `decide` raises
+ * With no Groq key configured, `screenImage` returns null, `decide` raises
  * `screeningUnavailable`, and the submission routes to review. The pipeline is
  * fully functional without a key — it just never uses the auto-approve lane.
  * That is the same path a rate limit or an outage takes (§7.4), so the

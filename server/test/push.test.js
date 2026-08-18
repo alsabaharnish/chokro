@@ -167,7 +167,7 @@ describe('data payload shape', () => {
     // routeForMessage in push_controller.dart refuses anything outside this set
     // rather than handing an arbitrary string to go_router, which would render
     // the route-error screen. The two lists have to agree.
-    const known = ['/history', '/wallet', '/home', '/claims/new'];
+    const known = ['/history', '/wallet', '/home', '/claims'];
     for (const message of all) {
       expect(known).toContain(message.data.route);
     }

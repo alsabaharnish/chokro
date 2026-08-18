@@ -141,10 +141,11 @@ String? routeForMessage(RemoteMessage message) {
   // render `RouteErrorView`. `push.test.js` mirrors this set and fails if the
   // server starts emitting something not listed here.
   //
-  // `/claims/new` is where a *rejected* eco-action goes: it credits nothing, so
-  // the wallet has no entry to show, while that screen lists each claim's status
-  // and reason.
-  const known = {'/history', '/wallet', '/home', '/claims/new'};
+  // `/claims` is where a *rejected* eco-action goes: it credits nothing, so the
+  // wallet has no entry to show and `/history` lists disposals only, while that
+  // screen is the eco-action history with each claim's status and reason. It
+  // briefly pointed at `/claims/new`, which is the submit form.
+  const known = {'/history', '/wallet', '/home', '/claims'};
   final route = message.data['route'];
   if (route is String && known.contains(route)) return route;
   return null;

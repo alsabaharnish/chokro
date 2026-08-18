@@ -1,0 +1,1772 @@
+=========== FILE: lib/models/disposal_model.dart ===========
+/// Chokro — disposal submission model (F2.3–F2.8).
+///
+/// Plain Dart, no Firebase imports (§5.1).
+///
+/// This model carries the state machine for the earn loop, which is larger than
+/// the original brief anticipated. The brief assumed one approval path (an
+/// administrator). The design now has two — an automatic one when the AI screen
+/// and the mechanical checks all pass, and a manual one when anything is
+/// unclear — and the user is told which one credited them. That distinction has
+/// to survive into the ledger, so it lives in the status rather than being
+/// inferred from whether `reviewedBy` happens to be set.
+library;
+
+/// Where a submission sits in its lifecycle.
+///
+/// Two approved states, deliberately. Collapsing them would lose the answer to
+/// "was this checked by a person?", which is exactly what an examiner will ask
+/// about any auto-credited award, and what an appeal needs in order to be
+/// meaningful.
+enum DisposalStatus {
+  /// Awaiting a human decision. Either the AI was not confident, a mechanical
+  /// check flagged something, or the AI was unreachable. Points are not credited
+  /// and the wallet balance is untouched — the UI shows the amount as pending.
+  pending,
+
+  /// Cleared automatically: inside the radius, no active lockout, under the
+  /// daily cap, photo hash not seen before, and the AI screen passed. Points
+  /// credited by the server without a person looking.
+  autoApproved,
+
+  /// Cleared by an administrator after landing in the review queue. Points
+  /// credited by the server on the administrator's decision.
+  manualApproved,
+
+  /// Refused. No points, a mandatory reason recorded and shown to the user, and
+  /// the bin lockout released so a legitimate retry is possible (§7.4).
+  rejected;
+
+  /// Parses the string stored in Firestore, falling back to [pending].
+  ///
+  /// Falling back to the *unrewarded* state is deliberate: an unrecognised or
+  /// corrupted status must never be read as "approved". Fail toward no payout.
+  static DisposalStatus fromName(String? name) {
+    for (final status in DisposalStatus.values) {
+      if (status.name == name) return status;
+    }
+    return DisposalStatus.pending;
+  }
+
+  /// Whether points were awarded for this submission.
+  bool get isApproved =>
+      this == DisposalStatus.autoApproved || this == DisposalStatus.manualApproved;
+
+  bool get isPending => this == DisposalStatus.pending;
+  bool get isRejected => this == DisposalStatus.rejected;
+
+  /// Whether the outcome is settled. Pending submissions are the only ones the
+  /// admin queue should show.
+  bool get isTerminal => this != DisposalStatus.pending;
+
+  /// Whether a person made this decision.
+  bool get wasHumanDecided =>
+      this == DisposalStatus.manualApproved || this == DisposalStatus.rejected;
+}
+
+/// What the user says they are disposing of. A closed vocabulary, for the same
+/// reasons as the claim action types (§7): it makes submissions sortable, gives
+/// the AI screen something specific to check the photo against, and keeps an
+/// unmoderated free-text field out of the system.
+enum DisposalItemType {
+  plasticBottle,
+  plasticOther,
+  paper,
+  glass,
+  metal,
+  eWaste,
+  organic;
+
+  static DisposalItemType? fromName(String? name) {
+    for (final type in DisposalItemType.values) {
+      if (type.name == name) return type;
+    }
+    return null;
+  }
+
+  /// Label for the picker and the review queue.
+  String get label {
+    switch (this) {
+      case DisposalItemType.plasticBottle:
+        return 'Plastic bottles';
+      case DisposalItemType.plasticOther:
+        return 'Other plastic';
+      case DisposalItemType.paper:
+        return 'Paper and cardboard';
+      case DisposalItemType.glass:
+        return 'Glass';
+      case DisposalItemType.metal:
+        return 'Metal and cans';
+      case DisposalItemType.eWaste:
+        return 'Electronic waste';
+      case DisposalItemType.organic:
+        return 'Organic waste';
+    }
+  }
+}
+
+/// Why a submission was routed to human review instead of being auto-approved.
+///
+/// Recorded on the submission and shown to the reviewing administrator, so the
+/// queue explains itself rather than presenting a photo with no context. A
+/// submission may carry several flags at once.
+enum DisposalFlag {
+  /// GPS position fell outside the bin's radius.
+  outsideRadius,
+
+  /// The photo's perceptual hash closely matches one this user submitted before.
+  duplicatePhoto,
+
+  /// The AI's read of the photo disagrees with the count the user declared.
+  countMismatch,
+
+  /// The AI's confidence fell below the auto-approve threshold.
+  lowConfidence,
+
+  /// The AI did not see the declared material in the photo.
+  itemTypeMismatch,
+
+  /// The user has already had the maximum approved disposals today (§7.3).
+  dailyCapReached,
+
+  /// The AI service could not be reached or errored. Fail toward review, never
+  /// toward payout.
+  screeningUnavailable,
+
+  /// The photograph's perceptual hash could not be computed, so it was never
+  /// compared against this user's earlier submissions (F2.11).
+  ///
+  /// Distinct from [duplicatePhoto] and from its absence. "No match found" and
+  /// "could not look" are different answers, and treating them alike is what let
+  /// a submission take the auto-approve lane with the duplicate defence never
+  /// having run — the hash step threw, nothing was flagged, `flags.length == 0`,
+  /// and it paid out. Fail toward review, exactly like
+  /// [screeningUnavailable].
+  hashUnavailable;
+
+  static DisposalFlag? fromName(String? name) {
+    for (final flag in DisposalFlag.values) {
+      if (flag.name == name) return flag;
+    }
+    return null;
+  }
+
+  /// Sentence shown to the administrator in the review queue.
+  String get explanation {
+    switch (this) {
+      case DisposalFlag.outsideRadius:
+        return 'Captured position was outside the bin radius.';
+      case DisposalFlag.duplicatePhoto:
+        return 'Photo closely matches an earlier submission by this user.';
+      case DisposalFlag.countMismatch:
+        return 'Declared item count does not match what the screen detected.';
+      case DisposalFlag.lowConfidence:
+        return 'Automated screening was not confident enough to decide.';
+      case DisposalFlag.itemTypeMismatch:
+        return 'Declared material was not detected in the photo.';
+      case DisposalFlag.dailyCapReached:
+        return 'User has reached the daily approved-disposal cap.';
+      case DisposalFlag.hashUnavailable:
+        return 'The photo could not be fingerprinted, so it was not compared '
+            'against earlier submissions.';
+      case DisposalFlag.screeningUnavailable:
+        return 'Automated screening was unavailable; not yet checked.';
+    }
+  }
+}
+
+/// One disposal submission.
+class DisposalModel {
+  /// Firestore document ID. Null before the document is written.
+  final String? id;
+
+  final String userId;
+  final String binId;
+
+  /// Cloudinary URL for the disposal photograph.
+  final String photoUrl;
+
+  /// Cloudinary public_id for the stored image.
+  ///
+  /// Needed server-side: the perceptual hash is computed from an 8x8 grayscale
+  /// transform of this image, and the transform URL is built from the public
+  /// id. Written by the client because only the client sees the upload
+  /// response, and harmless in its hands — it names an image that is already
+  /// public at an unguessable URL.
+  final String photoPublicId;
+
+  /// Perceptual hash of the photograph, used for duplicate detection.
+  ///
+  /// SERVER-WRITTEN ONLY. This is null on the document the client creates. The
+  /// trusted service computes it from the stored image and writes it during
+  /// screening. A client-supplied hash would be worthless — a modified app would
+  /// simply send a fresh random value every time and the check would never fire.
+  final String? photoHash;
+
+  /// Coordinates reported by the device at capture time.
+  final double capturedLat;
+  final double capturedLng;
+
+  /// Distance from the bin as computed on-device, in metres.
+  ///
+  /// Display and feedback only. The server recomputes this from
+  /// [capturedLat]/[capturedLng] and never trusts the number stored here — a
+  /// client can lie about both the distance and the coordinates, but storing the
+  /// raw inputs at least makes the lie auditable (§7.4, F2.5).
+  final double distanceMeters;
+
+  /// How many items the user says they are disposing of.
+  final int declaredItemCount;
+
+  /// What the user says the items are.
+  final DisposalItemType itemType;
+
+  final DisposalStatus status;
+
+  /// Why this went to review. Empty on an auto-approved submission.
+  final List<DisposalFlag> flags;
+
+  /// Screening confidence, 0.0–1.0. Null if screening has not run or failed.
+  final double? screenConfidence;
+
+  /// Item count the screen believes it saw. Null if it could not tell.
+  final int? screenItemCount;
+
+  /// Short free-text note from the screening service, for the admin queue only.
+  /// Never shown to the user — it would teach people how to game the screen.
+  final String? screenNotes;
+
+  /// Points credited, snapshotted at decision time.
+  ///
+  /// Null until approved. Once set it is never recomputed from the current
+  /// policy: an administrator lowering the disposal award must not rewrite what
+  /// past submissions were worth (see `points_policy.dart`).
+  final int? pointsAwarded;
+
+  /// Mandatory on rejection, and surfaced to the user.
+  final String? rejectionReason;
+
+  /// UID of the deciding administrator. Null on an auto-approved submission —
+  /// which is precisely how the two approval paths stay distinguishable.
+  final String? reviewedBy;
+
+  final DateTime? reviewedAt;
+  final DateTime? createdAt;
+
+  const DisposalModel({
+    this.id,
+    required this.userId,
+    required this.binId,
+    required this.photoUrl,
+    this.photoPublicId = '',
+    this.photoHash,
+    required this.capturedLat,
+    required this.capturedLng,
+    required this.distanceMeters,
+    required this.declaredItemCount,
+    required this.itemType,
+    this.status = DisposalStatus.pending,
+    this.flags = const <DisposalFlag>[],
+    this.screenConfidence,
+    this.screenItemCount,
+    this.screenNotes,
+    this.pointsAwarded,
+    this.rejectionReason,
+    this.reviewedBy,
+    this.reviewedAt,
+    this.createdAt,
+  });
+
+  factory DisposalModel.fromJson(Map<String, dynamic> json, {String? id}) {
+    final rawFlags = json['flags'];
+    final flags = <DisposalFlag>[];
+    if (rawFlags is List) {
+      for (final entry in rawFlags) {
+        final flag = DisposalFlag.fromName(entry as String?);
+        if (flag != null) flags.add(flag);
+      }
+    }
+
+    return DisposalModel(
+      id: id ?? json['id'] as String?,
+      userId: (json['userId'] as String?) ?? '',
+      binId: (json['binId'] as String?) ?? '',
+      photoUrl: (json['photoUrl'] as String?) ?? '',
+      photoPublicId: (json['photoPublicId'] as String?) ?? '',
+      photoHash: json['photoHash'] as String?,
+      capturedLat: _toDouble(json['capturedLat']),
+      capturedLng: _toDouble(json['capturedLng']),
+      distanceMeters: _toDouble(json['distanceMeters']),
+      declaredItemCount: _toInt(json['declaredItemCount']),
+      itemType: DisposalItemType.fromName(json['itemType'] as String?) ??
+          DisposalItemType.plasticOther,
+      status: DisposalStatus.fromName(json['status'] as String?),
+      flags: flags,
+      screenConfidence: _toNullableDouble(json['screenConfidence']),
+      screenItemCount: _toNullableInt(json['screenItemCount']),
+      screenNotes: json['screenNotes'] as String?,
+      pointsAwarded: _toNullableInt(json['pointsAwarded']),
+      rejectionReason: json['rejectionReason'] as String?,
+      reviewedBy: json['reviewedBy'] as String?,
+      reviewedAt: json['reviewedAt'] as DateTime?,
+      createdAt: json['createdAt'] as DateTime?,
+    );
+  }
+
+  /// Field map for a Firestore write.
+  ///
+  /// Timestamps are omitted — the service layer writes them with
+  /// `FieldValue.serverTimestamp()` (§7.4). [photoHash], [screenConfidence],
+  /// [screenItemCount], [screenNotes], [pointsAwarded] and [status] transitions
+  /// are written by the trusted server, not by this map from the client.
+  /// Full serialisation, INCLUDING server-owned fields.
+  ///
+  /// Not the write path, and must never become one. `createPendingDisposal` uses
+  /// [toCreateJson], which omits `pointsAwarded`, `photoHash`, `screenConfidence`
+  /// and the rest by construction — the create rule uses `hasOnly`, so a document
+  /// carrying any of them is refused outright.
+  ///
+  /// This exists for the round-trip test that proves [fromJson] and this agree.
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'userId': userId,
+        'binId': binId,
+        'photoUrl': photoUrl,
+        if (photoHash != null) 'photoHash': photoHash,
+        'capturedLat': capturedLat,
+        'capturedLng': capturedLng,
+        'distanceMeters': distanceMeters,
+        'declaredItemCount': declaredItemCount,
+        'itemType': itemType.name,
+        'status': status.name,
+        'flags': flags.map((flag) => flag.name).toList(),
+        if (screenConfidence != null) 'screenConfidence': screenConfidence,
+        if (screenItemCount != null) 'screenItemCount': screenItemCount,
+        if (screenNotes != null) 'screenNotes': screenNotes,
+        if (pointsAwarded != null) 'pointsAwarded': pointsAwarded,
+        if (rejectionReason != null) 'rejectionReason': rejectionReason,
+        if (reviewedBy != null) 'reviewedBy': reviewedBy,
+      };
+
+  /// The map the *client* is allowed to write when creating a submission.
+  ///
+  /// Everything that decides a payout is absent by construction. The Firestore
+  /// rules enforce the same shape — this method exists so the client cannot
+  /// accidentally send a field the rules would reject, not as the security
+  /// measure itself. The rules are the security measure.
+  Map<String, dynamic> toCreateJson() => <String, dynamic>{
+        'userId': userId,
+        'binId': binId,
+        'photoUrl': photoUrl,
+        'photoPublicId': photoPublicId,
+        'capturedLat': capturedLat,
+        'capturedLng': capturedLng,
+        'distanceMeters': distanceMeters,
+        'declaredItemCount': declaredItemCount,
+        'itemType': itemType.name,
+        'status': DisposalStatus.pending.name,
+        'flags': const <String>[],
+      };
+
+  DisposalModel copyWith({
+    String? id,
+    String? userId,
+    String? binId,
+    String? photoUrl,
+    String? photoPublicId,
+    String? photoHash,
+    double? capturedLat,
+    double? capturedLng,
+    double? distanceMeters,
+    int? declaredItemCount,
+    DisposalItemType? itemType,
+    DisposalStatus? status,
+    List<DisposalFlag>? flags,
+    double? screenConfidence,
+    int? screenItemCount,
+    String? screenNotes,
+    int? pointsAwarded,
+    String? rejectionReason,
+    String? reviewedBy,
+    DateTime? reviewedAt,
+    DateTime? createdAt,
+  }) {
+    return DisposalModel(
+      id: id ?? this.id,
+      userId: userId ?? this.userId,
+      binId: binId ?? this.binId,
+      photoUrl: photoUrl ?? this.photoUrl,
+      photoPublicId: photoPublicId ?? this.photoPublicId,
+      photoHash: photoHash ?? this.photoHash,
+      capturedLat: capturedLat ?? this.capturedLat,
+      capturedLng: capturedLng ?? this.capturedLng,
+      distanceMeters: distanceMeters ?? this.distanceMeters,
+      declaredItemCount: declaredItemCount ?? this.declaredItemCount,
+      itemType: itemType ?? this.itemType,
+      status: status ?? this.status,
+      flags: flags ?? this.flags,
+      screenConfidence: screenConfidence ?? this.screenConfidence,
+      screenItemCount: screenItemCount ?? this.screenItemCount,
+      screenNotes: screenNotes ?? this.screenNotes,
+      pointsAwarded: pointsAwarded ?? this.pointsAwarded,
+      rejectionReason: rejectionReason ?? this.rejectionReason,
+      reviewedBy: reviewedBy ?? this.reviewedBy,
+      reviewedAt: reviewedAt ?? this.reviewedAt,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Derived state
+  // ---------------------------------------------------------------------------
+
+  bool get isPending => status.isPending;
+  bool get isApproved => status.isApproved;
+  bool get isRejected => status.isRejected;
+  bool get wasAutoApproved => status == DisposalStatus.autoApproved;
+  bool get wasManuallyApproved => status == DisposalStatus.manualApproved;
+
+  /// Points actually in the user's wallet from this submission.
+  /// Zero unless approved — a pending submission has awarded nothing.
+  int get creditedPoints => isApproved ? (pointsAwarded ?? 0) : 0;
+
+  bool get hasFlags => flags.isNotEmpty;
+
+  /// One-line status for the user's history screen.
+  String get userFacingStatus {
+    switch (status) {
+      case DisposalStatus.pending:
+        return 'Pending review';
+      case DisposalStatus.autoApproved:
+        return 'Approved';
+      case DisposalStatus.manualApproved:
+        return 'Manually verified';
+      case DisposalStatus.rejected:
+        return 'Rejected';
+    }
+  }
+
+  /// Structural problems with the record, independent of any decision.
+  ///
+  /// Not a substitute for the rules or the server checks — this catches a
+  /// malformed submission early, in the app, before an upload is wasted.
+  List<String> validate() {
+    final problems = <String>[];
+    if (userId.trim().isEmpty) problems.add('User is required.');
+    if (binId.trim().isEmpty) problems.add('Bin is required.');
+    if (photoUrl.trim().isEmpty) problems.add('A photograph is required.');
+    if (declaredItemCount <= 0) {
+      problems.add('Item count must be at least 1.');
+    }
+    if (declaredItemCount > 100) {
+      problems.add('Item count is implausibly high.');
+    }
+    if (capturedLat.isNaN || capturedLat < -90 || capturedLat > 90) {
+      problems.add('Captured latitude is out of range.');
+    }
+    if (capturedLng.isNaN || capturedLng < -180 || capturedLng > 180) {
+      problems.add('Captured longitude is out of range.');
+    }
+    if (capturedLat == 0 && capturedLng == 0) {
+      problems.add('Location fix failed; try again with GPS enabled.');
+    }
+    if (status.isRejected &&
+        (rejectionReason == null || rejectionReason!.trim().isEmpty)) {
+      problems.add('A rejection must record a reason.');
+    }
+    if (status.isApproved && (pointsAwarded == null || pointsAwarded! <= 0)) {
+      problems.add('An approved submission must record the points awarded.');
+    }
+    if (status == DisposalStatus.manualApproved &&
+        (reviewedBy == null || reviewedBy!.trim().isEmpty)) {
+      problems.add('A manual approval must record the reviewing administrator.');
+    }
+    return problems;
+  }
+
+  bool get isValid => validate().isEmpty;
+
+  @override
+  String toString() =>
+      'DisposalModel(id: $id, status: ${status.name}, flags: '
+      '${flags.map((f) => f.name).toList()}, points: $pointsAwarded)';
+}
+
+double _toDouble(Object? value, {double fallback = 0.0}) {
+  if (value is double) return value;
+  if (value is num) return value.toDouble();
+  return fallback;
+}
+
+double? _toNullableDouble(Object? value) {
+  if (value is double) return value;
+  if (value is num) return value.toDouble();
+  return null;
+}
+
+int _toInt(Object? value, {int fallback = 0}) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  return fallback;
+}
+
+int? _toNullableInt(Object? value) {
+  if (value is int) return value;
+  if (value is num) return value.toInt();
+  return null;
+}
+
+=========== FILE: lib/models/transaction_model.dart ===========
+/// The ledger entry written alongside every balance change (NFR-4).
+///
+/// Plain Dart, no Firebase imports. The service layer converts `Timestamp` to
+/// `DateTime` on the way in, so this file stays emulator-free and testable.
+///
+/// Every field here is written by the trusted server. The client never creates
+/// a transaction — rules deny client writes to the collection entirely — so
+/// this model is read-only in practice and carries no `toFirestore` path.
+library;
+
+/// Where a balance change came from.
+///
+/// `unknown` exists so that a source value this build does not recognise
+/// renders as "Other" instead of crashing the ledger. Reads are forgiving;
+/// writes are strict and happen server-side.
+enum TransactionSource { disposal, purchase, claim, redemption, unknown }
+
+TransactionSource parseTransactionSource(Object? raw) {
+  final name = raw is String ? raw : raw?.toString().split('.').last;
+  switch (name) {
+    case 'disposal':
+      return TransactionSource.disposal;
+    case 'purchase':
+      return TransactionSource.purchase;
+    case 'claim':
+      return TransactionSource.claim;
+    case 'redemption':
+      return TransactionSource.redemption;
+    default:
+      return TransactionSource.unknown;
+  }
+}
+
+extension TransactionSourceDisplay on TransactionSource {
+  /// The value as stored in Firestore.
+  String get wireValue => name;
+
+  /// User-facing label. Named for what the user did, not for the schema.
+  String get label {
+    switch (this) {
+      case TransactionSource.disposal:
+        return 'Waste disposal';
+      case TransactionSource.purchase:
+        return 'Marketplace purchase';
+      case TransactionSource.claim:
+        return 'Eco-action claim';
+      case TransactionSource.redemption:
+        return 'Points redeemed';
+      case TransactionSource.unknown:
+        return 'Other';
+    }
+  }
+
+  /// One line explaining why the balance moved, shown under the label.
+  String get description {
+    switch (this) {
+      case TransactionSource.disposal:
+        return 'Verified disposal at a registered bin';
+      case TransactionSource.purchase:
+        return 'Reward for a confirmed order';
+      case TransactionSource.claim:
+        return 'Approved self-reported action';
+      case TransactionSource.redemption:
+        return 'Spent at checkout';
+      case TransactionSource.unknown:
+        return '';
+    }
+  }
+}
+
+class TransactionModel {
+  const TransactionModel({
+    required this.id,
+    required this.userId,
+    required this.delta,
+    required this.source,
+    this.refId,
+    this.balanceAfter,
+    this.createdAt,
+  });
+
+  /// Firestore document id.
+  final String id;
+
+  final String userId;
+
+  /// Signed. Positive credits, negative debits.
+  final int delta;
+
+  final TransactionSource source;
+
+  /// The disposal, claim or order this entry settles. Null only on entries
+  /// that reference nothing.
+  final String? refId;
+
+  /// The wallet balance immediately after this entry was applied. Server
+  /// written inside the same transaction as the balance itself.
+  final int? balanceAfter;
+
+  /// Null while the server timestamp is still unresolved locally.
+  final DateTime? createdAt;
+
+  bool get isCredit => delta > 0;
+
+  /// `+50` / `-120`.
+  String get signedDelta => delta > 0 ? '+$delta' : '$delta';
+
+  /// Tolerant on numbers: Firestore returns integers as `int` but a value that
+  /// has been through JSON may arrive as `double` or as a numeric string.
+  static int? _asInt(Object? value) {
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value);
+    return null;
+  }
+
+  /// [data] must already have `createdAt` converted from `Timestamp` to
+  /// `DateTime` by the service layer.
+  factory TransactionModel.fromMap(String id, Map<String, dynamic> data) {
+    final created = data['createdAt'];
+    return TransactionModel(
+      id: id,
+      userId: (data['userId'] as String?) ?? '',
+      delta: _asInt(data['delta']) ?? 0,
+      source: parseTransactionSource(data['source']),
+      refId: data['refId'] as String?,
+      balanceAfter: _asInt(data['balanceAfter']),
+      createdAt: created is DateTime ? created : null,
+    );
+  }
+
+  // `toMap()` was deleted rather than kept.
+  //
+  // Zero callers in `lib/`, in `test/` and on the server, and it was actively
+  // misleading: no client may ever write a `transactions` document — the rules
+  // refuse it to an administrator as flatly as to a buyer — so a serialiser for
+  // one could only ever have been used by mistake. Every ledger entry is written
+  // by `award.js` inside the same transaction that moves the balance, which is
+  // what makes "no client writes a balance" true without qualification.
+
+  @override
+  String toString() =>
+      'TransactionModel($id, ${source.wireValue}, $signedDelta, after=$balanceAfter)';
+}
+
+=========== FILE: lib/models/seller_application_model.dart ===========
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../core/constants.dart';
+
+class SellerApplicationModel {
+  final String id;
+  final String userId;
+  final String businessName;
+  final String description;
+  final String status;
+  /// Server time the application was submitted.
+  ///
+  /// Nullable because it is written with `FieldValue.serverTimestamp()` per §6 —
+  /// this model was the last one still stamping the device clock — and Firestore
+  /// resolves that on the server, so the local echo carries null briefly.
+  final DateTime? createdAt;
+  final String? reviewedBy;
+  final DateTime? reviewedAt;
+  final String? reason;
+
+  const SellerApplicationModel({
+    required this.id,
+    required this.userId,
+    required this.businessName,
+    required this.description,
+    required this.status,
+    this.createdAt,
+    this.reviewedBy,
+    this.reviewedAt,
+    this.reason,
+  });
+
+  bool get isPending => status == AppConstants.statusPending;
+  bool get isApproved => status == AppConstants.statusApproved;
+
+  factory SellerApplicationModel.fromFirestore(DocumentSnapshot doc) {
+    final data = doc.data() as Map<String, dynamic>;
+    return SellerApplicationModel(
+      id: doc.id,
+      userId: data['userId'] as String,
+      businessName: data['businessName'] as String,
+      description: data['description'] as String,
+      status: data['status'] as String,
+      // Nullable-tolerant: `createdAt` is a pending server timestamp for one
+      // round trip after the write, and the old unchecked cast threw on exactly
+      // the document it had just created.
+      createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
+      reviewedBy: data['reviewedBy'] as String?,
+      reviewedAt: data['reviewedAt'] != null
+          ? (data['reviewedAt'] as Timestamp).toDate()
+          : null,
+      reason: data['reason'] as String?,
+    );
+  }
+
+  Map<String, dynamic> toFirestore() => {
+        'userId': userId,
+        'businessName': businessName,
+        'description': description,
+        'status': status,
+        // Omitted deliberately; the service supplies
+        // `FieldValue.serverTimestamp()`. Writing the device clock here let a
+        // phone with a skewed clock date its own application (§6).
+        if (reviewedBy != null) 'reviewedBy': reviewedBy,
+        if (reviewedAt != null) 'reviewedAt': Timestamp.fromDate(reviewedAt!),
+        if (reason != null) 'reason': reason,
+      };
+}
+
+=========== FILE: lib/services/auth_service.dart ===========
+import 'package:firebase_auth/firebase_auth.dart';
+
+class AuthService {
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+
+  Stream<User?> get authStateChanges => _auth.authStateChanges();
+
+  User? get currentUser => _auth.currentUser;
+
+  Future<UserCredential> signUp({
+    required String email,
+    required String password,
+  }) =>
+      _auth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+
+  Future<UserCredential> signIn({
+    required String email,
+    required String password,
+  }) =>
+      _auth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+
+  Future<void> signOut() => _auth.signOut();
+
+  /// Sends a password-reset email (F1.1).
+  ///
+  /// The only in-app recovery path there is. Without it a forgotten password is
+  /// terminal — there is no other route back into an account, and
+  /// `core/auth_errors.dart` was already carrying a `requires-recent-login`
+  /// message for a feature nothing implemented.
+  ///
+  /// Firebase deliberately does **not** report whether the address is registered,
+  /// and this does not attempt to find out. Telling a caller "no account exists
+  /// with that email" turns the reset form into an account-enumeration oracle —
+  /// the same reason `authErrorMessage` keeps the three credential failures
+  /// indistinguishable at sign-in. The caller shows the same confirmation either
+  /// way.
+  Future<void> sendPasswordReset(String email) =>
+      _auth.sendPasswordResetEmail(email: email.trim());
+}
+
+=========== FILE: lib/services/user_service.dart ===========
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../models/user_model.dart';
+import '../models/wallet_model.dart';
+import '../models/seller_application_model.dart';
+import '../core/constants.dart';
+
+class UserService {
+  /// Resolved on use rather than in a field initializer.
+  ///
+  /// As a `final` field this ran at construction, so `UserService()` threw
+  /// unless Firebase had already been initialised — which made the class
+  /// impossible to subclass in a unit test even to replace a single method that
+  /// never touches Firestore. `FirebaseFirestore.instance` returns the same
+  /// object every call, so deferring it costs nothing.
+  FirebaseFirestore get _db => FirebaseFirestore.instance;
+
+  // ── registration ──────────────────────────────────────────────────────────
+
+  /// Creates user doc + wallet doc atomically at registration (F1.1).
+  ///
+  /// Both timestamps come from `FieldValue.serverTimestamp()` rather than the
+  /// device, per §6 of the brief. They used to be `DateTime.now()`, which meant
+  /// a phone with a skewed clock wrote a join date and a wallet date that the
+  /// server never agreed to — and unlike a disposal, nothing downstream ever
+  /// re-checks these, so a wrong value would have stayed wrong forever.
+  ///
+  /// The batch is what makes this safe to run from the client: the rules allow
+  /// creating a wallet only at a zero balance, and a user document only for
+  /// yourself at role `buyer` and status `active`, so neither half can be abused
+  /// and both land together or not at all.
+  Future<void> createUserWithWallet(UserModel user) async {
+    final batch = _db.batch();
+
+    batch.set(_db.collection('users').doc(user.uid), {
+      ...user.toFirestore(),
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+
+    batch.set(_db.collection('wallets').doc(user.uid), {
+      ...WalletModel(userId: user.uid, balance: 0).toFirestore(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    await batch.commit();
+  }
+
+  // ── profile management (F1.1) ─────────────────────────────────────────────
+
+  /// Renames the signed-in user's own account.
+  ///
+  /// The write carries **only** `name`, and that is a hard requirement rather
+  /// than tidiness. The rule is:
+  ///
+  ///     allow update: if isSelf(uid)
+  ///       && request.resource.data.diff(resource.data)
+  ///            .affectedKeys().hasOnly(['name'])
+  ///
+  /// `hasOnly` means the diff may contain nothing else. Adding a companion
+  /// `updatedAt` — the reflex on a write like this — would make every rename
+  /// fail with permission-denied, and the failure would look like a rules
+  /// misconfiguration rather than an extra field.
+  ///
+  /// Role and status are absent for the same reason they are absent from the
+  /// rule: a user must not be able to promote or un-suspend themselves.
+  Future<void> updateName({required String uid, required String name}) =>
+      _db.collection('users').doc(uid).update({'name': name});
+
+  // ── user reads ────────────────────────────────────────────────────────────
+
+  Future<UserModel?> getUser(String uid) async {
+    final doc = await _db.collection('users').doc(uid).get();
+    if (!doc.exists) return null;
+    return UserModel.fromFirestore(doc);
+  }
+
+  Stream<UserModel?> watchUser(String uid) =>
+      _db.collection('users').doc(uid).snapshots().map(
+            (doc) => doc.exists ? UserModel.fromFirestore(doc) : null,
+          );
+
+  // ── admin: user list ──────────────────────────────────────────────────────
+
+  Stream<List<UserModel>> watchAllUsers() =>
+      _db.collection('users').snapshots().map(
+            (snap) => snap.docs.map(UserModel.fromFirestore).toList(),
+          );
+
+  Future<void> updateUserRole(String uid, String role) =>
+      _db.collection('users').doc(uid).update({'role': role});
+
+  /// Suspends [uid], indefinitely when [until] is null (F5.2, F5.3).
+  ///
+  /// A timed suspension stores its expiry and nothing further happens. No job
+  /// lifts it later — readers resolve the date themselves, in
+  /// `UserModel.isActiveAt` and in `isActive()` in the rules.
+  ///
+  /// LIMITATION: [until] is computed from the administrator's device clock,
+  /// because Firestore cannot offset a server timestamp within a single write.
+  /// A skewed admin clock produces a skewed expiry. The comparison it is later
+  /// checked against is server-side (`request.time`), so this affects how long
+  /// a suspension lasts — never whether the suspended user can shorten it.
+  Future<void> suspendUser(String uid, {DateTime? until}) =>
+      _db.collection('users').doc(uid).update({
+        'status': AppConstants.statusSuspended,
+        'suspendedAt': FieldValue.serverTimestamp(),
+        'suspendedUntil':
+            until == null ? FieldValue.delete() : Timestamp.fromDate(until),
+      });
+
+  /// Lifts a suspension and clears any expiry, so a later indefinite
+  /// suspension cannot inherit a stale date.
+  Future<void> reinstateUser(String uid) =>
+      _db.collection('users').doc(uid).update({
+        'status': AppConstants.statusActive,
+        'reinstatedAt': FieldValue.serverTimestamp(),
+        'suspendedUntil': FieldValue.delete(),
+      });
+
+  // ── seller applications ───────────────────────────────────────────────────
+
+  /// Files a seller application (F1.2).
+  ///
+  /// `createdAt` is supplied here with `FieldValue.serverTimestamp()`. The model
+  /// used to stamp `Timestamp.fromDate(DateTime.now())` from the device — it was
+  /// the last model still doing so — which let a phone with a skewed clock date
+  /// its own application, and an administrator sorts the queue by that field.
+  Future<void> submitSellerApplication(SellerApplicationModel app) =>
+      _db.collection('sellerApplications').add({
+        ...app.toFirestore(),
+        'createdAt': FieldValue.serverTimestamp(),
+      });
+
+  Stream<List<SellerApplicationModel>> watchPendingApplications() =>
+      _db
+          .collection('sellerApplications')
+          .where('status', isEqualTo: AppConstants.statusPending)
+          .snapshots()
+          .map((snap) =>
+              snap.docs.map(SellerApplicationModel.fromFirestore).toList());
+
+  Stream<List<SellerApplicationModel>> watchUserApplications(String uid) =>
+      _db
+          .collection('sellerApplications')
+          .where('userId', isEqualTo: uid)
+          .snapshots()
+          .map((snap) =>
+              snap.docs.map(SellerApplicationModel.fromFirestore).toList());
+
+  Future<void> reviewApplication({
+    required String appId,
+    required String status,
+    required String reviewedBy,
+    String? reason,
+  }) async {
+    final batch = _db.batch();
+
+    batch.update(
+      _db.collection('sellerApplications').doc(appId),
+      {
+        'status': status,
+        'reviewedBy': reviewedBy,
+        'reviewedAt': FieldValue.serverTimestamp(),
+        'reason': ?reason,
+      },
+    );
+
+    if (status == AppConstants.statusApproved) {
+      // find the userId from the application first
+      final appDoc =
+          await _db.collection('sellerApplications').doc(appId).get();
+
+      // Checked rather than force-unwrapped. `appDoc.data()!['userId'] as String`
+      // threw a raw type error on a deleted application or a document missing the
+      // field, in the middle of a batch that also flips a role — so an
+      // administrator pressing Approve got an unhandled exception instead of a
+      // message, with no indication whether anything had been written.
+      final userId = appDoc.data()?['userId'];
+      if (userId is! String || userId.isEmpty) {
+        throw StateError(
+          'That application no longer names a user, so no role was changed.',
+        );
+      }
+
+      batch.update(
+        _db.collection('users').doc(userId),
+        {'role': AppConstants.roleSeller},
+      );
+    }
+
+    await batch.commit();
+  }
+
+  // ── wallet ────────────────────────────────────────────────────────────────
+
+  Stream<WalletModel?> watchWallet(String uid) =>
+      _db.collection('wallets').doc(uid).snapshots().map(
+            (doc) => doc.exists ? WalletModel.fromFirestore(doc) : null,
+          );
+}
+
+=========== FILE: lib/services/photo_upload_service.dart ===========
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:flutter/foundation.dart';
+import 'package:http/http.dart' as http;
+
+import '../core/api_config.dart';
+
+import '../core/network_errors.dart';
+
+/// Uploads disposal photographs through the trusted service.
+///
+/// The image does not go to a storage bucket directly. It goes to the Node
+/// service, which holds the image-host credentials and which needs the raw bytes
+/// anyway — to compute the perceptual hash and to send the image for screening.
+/// One transfer instead of two, and the hash describes exactly the bytes that
+/// were stored.
+///
+/// The user's identity is taken from the Firebase ID token sent with the
+/// request, never from anything in the body. A caller cannot upload into someone
+/// else's folder by claiming a different uid.
+class PhotoUploadService {
+  final http.Client _client;
+
+  PhotoUploadService({http.Client? client}) : _client = client ?? http.Client();
+
+  /// Uploads [file] and returns its URL and Cloudinary public id.
+  ///
+  /// The public id is needed by the verification pipeline: the perceptual hash
+  /// is computed from an 8x8 grayscale transform of the stored image, and that
+  /// transform URL is built from the public id. The server has always returned
+  /// it; it was previously discarded here.
+  ///
+  /// Throws [PhotoUploadException] with a message fit to show a user.
+  Future<UploadedPhoto> uploadDisposalPhoto(File file) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      throw const PhotoUploadException('You are not signed in.');
+    }
+
+    final token = await user.getIdToken();
+    final bytes = await file.readAsBytes();
+
+    http.Response response;
+    try {
+      response = await _client
+          .post(
+            ApiConfig.path('/photos/disposal'),
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': 'Bearer $token',
+            },
+            body: jsonEncode({'imageBase64': base64Encode(bytes)}),
+          )
+          .timeout(ApiConfig.coldStartTimeout);
+    } on TimeoutException catch (error) {
+      // The genuine cold start: the free instance sleeps after ~15 minutes and
+      // the first request back takes 30-60 seconds. Only this clause should
+      // produce the "took too long" message.
+      _log('timed out after ${ApiConfig.coldStartTimeout}', error);
+      throw PhotoUploadException(slowServerMessage);
+    } on SocketException catch (error) {
+      _log('socket failure — no route to the host', error);
+      throw PhotoUploadException(unreachableServerMessage);
+    } on http.ClientException catch (error) {
+      // On the web build this is the CORS signature: the browser refuses the
+      // request and `package:http` reports "XMLHttpRequest error" with no
+      // detail. It is not a socket failure, so it used to fall through to the
+      // generic clause and read as a timeout. Check the origin against
+      // ALLOWED_ORIGINS on the server before suspecting the network.
+      _log('client exception — on web, check CORS and the origin', error);
+      throw PhotoUploadException(unreachableServerMessage);
+    } catch (error, stackTrace) {
+      _log('unexpected failure sending the photo', error, stackTrace);
+      throw const PhotoUploadException(
+        'Something went wrong sending the photo. Try again.',
+      );
+    }
+
+    if (response.statusCode == 200) {
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final url = body['photoUrl'] as String?;
+      if (url == null || url.isEmpty) {
+        throw const PhotoUploadException(
+          'The server did not return a photo URL.',
+        );
+      }
+      return UploadedPhoto(
+        url: url,
+        // Absent only from an older server build.
+        //
+        // An empty id means `verifyDisposal` skips the hash step entirely. That
+        // now routes to review rather than approving: it leaves
+        // `duplicateChecked` false, `decide()` raises `hashUnavailable`, and a
+        // flagged submission cannot take the auto-approve lane.
+        //
+        // This comment previously asserted the same outcome while nothing
+        // implemented it — the skipped check produced no flag at all, so an
+        // empty id auto-approved with the duplicate defence never having run.
+        publicId: (body['publicId'] as String?) ?? '',
+      );
+    }
+
+    // The server sends a user-safe message for anything it considers the
+    // caller's fault; everything else gets a generic one.
+    String message = 'The photo could not be uploaded.';
+    try {
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      final serverMessage = body['message'] as String?;
+      if (serverMessage != null && serverMessage.isNotEmpty) {
+        message = serverMessage;
+      }
+    } catch (error) {
+      // Non-JSON response — keep the generic message, but say so in debug.
+      _log('response body was not JSON (${response.statusCode})', error);
+    }
+
+    if (response.statusCode == 401 || response.statusCode == 403) {
+      throw const PhotoUploadException(
+        'Your session has expired. Sign in again.',
+      );
+    }
+
+    throw PhotoUploadException(message);
+  }
+}
+
+/// Writes the underlying failure to the debug console without changing what the
+/// user is told. Stripped from release builds.
+void _log(String context, Object error, [StackTrace? stackTrace]) {
+  if (!kDebugMode) return;
+  debugPrint('[PhotoUploadService] $context: $error');
+  if (stackTrace != null) debugPrint('$stackTrace');
+}
+
+/// A stored photograph: where it lives, and how the server can address it.
+class UploadedPhoto {
+  const UploadedPhoto({required this.url, required this.publicId});
+
+  final String url;
+  final String publicId;
+}
+
+class PhotoUploadException implements Exception {
+  final String message;
+  const PhotoUploadException(this.message);
+
+  @override
+  String toString() => message;
+}
+
+=========== FILE: lib/controllers/auth_controller.dart ===========
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../services/auth_service.dart';
+import '../services/user_service.dart';
+import '../models/user_model.dart';
+import '../core/auth_errors.dart';
+import '../core/constants.dart';
+// Scoped import. `push_controller.dart` imports `firebaseAuthStateProvider` from
+// this file, so the two form a cycle — which Dart permits for library imports
+// (unlike `part` files). Both sides are `show`-scoped to keep the intent legible.
+import 'push_controller.dart' show pushServiceProvider;
+
+final authServiceProvider = Provider<AuthService>((ref) => AuthService());
+final userServiceProvider = Provider<UserService>((ref) => UserService());
+
+// raw Firebase auth state
+final firebaseAuthStateProvider = StreamProvider<User?>((ref) {
+  return ref.watch(authServiceProvider).authStateChanges;
+});
+
+// resolved UserModel from Firestore
+final currentUserProvider = StreamProvider<UserModel?>((ref) {
+  final authState = ref.watch(firebaseAuthStateProvider);
+  return authState.when(
+    data: (user) {
+      if (user == null) return Stream.value(null);
+      return ref.watch(userServiceProvider).watchUser(user.uid);
+    },
+    loading: () => Stream.value(null),
+    error: (_, _) => Stream.value(null),
+  );
+});
+
+// auth actions
+class AuthController extends AsyncNotifier<void> {
+  @override
+  Future<void> build() async {}
+
+  /// Runs [action], converting any Firebase auth failure into an [AuthFailure]
+  /// whose message is already fit to display.
+  ///
+  /// The views read `state.error` and render it directly, so the conversion has
+  /// to happen here — on the far side of that boundary there is no longer
+  /// enough information to say anything useful, and `toString()` on the vendor
+  /// exception is what used to reach the user.
+  Future<void> _guard(Future<void> Function() action) async {
+    state = const AsyncLoading();
+    state = await AsyncValue.guard(() async {
+      try {
+        await action();
+      } on FirebaseAuthException catch (err) {
+        throw AuthFailure(authErrorMessage(err.code), code: err.code);
+      }
+    });
+  }
+
+  Future<void> signUp({
+    required String name,
+    required String email,
+    required String password,
+  }) async {
+    await _guard(() async {
+      final authService = ref.read(authServiceProvider);
+      final userService = ref.read(userServiceProvider);
+
+      final credential = await authService.signUp(
+        email: email,
+        password: password,
+      );
+
+      final created = credential.user;
+      if (created == null) {
+        // Should not happen after a successful signUp, but the alternative was
+        // `credential.user!`, and a null there would have surfaced as a bare
+        // type error instead of anything a user could act on.
+        throw const AuthFailure(
+          'The account was created but could not be opened. Try signing in.',
+          code: 'missing-credential-user',
+        );
+      }
+
+      final user = UserModel(
+        uid: created.uid,
+        name: name,
+        email: email,
+        role: AppConstants.roleBuyer,
+        status: AppConstants.statusActive,
+        // createdAt comes from the server — see UserModel.toFirestore.
+      );
+
+      try {
+        // atomic: user doc + wallet doc in one batch
+        await userService.createUserWithWallet(user);
+      } catch (error) {
+        // Registration is two steps against two different systems: an Auth
+        // account, then a Firestore profile. Failing the second used to leave
+        // an account that could authenticate and do nothing else — no role, no
+        // wallet, no name — and the only way out was the recovery screen.
+        //
+        // Rolling the Auth account back turns that dead end into a plain retry,
+        // and frees the email address so the second attempt is not refused as
+        // already-in-use.
+        //
+        // Best effort: if the delete also fails the account survives and the
+        // recovery screen is still there to catch it. Either way the original
+        // failure is what gets reported, because that is the one that explains
+        // what went wrong.
+        try {
+          await created.delete();
+        } catch (_) {
+          // Swallowed on purpose. Reporting a cleanup failure instead of the
+          // real cause would send the user chasing the wrong problem.
+        }
+        rethrow;
+      }
+    });
+  }
+
+  Future<void> signIn({
+    required String email,
+    required String password,
+  }) async {
+    await _guard(() async {
+      await ref.read(authServiceProvider).signIn(
+            email: email,
+            password: password,
+          );
+    });
+  }
+
+  /// Sends a password-reset email (F1.1).
+  ///
+  /// Succeeds silently whether or not the address is registered. Firebase does
+  /// not say, and the view must not imply it either: a form that answered "no
+  /// such account" would let anyone test which email addresses hold accounts,
+  /// which is the same leak `authErrorMessage` avoids by keeping the three
+  /// credential failures indistinguishable at sign-in.
+  ///
+  /// `invalid-email` is still reported, because that is about the text typed
+  /// rather than about who exists.
+  Future<void> sendPasswordReset(String email) async {
+    await _guard(() async {
+      await ref.read(authServiceProvider).sendPasswordReset(email);
+    });
+  }
+
+  /// Signs out, retiring this device's push registration first (F7.1).
+  ///
+  /// The order is the whole point, and getting it wrong fails silently.
+  ///
+  /// `users/{uid}/devices/{token}` is deletable only by `isSelf(uid)`. After
+  /// `signOut` there is no `request.auth`, so the rules refuse the delete and the
+  /// document is stranded server-side — still listed, still notified. The next
+  /// decision for *this* account then lights up the phone of whoever signs in
+  /// next, carrying a rejection reason written for somebody else. Shared and
+  /// borrowed phones are normal in this project's setting, so that is a real
+  /// disclosure rather than a hypothetical one.
+  ///
+  /// It cannot be driven off the auth stream going null for the same reason —
+  /// see `PushRegistrar`, which handles registration but deliberately not this.
+  ///
+  /// The cleanup never throws and is not allowed to block the sign-out. A user
+  /// who taps sign out must end up signed out even if the network is gone; a
+  /// stranded token is the lesser failure, and the server prunes tokens FCM
+  /// reports as dead anyway.
+  Future<void> signOut() async {
+    await _guard(() async {
+      final uid = ref.read(authServiceProvider).currentUser?.uid;
+      if (uid != null) {
+        await ref.read(pushServiceProvider).unregisterDevice(uid);
+      }
+
+      await ref.read(authServiceProvider).signOut();
+    });
+  }
+}
+
+final authControllerProvider =
+    AsyncNotifierProvider<AuthController, void>(AuthController.new);
+
+=========== FILE: lib/views/auth/login_view.dart ===========
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import '../../controllers/auth_controller.dart';
+import '../../core/auth_errors.dart';
+import '../../core/theme.dart';
+import '../../core/validators.dart';
+
+class LoginView extends ConsumerStatefulWidget {
+  const LoginView({super.key});
+
+  @override
+  ConsumerState<LoginView> createState() => _LoginViewState();
+}
+
+class _LoginViewState extends ConsumerState<LoginView> {
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+
+  /// Lets the email field's keyboard "next" key move focus to the password
+  /// rather than dismissing itself, which is what it did before.
+  final _passwordFocus = FocusNode();
+
+  bool _obscurePassword = true;
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    _passwordFocus.dispose();
+    super.dispose();
+  }
+
+  /// Sends a password-reset email (F1.1).
+  ///
+  /// Confirms the same way whether or not the address has an account. Firebase
+  /// does not report which, and this must not imply it either — a form that
+  /// answered "no such account" would let anyone test which email addresses hold
+  /// accounts. That is the same leak `authErrorMessage` avoids by keeping the
+  /// three credential failures indistinguishable, and it would be a poor place to
+  /// undo it.
+  ///
+  /// The email field is validated first, and reused, so someone who has already
+  /// typed their address does not type it twice.
+  Future<void> _forgotPassword() async {
+    FocusScope.of(context).unfocus();
+
+    final email = _emailController.text.trim();
+    final invalid = validateEmail(email);
+
+    if (invalid != null) {
+      final scheme = Theme.of(context).colorScheme;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('Enter your email address first — $invalid.'),
+            backgroundColor: scheme.errorContainer,
+          ),
+        );
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Reset your password?'),
+        content: Text(
+          'We will email a reset link to $email. Open it on this device and '
+          'choose a new password.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Send link'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) return;
+
+    await ref.read(authControllerProvider.notifier).sendPasswordReset(email);
+    if (!mounted) return;
+
+    final error = ref.read(authControllerProvider).error;
+    final scheme = Theme.of(context).colorScheme;
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          // A malformed address is worth reporting — that is about the text
+          // typed, not about who exists. Anything else confirms, including the
+          // case where no account has that address.
+          content: Text(
+            error == null
+                ? 'If an account exists for $email, a reset link is on its way.'
+                : (error is AuthFailure ? error.message : authErrorMessage(null)),
+          ),
+          backgroundColor: error == null ? null : scheme.errorContainer,
+          showCloseIcon: true,
+        ),
+      );
+  }
+
+  Future<void> _submit() async {
+    // Dismiss the keyboard first: the error snackbar appears at the bottom of
+    // the screen, and an open keyboard covered it entirely on a small phone.
+    FocusScope.of(context).unfocus();
+
+    if (!_formKey.currentState!.validate()) return;
+
+    await ref.read(authControllerProvider.notifier).signIn(
+          email: _emailController.text.trim(),
+          password: _passwordController.text,
+        );
+
+    if (!mounted) return;
+    final error = ref.read(authControllerProvider).error;
+    if (error == null) return;
+
+    final scheme = Theme.of(context).colorScheme;
+    ScaffoldMessenger.of(context)
+      // One message at a time. Tapping Sign In twice used to stack snackbars,
+      // so the second attempt's result queued behind the first.
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            // The controller has already converted the vendor exception into
+            // something readable. `error.toString()` used to land here, which
+            // put "[firebase_auth/invalid-credential] The supplied auth
+            // credential is incorrect, malformed or has expired." in front of
+            // someone who had mistyped their password.
+            error is AuthFailure ? error.message : authErrorMessage(null),
+          ),
+          backgroundColor: scheme.errorContainer,
+          showCloseIcon: true,
+        ),
+      );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isLoading = ref.watch(authControllerProvider).isLoading;
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(AppTheme.gapLg),
+            child: ConstrainedBox(
+              constraints:
+                  const BoxConstraints(maxWidth: AppTheme.maxFormWidth),
+              // AutofillGroup lets the platform password manager see the email
+              // and password as one credential and offer to save it.
+              child: AutofillGroup(
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Icon(Icons.eco,
+                          size: 64, color: theme.colorScheme.primary),
+                      const SizedBox(height: AppTheme.gapMd),
+                      Text(
+                        'Chokro',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.headlineMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: theme.colorScheme.primary,
+                        ),
+                      ),
+                      const SizedBox(height: AppTheme.gapSm),
+                      Text(
+                        'Sign in to continue',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: AppTheme.gapXl),
+                      TextFormField(
+                        controller: _emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        textInputAction: TextInputAction.next,
+                        autofillHints: const [AutofillHints.email],
+                        autocorrect: false,
+                        // Email addresses are case-insensitive and never
+                        // capitalised; the default sentence-case keyboard made
+                        // every address start with a capital on iOS.
+                        textCapitalization: TextCapitalization.none,
+                        enabled: !isLoading,
+                        decoration: const InputDecoration(
+                          labelText: 'Email',
+                          prefixIcon: Icon(Icons.email_outlined),
+                        ),
+                        validator: validateEmail,
+                        onFieldSubmitted: (_) => _passwordFocus.requestFocus(),
+                      ),
+                      const SizedBox(height: AppTheme.gapMd),
+                      TextFormField(
+                        controller: _passwordController,
+                        focusNode: _passwordFocus,
+                        obscureText: _obscurePassword,
+                        textInputAction: TextInputAction.done,
+                        autofillHints: const [AutofillHints.password],
+                        enabled: !isLoading,
+                        decoration: InputDecoration(
+                          labelText: 'Password',
+                          prefixIcon: const Icon(Icons.lock_outlined),
+                          suffixIcon: IconButton(
+                            tooltip:
+                                _obscurePassword ? 'Show password' : 'Hide password',
+                            icon: Icon(_obscurePassword
+                                ? Icons.visibility_outlined
+                                : Icons.visibility_off_outlined),
+                            onPressed: () => setState(
+                                () => _obscurePassword = !_obscurePassword),
+                          ),
+                        ),
+                        // Only "required" on sign-in. A minimum length here was
+                        // wrong: it is a check on the password being *created*,
+                        // and applying it at sign-in refuses to even try an
+                        // older short password, showing a validation error where
+                        // the truthful answer is "that is not your password".
+                        validator: (v) => (v == null || v.isEmpty)
+                            ? 'Enter your password'
+                            : null,
+                        // The keyboard's done key submits, so the user never has
+                        // to dismiss it to reach the button.
+                        onFieldSubmitted: (_) => isLoading ? null : _submit(),
+                      ),
+                      const SizedBox(height: AppTheme.gapLg),
+                      FilledButton(
+                        onPressed: isLoading ? null : _submit,
+                        child: isLoading
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Text('Sign In'),
+                      ),
+                      const SizedBox(height: AppTheme.gapSm),
+                      TextButton(
+                        onPressed: isLoading ? null : _forgotPassword,
+                        child: const Text('Forgot your password?'),
+                      ),
+                      TextButton(
+                        onPressed: isLoading ? null : () => context.go('/register'),
+                        child: const Text("Don't have an account? Register"),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+=========== FILE: lib/models/bin_model.dart ===========
+/// Chokro — bin model (F2.1).
+///
+/// Plain Dart, no Firebase imports (§5.1). The service layer converts Firestore
+/// `Timestamp` values to [DateTime] before calling [BinModel.fromJson], and back
+/// again on write. Models never know what a Timestamp is.
+library;
+
+/// A registered disposal point.
+///
+/// Bins are created by an administrator standing at the bin, so `lat`/`lng` come
+/// from a live GPS fix rather than typed input (§5.3). The [qrPayload] is printed
+/// and attached to the physical bin.
+class BinModel {
+  /// Firestore document ID. Null for a bin not yet written.
+  final String? id;
+
+  /// Human-readable name shown in the app and on the printed label,
+  /// e.g. "Merul Badda — Block C gate".
+  final String label;
+
+  final double lat;
+  final double lng;
+
+  /// Accepted distance in metres for a disposal submission at this bin.
+  /// Tuned per bin: a rooftop bin in a dense block needs a tighter radius than
+  /// one in an open compound.
+  final double radiusMeters;
+
+  /// The opaque identifier encoded into the printed QR code.
+  ///
+  /// SECURITY: this carries no coordinates and no user data (§6). A photographed
+  /// or copied code discloses nothing, and possessing one proves nothing — it
+  /// only names a bin. Standing near that bin is proved separately, by GPS.
+  final String qrPayload;
+
+  /// Inactive bins stop accepting submissions but are never deleted, because
+  /// past disposals reference them and a dangling reference breaks history.
+  final bool active;
+
+  /// UID of the administrator who registered the bin.
+  final String createdBy;
+
+  final DateTime? createdAt;
+
+  const BinModel({
+    this.id,
+    required this.label,
+    required this.lat,
+    required this.lng,
+    required this.radiusMeters,
+    required this.qrPayload,
+    required this.active,
+    required this.createdBy,
+    this.createdAt,
+  });
+
+  factory BinModel.fromJson(Map<String, dynamic> json, {String? id}) {
+    return BinModel(
+      id: id ?? json['id'] as String?,
+      label: (json['label'] as String?) ?? '',
+      lat: _toDouble(json['lat']),
+      lng: _toDouble(json['lng']),
+      radiusMeters: _toDouble(json['radiusMeters'], fallback: 50.0),
+      qrPayload: (json['qrPayload'] as String?) ?? '',
+      active: (json['active'] as bool?) ?? true,
+      createdBy: (json['createdBy'] as String?) ?? '',
+      createdAt: json['createdAt'] as DateTime?,
+    );
+  }
+
+  /// Field map for a Firestore write.
+  ///
+  /// [createdAt] is deliberately omitted: it must be written with
+  /// `FieldValue.serverTimestamp()` by the service layer, never with a
+  /// client-authored clock value (§7.4).
+  Map<String, dynamic> toJson() => <String, dynamic>{
+        'label': label,
+        'lat': lat,
+        'lng': lng,
+        'radiusMeters': radiusMeters,
+        'qrPayload': qrPayload,
+        'active': active,
+        'createdBy': createdBy,
+      };
+
+  BinModel copyWith({
+    String? id,
+    String? label,
+    double? lat,
+    double? lng,
+    double? radiusMeters,
+    String? qrPayload,
+    bool? active,
+    String? createdBy,
+    DateTime? createdAt,
+  }) {
+    return BinModel(
+      id: id ?? this.id,
+      label: label ?? this.label,
+      lat: lat ?? this.lat,
+      lng: lng ?? this.lng,
+      radiusMeters: radiusMeters ?? this.radiusMeters,
+      qrPayload: qrPayload ?? this.qrPayload,
+      active: active ?? this.active,
+      createdBy: createdBy ?? this.createdBy,
+      createdAt: createdAt ?? this.createdAt,
+    );
+  }
+
+  /// Human-readable problems with this bin. Empty means it is safe to save.
+  List<String> validate() {
+    final problems = <String>[];
+    if (label.trim().isEmpty) {
+      problems.add('Bin label is required.');
+    }
+    if (qrPayload.trim().isEmpty) {
+      problems.add('QR payload is required.');
+    }
+    if (createdBy.trim().isEmpty) {
+      problems.add('Creating administrator is required.');
+    }
+    if (lat.isNaN || lat < -90 || lat > 90) {
+      problems.add('Latitude is out of range.');
+    }
+    if (lng.isNaN || lng < -180 || lng > 180) {
+      problems.add('Longitude is out of range.');
+    }
+    if (lat == 0 && lng == 0) {
+      problems.add('Coordinates look like a failed GPS fix.');
+    }
+    if (radiusMeters <= 0) {
+      problems.add('Radius must be greater than zero.');
+    }
+    if (radiusMeters > 1000) {
+      problems.add('Radius may not exceed 1000 m — a geofence that large '
+          'no longer proves the user was at the bin.');
+    }
+    return problems;
+  }
+
+  bool get isValid => validate().isEmpty;
+
+  /// Whether this bin can currently accept submissions.
+  bool get acceptsSubmissions => active && isValid;
+
+  @override
+  String toString() => 'BinModel(id: $id, label: $label, active: $active)';
+
+  @override
+  bool operator ==(Object other) =>
+      other is BinModel &&
+      other.id == id &&
+      other.label == label &&
+      other.lat == lat &&
+      other.lng == lng &&
+      other.radiusMeters == radiusMeters &&
+      other.qrPayload == qrPayload &&
+      other.active == active &&
+      other.createdBy == createdBy &&
+      other.createdAt == createdAt;
+
+  @override
+  int get hashCode => Object.hash(
+        id,
+        label,
+        lat,
+        lng,
+        radiusMeters,
+        qrPayload,
+        active,
+        createdBy,
+        createdAt,
+      );
+}
+
+double _toDouble(Object? value, {double fallback = 0.0}) {
+  if (value is double) return value;
+  if (value is int) return value.toDouble();
+  if (value is num) return value.toDouble();
+  return fallback;
+}
+

@@ -9,6 +9,7 @@ import '../../core/label_format.dart';
 import '../../core/theme.dart';
 import '../../models/claim_model.dart';
 import '../shared/app_shell.dart';
+import '../shared/error_retry.dart';
 
 /// Submitting a self-reported eco-action (F6.1, F6.2, F6.4).
 ///
@@ -244,7 +245,11 @@ class ClaimHistoryList extends ConsumerWidget {
 
     return claims.when(
       loading: () => const Center(child: CircularProgressIndicator()),
-      error: (error, _) => Text('Claims did not load: $error'),
+      error: (error, _) => ErrorRetry(
+        error: error,
+        title: 'Your eco-actions',
+        onRetry: () => ref.invalidate(userClaimsProvider),
+      ),
       data: (items) {
         if (items.isEmpty) {
           return Text(

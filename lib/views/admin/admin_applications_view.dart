@@ -5,6 +5,7 @@ import '../../controllers/seller_application_controller.dart';
 import '../../models/seller_application_model.dart';
 import '../shared/app_shell.dart';
 import '../shared/rejection_reason_dialog.dart';
+import '../shared/error_retry.dart';
 
 class AdminApplicationsView extends ConsumerWidget {
   const AdminApplicationsView({super.key});
@@ -74,11 +75,10 @@ class AdminApplicationsView extends ConsumerWidget {
       title: 'Seller applications',
       child: pendingAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
-        error: (e, _) => Center(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Text('Could not load the queue: $e'),
-          ),
+        error: (e, _) => ErrorRetry(
+          error: e,
+          title: 'The application queue',
+          onRetry: () => ref.invalidate(pendingApplicationsProvider),
         ),
         data: (apps) {
           if (apps.isEmpty) {

@@ -7,6 +7,7 @@ import '../../core/label_format.dart';
 import '../../models/disposal_model.dart';
 import '../shared/app_shell.dart';
 import '../shared/status_chip.dart';
+import '../../core/network_errors.dart';
 
 /// Every submission the signed-in user has made, newest first (F7.2).
 ///
@@ -315,7 +316,9 @@ class _ErrorState extends StatelessWidget {
             Text('Submissions did not load', style: theme.textTheme.titleMedium),
             const SizedBox(height: 6),
             Text(
-              '$error',
+              // Interpreted, not printed. `'$error'` rendered the vendor
+              // prefix and class name straight to the user.
+              friendlyErrorMessage(error),
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall
                   ?.copyWith(color: theme.colorScheme.onSurfaceVariant),

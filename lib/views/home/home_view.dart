@@ -122,6 +122,19 @@ class HomeView extends ConsumerWidget {
                           badgeCount: pendingCount,
                           onTap: () => context.push('/history'),
                         ),
+
+                        // Separate from "My submissions", because that screen
+                        // reads disposals only. F7.2 asks for history "with
+                        // status and reason", and for eco-actions that lived
+                        // inside the submit form — visible only while composing a
+                        // new claim, gone the moment one was submitted.
+                        ActionCard(
+                          icon: Icons.eco_outlined,
+                          title: 'My eco-actions',
+                          subtitle: 'Status and reason for every action you '
+                              'have logged.',
+                          onTap: () => context.push('/claims'),
+                        ),
                         const SizedBox(height: AppTheme.gapSm),
                         ActionCard(
                           icon: Icons.account_balance_wallet_outlined,

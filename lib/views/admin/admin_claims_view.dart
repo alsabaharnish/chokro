@@ -7,6 +7,7 @@ import '../../core/label_format.dart';
 import '../../models/claim_model.dart';
 import '../shared/app_shell.dart';
 import '../shared/rejection_reason_dialog.dart';
+import '../shared/error_retry.dart';
 
 /// The claims review queue (F6.3).
 ///
@@ -41,11 +42,10 @@ class AdminClaimsView extends ConsumerWidget {
               const BoxConstraints(maxWidth: AdminClaimsView._maxContentWidth),
           child: pending.when(
             loading: () => const Center(child: CircularProgressIndicator()),
-            error: (error, _) => Center(
-              child: Padding(
-                padding: const EdgeInsets.all(32),
-                child: Text('The queue did not load: $error'),
-              ),
+            error: (error, _) => ErrorRetry(
+              error: error,
+              title: 'The claim queue',
+              onRetry: () => ref.invalidate(pendingClaimsProvider),
             ),
             data: (claims) {
               if (claims.isEmpty) {

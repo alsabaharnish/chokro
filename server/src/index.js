@@ -5,9 +5,16 @@
  *   GET  /whoami              auth      — token verification and Firestore reach
  *   GET  /admin/ping          admin     — role gating
  *   POST /photos/disposal     auth      — upload a disposal photograph
+ *   GET  /photos/limits       no auth   — the upload size ceiling
+ *   POST /disposals/:id/review   admin  — approve or reject (F2.8)
+ *   POST /disposals/:id/verify   auth   — the two-lane decision (F2.5, F2.10-12)
+ *   GET  /config/points       auth      — the points policy, with provenance
+ *   POST /config/points       admin     — validated policy write (F3.3)
+ *   POST /bins                admin     — register a bin (F2.1)
+ *   POST /bins/:id/active     admin     — take a bin in or out of service
+ *   POST /claims/:id/review   admin     — approve or reject a claim (F6.3)
  *
- * Still to come (M2): /disposals/:id/verify, /disposals/:id/review,
- * /config/points, and award.js — the single wallet-credit path.
+ * Every wallet credit goes through `award.js`, which is the single path.
  */
 
 require('dotenv').config();

@@ -11,6 +11,7 @@ import '../views/home/home_view.dart';
 import '../views/seller_application/seller_application_view.dart';
 import '../views/admin/admin_applications_view.dart';
 import '../views/admin/admin_claims_view.dart';
+import '../views/claims/claim_history_view.dart';
 import '../views/claims/claim_submit_view.dart';
 import '../views/admin/admin_bins_view.dart';
 import '../views/admin/admin_users_view.dart';
@@ -29,6 +30,55 @@ import '../views/shared/splash_view.dart';
 
 /// Shown while Firebase Auth is still resolving who — if anyone — is signed in.
 const String splashPath = '/splash';
+
+/// A destination deferred until the auth gate can decide on it.
+///
+/// The gate has to send an unresolved or anonymous visitor somewhere — the splash
+/// or the sign-in screen — and until now that destination replaced the one they
+/// asked for, permanently. Two paths lost:
+///
+///  * An administrator cold-opening `/admin/bins` waited on the splash and then
+///    landed on `/home`.
+///  * A **push tap from a terminated state** (F7.1). `main.dart` reads
+///    `initialMessage()` in a post-frame callback and calls `go('/history')`; if
+///    the gate had not resolved by that moment, the redirect swallowed it. That is
+///    the notification path most worth demonstrating, and it silently went to the
+///    wrong screen.
+///
+/// Held in memory rather than as a `?from=` query parameter, because the URL bar
+/// is not the right place for it on mobile and a cold-start deep link is already
+/// in `state.matchedLocation` on the first redirect pass.
+///
+/// SECURITY: consuming this returns a *location*, which sends the request back
+/// through `GoRouter`'s matching and through the target route's own `redirect`.
+/// A buyer who somehow arrives with `/admin/users` remembered still meets
+/// `requireAdmin` and still bounces to `/home`. Nothing here grants access; it
+/// only restores an intention.
+class PendingDestination {
+  String? _path;
+
+  /// Records where the visitor was trying to go.
+  ///
+  /// Last write wins. If someone taps a notification while sitting on the splash,
+  /// that newer intention is the right one to honour.
+  void remember(String path) => _path = path;
+
+  /// Returns the remembered path and forgets it.
+  ///
+  /// Cleared on read so a later sign-out and sign-in as somebody else cannot
+  /// teleport the new session to a screen the previous one had asked for.
+  String? consume() {
+    final path = _path;
+    _path = null;
+    return path;
+  }
+}
+
+final pendingDestinationProvider = Provider<PendingDestination>((ref) {
+  // Outlives the redirect passes that write and read it.
+  ref.keepAlive();
+  return PendingDestination();
+});
 
 /// Notifies go_router when the facts its redirects depend on have changed.
 ///
@@ -149,6 +199,7 @@ final routerProvider = Provider<GoRouter>((ref) {
   // which is the whole point (see [_AuthGateListenable]). Watching
   // `currentUserProvider` directly, as this used to, is what rebuilt it.
   final refreshListenable = ref.watch(_authGateProvider);
+  final pending = ref.watch(pendingDestinationProvider);
 
   /// The signed-in account, or null. Read fresh on each redirect pass.
   ({_Gate gate, UserModel? user}) resolve() {
@@ -226,14 +277,27 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       final (gate: gate, user: _) = resolve();
 
+      /// Whether [location] is somewhere worth returning to.
+      ///
+      /// The gate's own waypoints are not: remembering `/splash` or `/login`
+      /// would restore the screen the visitor was sent to rather than the one
+      /// they asked for.
+      bool isRealDestination() =>
+          !isSplash && !isAuthRoute && !isIncomplete && location != '/home';
+
       switch (gate) {
         case _Gate.unresolved:
           // Hold on the splash. Anywhere else would either flash the login
           // screen at a signed-in user or show a shell with no data in it.
-          return isSplash ? null : splashPath;
+          if (isSplash) return null;
+          if (isRealDestination()) pending.remember(location);
+          return splashPath;
 
         case _Gate.anonymous:
           if (isAuthRoute) return null;
+          // Kept across sign-in too: someone who follows a link, is asked to
+          // sign in, and does so should arrive where the link pointed.
+          if (isRealDestination()) pending.remember(location);
           return '/login';
 
         case _Gate.profileMissing:
@@ -242,7 +306,12 @@ final routerProvider = Provider<GoRouter>((ref) {
         case _Gate.signedIn:
           // Nothing to do on the splash but leave it, and an authenticated user
           // has no business on the sign-in screen or the recovery screen.
-          if (isSplash || isAuthRoute || isIncomplete) return '/home';
+          //
+          // `/home` is the fallback, not the destination. Hardcoding it here is
+          // what discarded admin deep links and terminated-state push taps.
+          if (isSplash || isAuthRoute || isIncomplete) {
+            return pending.consume() ?? '/home';
+          }
           return null;
       }
     },
@@ -270,6 +339,13 @@ final routerProvider = Provider<GoRouter>((ref) {
           // Already a seller: the application form has nothing to offer.
           return resolve().user!.isSeller ? '/home' : null;
         },
+      ),
+      GoRoute(
+        // Declared before '/claims/new' is irrelevant to go_router (paths are
+        // matched exactly), but kept adjacent so the pair is obvious.
+        path: '/claims',
+        builder: (context, state) => const ClaimHistoryView(),
+        redirect: requireSignedIn,
       ),
       GoRoute(
         path: '/claims/new',
