@@ -5,6 +5,10 @@ import '../services/user_service.dart';
 import '../models/user_model.dart';
 import '../core/auth_errors.dart';
 import '../core/constants.dart';
+// Scoped import. `push_controller.dart` imports `firebaseAuthStateProvider` from
+// this file, so the two form a cycle — which Dart permits for library imports
+// (unlike `part` files). Both sides are `show`-scoped to keep the intent legible.
+import 'push_controller.dart' show pushServiceProvider;
 
 final authServiceProvider = Provider<AuthService>((ref) => AuthService());
 final userServiceProvider = Provider<UserService>((ref) => UserService());
@@ -124,8 +128,32 @@ class AuthController extends AsyncNotifier<void> {
     });
   }
 
+  /// Signs out, retiring this device's push registration first (F7.1).
+  ///
+  /// The order is the whole point, and getting it wrong fails silently.
+  ///
+  /// `users/{uid}/devices/{token}` is deletable only by `isSelf(uid)`. After
+  /// `signOut` there is no `request.auth`, so the rules refuse the delete and the
+  /// document is stranded server-side — still listed, still notified. The next
+  /// decision for *this* account then lights up the phone of whoever signs in
+  /// next, carrying a rejection reason written for somebody else. Shared and
+  /// borrowed phones are normal in this project's setting, so that is a real
+  /// disclosure rather than a hypothetical one.
+  ///
+  /// It cannot be driven off the auth stream going null for the same reason —
+  /// see `PushRegistrar`, which handles registration but deliberately not this.
+  ///
+  /// The cleanup never throws and is not allowed to block the sign-out. A user
+  /// who taps sign out must end up signed out even if the network is gone; a
+  /// stranded token is the lesser failure, and the server prunes tokens FCM
+  /// reports as dead anyway.
   Future<void> signOut() async {
     await _guard(() async {
+      final uid = ref.read(authServiceProvider).currentUser?.uid;
+      if (uid != null) {
+        await ref.read(pushServiceProvider).unregisterDevice(uid);
+      }
+
       await ref.read(authServiceProvider).signOut();
     });
   }

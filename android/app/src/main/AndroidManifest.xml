@@ -4,6 +4,14 @@
     <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
 
+    <!-- Push notification on a decision (F7.1). Android 13 (API 33) and above
+         will not deliver a notification until the user grants this at runtime,
+         and the runtime prompt cannot be raised unless the permission is
+         declared here first. On earlier versions it is granted at install and
+         this line is inert. PushService.requestPermission raises the prompt on
+         first sign-in. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+
     <uses-feature android:name="android.hardware.camera" android:required="false"/>
     
     <application

@@ -1,0 +1,994 @@
+=========== FILE: lib/main.dart ===========
+import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'core/theme.dart';
+import 'firebase_options.dart';
+import 'routing/router.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  runApp(const ProviderScope(child: ChokroApp()));
+}
+
+class ChokroApp extends ConsumerWidget {
+  const ChokroApp({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final router = ref.watch(routerProvider);
+
+    return MaterialApp.router(
+      title: 'Chokro',
+      debugShowCheckedModeBanner: false,
+      theme: AppTheme.light(),
+      darkTheme: AppTheme.dark(),
+      // Follows the device. The app is used outdoors at a bin and indoors at a
+      // desk, and a user who has chosen dark mode system-wide has chosen it here
+      // too — there was previously no dark theme at all, so every screen was a
+      // full-brightness white panel at night.
+      themeMode: ThemeMode.system,
+      routerConfig: router,
+    );
+  }
+}
+
+=========== FILE: lib/models/user_model.dart ===========
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../core/constants.dart';
+
+/// A platform account.
+///
+/// ## Suspension and lazy expiry (F5.2, F5.3)
+///
+/// A suspension can be permanent or temporary. There is no scheduler in this
+/// system — Cloud Functions need a billing card and the free Render instance
+/// sleeps — so nothing exists that could wake up and lift a suspension when its
+/// time is up. A temporary suspension therefore expires *lazily*: the account
+/// is suspended for exactly as long as `suspendedUntil` is in the future, and
+/// the question is answered whenever someone asks it.
+///
+/// The same rule is written twice: [isActiveAt] here, and `isActive()` in
+/// `firestore.rules`, which compares `suspendedUntil` against `request.time`.
+/// The rules version is the one that enforces; this one exists so the interface
+/// can tell the user the truth. They must agree, and
+/// `rules_test/suspension.rules.test.js` proves the rules half.
+///
+/// `status` stays `'suspended'` after the expiry passes. Nothing rewrites it,
+/// because nothing is running to do so — a lapsed suspension is a suspended
+/// status plus a past date, and every reader resolves that for itself.
+class UserModel {
+  final String uid;
+  final String name;
+  final String email;
+  final String role;
+  final String status;
+
+  /// When the account was opened, as the *server* saw it.
+  ///
+  /// Nullable, and honestly so. It is written with
+  /// `FieldValue.serverTimestamp()`, which Firestore resolves on the server —
+  /// so the locally cached snapshot Firestore hands back immediately after
+  /// registration carries null here until the round trip completes. That window
+  /// is brief, but it is real, and it is on the signup path where every account
+  /// passes exactly once.
+  final DateTime? createdAt;
+
+  /// When a temporary suspension lapses.
+  ///
+  /// Null while active, and null for a *permanent* suspension — which is why
+  /// null must never be read as "not suspended". Only [isActiveAt] should
+  /// interpret this field.
+  final DateTime? suspendedUntil;
+
+  const UserModel({
+    required this.uid,
+    required this.name,
+    required this.email,
+    required this.role,
+    required this.status,
+    this.createdAt,
+    this.suspendedUntil,
+  });
+
+  bool get isAdmin => role == AppConstants.roleAdmin;
+  bool get isSeller => role == AppConstants.roleSeller || isAdmin;
+
+  /// Whether this account may act, evaluated at [now].
+  ///
+  /// Pure and clock-injected so it can be unit-tested without waiting. An
+  /// unrecognised status is not active — fail closed, the same way an
+  /// unrecognised disposal status falls back to `pending`.
+  bool isActiveAt(DateTime now) {
+    if (status == AppConstants.statusActive) return true;
+    if (status != AppConstants.statusSuspended) return false;
+
+    final until = suspendedUntil;
+    if (until == null) return false; // permanent
+    return now.isAfter(until);
+  }
+
+  bool get isActive => isActiveAt(DateTime.now());
+
+  /// Suspended with no end date.
+  bool get isSuspendedIndefinitely =>
+      status == AppConstants.statusSuspended && suspendedUntil == null;
+
+  /// Suspended now, but with an end date in the future.
+  bool get isSuspendedTemporarily =>
+      status == AppConstants.statusSuspended &&
+      suspendedUntil != null &&
+      !isActive;
+
+  /// Status still reads `suspended`, but the date has passed, so the account
+  /// is acting normally again. Worth surfacing in the admin list: it explains
+  /// why a "suspended" user is submitting.
+  bool get hasLapsedSuspension =>
+      status == AppConstants.statusSuspended &&
+      suspendedUntil != null &&
+      isActive;
+
+  /// Reads a user document, tolerating a field that is missing or the wrong
+  /// shape.
+  ///
+  /// Every cast here used to be unchecked — `data['name'] as String`,
+  /// `(data['createdAt'] as Timestamp).toDate()`, and the whole payload as a
+  /// `Map`. Any one of them throwing takes far more with it than
+  /// a single screen, because this factory sits under `watchUser`, which feeds
+  /// `currentUserProvider`, which the router's gate reads to decide where the
+  /// user is allowed to be. A throw there surfaces as an `AsyncError` with no
+  /// value, the gate reads "signed in with no profile", and a perfectly valid
+  /// account is redirected to the account-recovery screen — a dead end reached
+  /// because one field was the wrong type.
+  ///
+  /// `createdAt` is the case that actually happens: it is written with
+  /// `FieldValue.serverTimestamp()`, so the local echo of the registration write
+  /// has it as null for one round trip. The old cast crashed on precisely the
+  /// document it had just created.
+  ///
+  /// A missing role or status falls back to the least privileged value, never a
+  /// permissive one: an unreadable account gets buyer rights and an inactive
+  /// status, and the rules refuse anything more regardless of what this says.
+  factory UserModel.fromFirestore(DocumentSnapshot doc) =>
+      UserModel.fromMap(doc.data(), uid: doc.id);
+
+  /// The parsing itself, over a plain map.
+  ///
+  /// Split out so it can be tested without a `DocumentSnapshot` — that type is
+  /// sealed, so faking one means implementing a sealed class, and the analyzer
+  /// is right to object. This mirrors [BinModel.fromJson], which the rest of the
+  /// codebase already shapes this way.
+  factory UserModel.fromMap(Object? raw, {required String uid}) {
+    final data = raw is Map<String, dynamic> ? raw : const <String, dynamic>{};
+
+    return UserModel(
+      uid: uid,
+      name: _string(data['name']),
+      email: _string(data['email']),
+      // Fail closed. `isAdmin`/`isSeller` compare against these, so guessing
+      // upward here would hand out privileges on malformed data.
+      role: _string(data['role'], fallback: AppConstants.roleBuyer),
+      status: _string(data['status'], fallback: AppConstants.statusSuspended),
+      createdAt: _date(data['createdAt']),
+      suspendedUntil: _date(data['suspendedUntil']),
+    );
+  }
+
+  /// Field map for a Firestore write.
+  ///
+  /// Omits `suspendedUntil` when null rather than writing an explicit null.
+  /// Registration writes this map, and an absent key is cleaner than a null one
+  /// for a field that only an administrator ever sets.
+  ///
+  /// `createdAt` is deliberately omitted, exactly as [BinModel.toJson] omits
+  /// its own: §6 of the brief requires every `createdAt` to be written with
+  /// `FieldValue.serverTimestamp()`, and this used to write
+  /// `Timestamp.fromDate(DateTime.now())` from the device instead. A phone with
+  /// a wrong clock — or one deliberately set back — recorded a join date the
+  /// server never agreed to. The service layer supplies it; the rules require
+  /// the key to be present on create, and a server timestamp satisfies that.
+  Map<String, dynamic> toFirestore() => {
+        'name': name,
+        'email': email,
+        'role': role,
+        'status': status,
+        if (suspendedUntil != null)
+          'suspendedUntil': Timestamp.fromDate(suspendedUntil!),
+      };
+
+  /// [clearSuspendedUntil] exists because passing null to [suspendedUntil]
+  /// cannot be distinguished from omitting it.
+  UserModel copyWith({
+    String? name,
+    String? role,
+    String? status,
+    DateTime? suspendedUntil,
+    bool clearSuspendedUntil = false,
+  }) =>
+      UserModel(
+        uid: uid,
+        name: name ?? this.name,
+        email: email,
+        role: role ?? this.role,
+        status: status ?? this.status,
+        createdAt: createdAt,
+        suspendedUntil:
+            clearSuspendedUntil ? null : (suspendedUntil ?? this.suspendedUntil),
+      );
+}
+
+/// A string field, whatever Firestore actually returned.
+String _string(Object? value, {String fallback = ''}) =>
+    value is String ? value : fallback;
+
+/// A date field, tolerating both a resolved `Timestamp` and an unresolved
+/// `FieldValue.serverTimestamp()` that has not come back from the server yet.
+DateTime? _date(Object? value) {
+  if (value is Timestamp) return value.toDate();
+  // Firestore normally hands back Timestamp, but a document written by another
+  // client or a migration script can carry an ISO string or epoch millis.
+  if (value is DateTime) return value;
+  if (value is String) return DateTime.tryParse(value);
+  if (value is int) return DateTime.fromMillisecondsSinceEpoch(value);
+  return null;
+}
+
+=========== FILE: lib/services/user_service.dart ===========
+import 'package:cloud_firestore/cloud_firestore.dart';
+import '../models/user_model.dart';
+import '../models/wallet_model.dart';
+import '../models/seller_application_model.dart';
+import '../core/constants.dart';
+
+class UserService {
+  /// Resolved on use rather than in a field initializer.
+  ///
+  /// As a `final` field this ran at construction, so `UserService()` threw
+  /// unless Firebase had already been initialised — which made the class
+  /// impossible to subclass in a unit test even to replace a single method that
+  /// never touches Firestore. `FirebaseFirestore.instance` returns the same
+  /// object every call, so deferring it costs nothing.
+  FirebaseFirestore get _db => FirebaseFirestore.instance;
+
+  // ── registration ──────────────────────────────────────────────────────────
+
+  /// Creates user doc + wallet doc atomically at registration (F1.1).
+  ///
+  /// Both timestamps come from `FieldValue.serverTimestamp()` rather than the
+  /// device, per §6 of the brief. They used to be `DateTime.now()`, which meant
+  /// a phone with a skewed clock wrote a join date and a wallet date that the
+  /// server never agreed to — and unlike a disposal, nothing downstream ever
+  /// re-checks these, so a wrong value would have stayed wrong forever.
+  ///
+  /// The batch is what makes this safe to run from the client: the rules allow
+  /// creating a wallet only at a zero balance, and a user document only for
+  /// yourself at role `buyer` and status `active`, so neither half can be abused
+  /// and both land together or not at all.
+  Future<void> createUserWithWallet(UserModel user) async {
+    final batch = _db.batch();
+
+    batch.set(_db.collection('users').doc(user.uid), {
+      ...user.toFirestore(),
+      'createdAt': FieldValue.serverTimestamp(),
+    });
+
+    batch.set(_db.collection('wallets').doc(user.uid), {
+      ...WalletModel(userId: user.uid, balance: 0).toFirestore(),
+      'updatedAt': FieldValue.serverTimestamp(),
+    });
+
+    await batch.commit();
+  }
+
+  // ── profile management (F1.1) ─────────────────────────────────────────────
+
+  /// Renames the signed-in user's own account.
+  ///
+  /// The write carries **only** `name`, and that is a hard requirement rather
+  /// than tidiness. The rule is:
+  ///
+  ///     allow update: if isSelf(uid)
+  ///       && request.resource.data.diff(resource.data)
+  ///            .affectedKeys().hasOnly(['name'])
+  ///
+  /// `hasOnly` means the diff may contain nothing else. Adding a companion
+  /// `updatedAt` — the reflex on a write like this — would make every rename
+  /// fail with permission-denied, and the failure would look like a rules
+  /// misconfiguration rather than an extra field.
+  ///
+  /// Role and status are absent for the same reason they are absent from the
+  /// rule: a user must not be able to promote or un-suspend themselves.
+  Future<void> updateName({required String uid, required String name}) =>
+      _db.collection('users').doc(uid).update({'name': name});
+
+  // ── user reads ────────────────────────────────────────────────────────────
+
+  Future<UserModel?> getUser(String uid) async {
+    final doc = await _db.collection('users').doc(uid).get();
+    if (!doc.exists) return null;
+    return UserModel.fromFirestore(doc);
+  }
+
+  Stream<UserModel?> watchUser(String uid) =>
+      _db.collection('users').doc(uid).snapshots().map(
+            (doc) => doc.exists ? UserModel.fromFirestore(doc) : null,
+          );
+
+  // ── admin: user list ──────────────────────────────────────────────────────
+
+  Stream<List<UserModel>> watchAllUsers() =>
+      _db.collection('users').snapshots().map(
+            (snap) => snap.docs.map(UserModel.fromFirestore).toList(),
+          );
+
+  Future<void> updateUserRole(String uid, String role) =>
+      _db.collection('users').doc(uid).update({'role': role});
+
+  /// Suspends [uid], indefinitely when [until] is null (F5.2, F5.3).
+  ///
+  /// A timed suspension stores its expiry and nothing further happens. No job
+  /// lifts it later — readers resolve the date themselves, in
+  /// `UserModel.isActiveAt` and in `isActive()` in the rules.
+  ///
+  /// LIMITATION: [until] is computed from the administrator's device clock,
+  /// because Firestore cannot offset a server timestamp within a single write.
+  /// A skewed admin clock produces a skewed expiry. The comparison it is later
+  /// checked against is server-side (`request.time`), so this affects how long
+  /// a suspension lasts — never whether the suspended user can shorten it.
+  Future<void> suspendUser(String uid, {DateTime? until}) =>
+      _db.collection('users').doc(uid).update({
+        'status': AppConstants.statusSuspended,
+        'suspendedAt': FieldValue.serverTimestamp(),
+        'suspendedUntil':
+            until == null ? FieldValue.delete() : Timestamp.fromDate(until),
+      });
+
+  /// Lifts a suspension and clears any expiry, so a later indefinite
+  /// suspension cannot inherit a stale date.
+  Future<void> reinstateUser(String uid) =>
+      _db.collection('users').doc(uid).update({
+        'status': AppConstants.statusActive,
+        'reinstatedAt': FieldValue.serverTimestamp(),
+        'suspendedUntil': FieldValue.delete(),
+      });
+
+  // ── seller applications ───────────────────────────────────────────────────
+
+  Future<void> submitSellerApplication(SellerApplicationModel app) =>
+      _db.collection('sellerApplications').add(app.toFirestore());
+
+  Stream<List<SellerApplicationModel>> watchPendingApplications() =>
+      _db
+          .collection('sellerApplications')
+          .where('status', isEqualTo: AppConstants.statusPending)
+          .snapshots()
+          .map((snap) =>
+              snap.docs.map(SellerApplicationModel.fromFirestore).toList());
+
+  Stream<List<SellerApplicationModel>> watchUserApplications(String uid) =>
+      _db
+          .collection('sellerApplications')
+          .where('userId', isEqualTo: uid)
+          .snapshots()
+          .map((snap) =>
+              snap.docs.map(SellerApplicationModel.fromFirestore).toList());
+
+  Future<void> reviewApplication({
+    required String appId,
+    required String status,
+    required String reviewedBy,
+    String? reason,
+  }) async {
+    final batch = _db.batch();
+
+    batch.update(
+      _db.collection('sellerApplications').doc(appId),
+      {
+        'status': status,
+        'reviewedBy': reviewedBy,
+        'reviewedAt': FieldValue.serverTimestamp(),
+        'reason': ?reason,
+      },
+    );
+
+    if (status == AppConstants.statusApproved) {
+      // find the userId from the application first
+      final appDoc =
+          await _db.collection('sellerApplications').doc(appId).get();
+      final userId = appDoc.data()!['userId'] as String;
+      batch.update(
+        _db.collection('users').doc(userId),
+        {'role': AppConstants.roleSeller},
+      );
+    }
+
+    await batch.commit();
+  }
+
+  // ── wallet ────────────────────────────────────────────────────────────────
+
+  Stream<WalletModel?> watchWallet(String uid) =>
+      _db.collection('wallets').doc(uid).snapshots().map(
+            (doc) => doc.exists ? WalletModel.fromFirestore(doc) : null,
+          );
+}
+
+=========== FILE: lib/controllers/auth_controller.dart ===========
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import '../services/auth_service.dart';
+import '../services/user_service.dart';
+import '../models/user_model.dart';
+import '../core/auth_errors.dart';
+import '../core/constants.dart';
+
+final authServiceProvider = Provider<AuthService>((ref) => AuthService());
+final userServiceProvider = Provider<UserService>((ref) => UserService());
+
+// raw Firebase auth state
+final firebaseAuthStateProvider = StreamProvider<User?>((ref) {
+  return ref.watch(authServiceProvider).authStateChanges;
+});
+
+// resolved UserModel from Firestore
+final currentUserProvider = StreamProvider<UserModel?>((ref) {
+  final authState = ref.watch(firebaseAuthStateProvider);
+  return authState.when(
+    data: (user) {
+      if (user == null) return Stream.value(null);
+      return ref.watch(userServiceProvider).watchUser(user.uid);
+    },
+    loading: () => Stream.value(null),
+    error: (_, _) => Stream.value(null),
+  );
+});
+
+// auth actions
+class AuthController extends AsyncNotifier<void> {
+  @override
+  Future<void> build() async {}
+
+  /// Runs [action], converting any Firebase auth failure into an [AuthFailure]
+  /// whose message is already fit to display.
+  ///
+  /// The views read `state.error` and render it directly, so the conversion has
+  /// to happen here — on the far side of that boundary there is no longer
+  /// enough information to say anything useful, and `toString()` on the vendor
+  /// exception is what used to reach the user.
+  Future<void> _guard(Future<void> Function() action) async {
+    state = const AsyncLoading();
+    state = await AsyncValue.guard(() async {
+      try {
+        await action();
+      } on FirebaseAuthException catch (err) {
+        throw AuthFailure(authErrorMessage(err.code), code: err.code);
+      }
+    });
+  }
+
+  Future<void> signUp({
+    required String name,
+    required String email,
+    required String password,
+  }) async {
+    await _guard(() async {
+      final authService = ref.read(authServiceProvider);
+      final userService = ref.read(userServiceProvider);
+
+      final credential = await authService.signUp(
+        email: email,
+        password: password,
+      );
+
+      final created = credential.user;
+      if (created == null) {
+        // Should not happen after a successful signUp, but the alternative was
+        // `credential.user!`, and a null there would have surfaced as a bare
+        // type error instead of anything a user could act on.
+        throw const AuthFailure(
+          'The account was created but could not be opened. Try signing in.',
+          code: 'missing-credential-user',
+        );
+      }
+
+      final user = UserModel(
+        uid: created.uid,
+        name: name,
+        email: email,
+        role: AppConstants.roleBuyer,
+        status: AppConstants.statusActive,
+        // createdAt comes from the server — see UserModel.toFirestore.
+      );
+
+      try {
+        // atomic: user doc + wallet doc in one batch
+        await userService.createUserWithWallet(user);
+      } catch (error) {
+        // Registration is two steps against two different systems: an Auth
+        // account, then a Firestore profile. Failing the second used to leave
+        // an account that could authenticate and do nothing else — no role, no
+        // wallet, no name — and the only way out was the recovery screen.
+        //
+        // Rolling the Auth account back turns that dead end into a plain retry,
+        // and frees the email address so the second attempt is not refused as
+        // already-in-use.
+        //
+        // Best effort: if the delete also fails the account survives and the
+        // recovery screen is still there to catch it. Either way the original
+        // failure is what gets reported, because that is the one that explains
+        // what went wrong.
+        try {
+          await created.delete();
+        } catch (_) {
+          // Swallowed on purpose. Reporting a cleanup failure instead of the
+          // real cause would send the user chasing the wrong problem.
+        }
+        rethrow;
+      }
+    });
+  }
+
+  Future<void> signIn({
+    required String email,
+    required String password,
+  }) async {
+    await _guard(() async {
+      await ref.read(authServiceProvider).signIn(
+            email: email,
+            password: password,
+          );
+    });
+  }
+
+  Future<void> signOut() async {
+    await _guard(() async {
+      await ref.read(authServiceProvider).signOut();
+    });
+  }
+}
+
+final authControllerProvider =
+    AsyncNotifierProvider<AuthController, void>(AuthController.new);
+
+=========== FILE: lib/controllers/current_user_provider.dart ===========
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import 'auth_controller.dart' show firebaseAuthStateProvider;
+
+/// The signed-in user's uid, or null.
+///
+/// Delegates to the auth layer's existing stream rather than opening a second
+/// listener on `authStateChanges()`. One subscription, one source of truth.
+final currentUidProvider = Provider<String?>((ref) {
+  return ref.watch(firebaseAuthStateProvider).asData?.value?.uid;
+});
+
+=========== FILE: lib/core/api_config.dart ===========
+/// Where the trusted service lives.
+///
+/// Everything that decides a payout runs there, not here — see §5.1 of the
+/// project brief. The client calls it for photo upload now, and for submission
+/// verification once that endpoint exists.
+class ApiConfig {
+  const ApiConfig._();
+
+  /// Deployed service. Override at build time for local development:
+  ///
+  ///   flutter run --dart-define=CHOKRO_API=http://10.0.2.2:8787
+  ///
+  /// Note `10.0.2.2` rather than `localhost` on the Android emulator — the
+  /// emulator's localhost is the emulator itself. On a physical device, use the
+  /// Mac's LAN address instead.
+  static const String baseUrl = String.fromEnvironment(
+    'CHOKRO_API',
+    defaultValue: 'https://chokro.onrender.com',
+  );
+
+  static Uri path(String suffix) => Uri.parse('$baseUrl$suffix');
+
+  /// Render's free instance sleeps after roughly 15 minutes idle and takes
+  /// 30–60 seconds to wake. Requests must outlast that or the first submission
+  /// after a quiet period fails for no good reason.
+  static const Duration coldStartTimeout = Duration(seconds: 90);
+}
+
+=========== FILE: lib/core/constants.dart ===========
+class AppConstants {
+  // responsive breakpoint
+  static const double webBreakpoint = 900.0;
+
+  // user roles
+  static const String roleAdmin = 'admin';
+  static const String roleSeller = 'seller';
+  static const String roleBuyer = 'buyer';
+
+  // user status
+  static const String statusActive = 'active';
+  static const String statusSuspended = 'suspended';
+
+  // seller application status
+  static const String statusPending = 'pending';
+  static const String statusApproved = 'approved';
+  static const String statusRejected = 'rejected';
+}
+
+=========== FILE: lib/routing/router.dart ===========
+import 'package:firebase_auth/firebase_auth.dart' show User;
+import 'package:flutter/widgets.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
+import '../controllers/auth_controller.dart';
+import '../models/user_model.dart';
+import '../views/auth/login_view.dart';
+import '../views/auth/register_view.dart';
+import '../views/home/home_view.dart';
+import '../views/seller_application/seller_application_view.dart';
+import '../views/admin/admin_applications_view.dart';
+import '../views/admin/admin_claims_view.dart';
+import '../views/claims/claim_submit_view.dart';
+import '../views/admin/admin_bins_view.dart';
+import '../views/admin/admin_users_view.dart';
+import '../views/admin/points_policy_view.dart';
+import '../views/history/submission_history_view.dart';
+import '../views/profile/profile_view.dart';
+import '../views/wallet/wallet_ledger_view.dart';
+import '../views/disposal/scan_view.dart';
+import '../views/disposal/photo_view.dart';
+import '../views/disposal/location_view.dart';
+import '../views/disposal/declare_view.dart';
+import '../views/admin/admin_disposals_view.dart';
+import '../views/shared/account_incomplete_view.dart';
+import '../views/shared/route_error_view.dart';
+import '../views/shared/splash_view.dart';
+
+/// Shown while Firebase Auth is still resolving who — if anyone — is signed in.
+const String splashPath = '/splash';
+
+/// Notifies go_router when the facts its redirects depend on have changed.
+///
+/// ## Why this class exists
+///
+/// `routerProvider` used to `ref.watch` both the auth state and the user
+/// document, which meant a **new `GoRouter` instance** on every change to
+/// either. `MaterialApp.router` rebuilt with a new `routerConfig` throws away
+/// the `Navigator` and starts again at `initialLocation`, so any write to
+/// `users/{uid}` — an administrator flipping a role, a suspension lapsing —
+/// silently teleported the user to `/home`, losing an in-progress disposal
+/// three screens deep. Startup alone did it twice, as auth and then the user
+/// document resolved.
+///
+/// The router is now built exactly once and re-evaluates its redirects through
+/// this listenable instead. `notifyListeners` re-runs `redirect`; it does not
+/// touch the navigation stack.
+///
+/// Only the gate-relevant facts are forwarded, so an unrelated field changing
+/// on the user document does not cost a redirect pass.
+class _AuthGateListenable extends ChangeNotifier {
+  _AuthGateListenable(this._ref) {
+    _signature = _currentSignature();
+
+    // Both sources must be listened to, not just the profile.
+    //
+    // `currentUserProvider` returns `Stream.value(null)` from its own `loading`
+    // branch, so its value is an indistinguishable `null` both while auth is
+    // resolving and once auth has resolved to signed-out. Watching only that
+    // stream meant the signature read "anonymous" from the first frame and never
+    // *changed* when auth actually reported — so no notification fired, redirect
+    // never re-ran, and the app sat on the splash screen forever. The auth
+    // stream's own resolution state is the fact that changes.
+    _ref.listen<AsyncValue<User?>>(
+      firebaseAuthStateProvider,
+      (_, _) => _refresh(),
+    );
+    _ref.listen<AsyncValue<UserModel?>>(
+      currentUserProvider,
+      (_, _) => _refresh(),
+    );
+  }
+
+  final Ref _ref;
+  late String _signature;
+
+  void _refresh() {
+    final next = _currentSignature();
+    if (next == _signature) return;
+    _signature = next;
+    notifyListeners();
+  }
+
+  /// Everything `redirect` actually reads, flattened to a comparable string.
+  ///
+  /// Resolution state is part of it: "not signed in" and "we do not know yet"
+  /// lead to different destinations, so they must not compare equal.
+  String _currentSignature() {
+    final auth = _ref.read(firebaseAuthStateProvider);
+    if (auth.isLoading && !auth.hasValue) return 'auth:unresolved';
+    if (auth.value == null) return 'auth:anonymous';
+
+    // Same three-way order as `resolve()` below, for the same reason: a retained
+    // stale null makes `hasValue` true while the profile is still loading.
+    final profile = _ref.read(currentUserProvider);
+    final user = profile.value;
+
+    if (user != null) {
+      // Only the gate-relevant fields. A name or a wallet balance changing must
+      // not cost a redirect pass.
+      return 'user:${user.uid}|${user.role}|${user.status}'
+          '|${user.suspendedUntil}';
+    }
+
+    if (profile.isLoading) return 'profile:unresolved';
+    return 'profile:missing';
+  }
+}
+
+final _authGateProvider = Provider<_AuthGateListenable>((ref) {
+  // Riverpod 3 auto-disposes by default. Without this the gate was torn down the
+  // instant it was created — nothing depended on it, so its `ref.listen`
+  // subscriptions were cancelled before Firebase ever reported, `notifyListeners`
+  // never fired, and the app sat on the splash screen forever.
+  ref.keepAlive();
+
+  final listenable = _AuthGateListenable(ref);
+  ref.onDispose(listenable.dispose);
+  return listenable;
+});
+
+/// Shown when Firebase has a session but Firestore has no profile for it.
+const String accountIncompletePath = '/account-incomplete';
+
+/// What the gate knows about the signed-in account at redirect time.
+enum _Gate {
+  /// Auth has not reported yet, or the user document is still loading. Not the
+  /// same as signed out — treating it as such is what flashed the login screen
+  /// on every cold start.
+  unresolved,
+  anonymous,
+
+  /// Signed in, but `users/{uid}` does not exist. Registration writes the auth
+  /// account and the profile in two steps, so a failure between them leaves an
+  /// account that can authenticate and do nothing else. Both the old code and my
+  /// first attempt at this gate left such a user on an endless spinner; there is
+  /// no role to gate on and no name to greet, so the only honest move is to say
+  /// so and offer a way out.
+  profileMissing,
+
+  signedIn,
+}
+
+final routerProvider = Provider<GoRouter>((ref) {
+  // `watch`, so the dependency edge keeps the gate alive for as long as the
+  // router exists. It is safe here precisely because `_authGateProvider` returns
+  // one stable instance and never re-emits — so this never rebuilds the router,
+  // which is the whole point (see [_AuthGateListenable]). Watching
+  // `currentUserProvider` directly, as this used to, is what rebuilt it.
+  final refreshListenable = ref.watch(_authGateProvider);
+
+  /// The signed-in account, or null. Read fresh on each redirect pass.
+  ({_Gate gate, UserModel? user}) resolve() {
+    final auth = ref.read(firebaseAuthStateProvider);
+
+    // Auth itself has not reported yet.
+    if (auth.isLoading && !auth.hasValue) {
+      return (gate: _Gate.unresolved, user: null);
+    }
+    if (auth.value == null) return (gate: _Gate.anonymous, user: null);
+
+    // Signed in as far as Firebase is concerned. Now the profile that carries
+    // the role — and the order of these three checks matters.
+    //
+    // `currentUserProvider` returns `Stream.value(null)` from its own `loading`
+    // branch, so when auth resolves and it switches over to `watchUser(uid)`,
+    // Riverpod *retains that null as the previous value* while the new
+    // subscription loads. `hasValue` is therefore true with `value == null`, and
+    // a `isLoading && !hasValue` test does not fire. Reading that as "no
+    // document" flashed the account-recovery screen at every signed-in user on
+    // every cold start.
+    //
+    // `watchUser` emits null for a genuinely absent document too, so the only
+    // thing separating "still fetching" from "really not there" is `isLoading`.
+    final profile = ref.read(currentUserProvider);
+    final user = profile.value;
+
+    // A profile in hand wins, even mid-refresh — no reason to show a spinner
+    // over data we already have.
+    if (user != null) return (gate: _Gate.signedIn, user: user);
+
+    // No profile yet, but still arriving. Wait.
+    if (profile.isLoading) return (gate: _Gate.unresolved, user: null);
+
+    // Settled, signed in, and `users/{uid}` does not exist.
+    return (gate: _Gate.profileMissing, user: null);
+  }
+
+  /// Guards a route that requires an administrator.
+  ///
+  /// Waiting on [_Gate.unresolved] rather than bouncing to `/home` matters for
+  /// deep links: an administrator opening `/admin/users` from a notification
+  /// would otherwise be redirected away in the moment before their profile
+  /// loaded, and land somewhere they did not ask for.
+  String? requireAdmin(BuildContext context, GoRouterState state) {
+    final (gate: gate, user: user) = resolve();
+    return switch (gate) {
+      _Gate.unresolved => splashPath,
+      _Gate.anonymous => '/login',
+      _Gate.profileMissing => accountIncompletePath,
+      _Gate.signedIn => user!.isAdmin ? null : '/home',
+    };
+  }
+
+  String? requireSignedIn(BuildContext context, GoRouterState state) {
+    final (gate: gate, user: _) = resolve();
+    return switch (gate) {
+      _Gate.unresolved => splashPath,
+      _Gate.anonymous => '/login',
+      _Gate.profileMissing => accountIncompletePath,
+      _Gate.signedIn => null,
+    };
+  }
+
+  return GoRouter(
+    initialLocation: '/home',
+    refreshListenable: refreshListenable,
+    errorBuilder: (context, state) =>
+        RouteErrorView(location: state.uri.toString()),
+    redirect: (context, state) {
+      final location = state.matchedLocation;
+      final isAuthRoute = location == '/login' || location == '/register';
+      final isSplash = location == splashPath;
+      final isIncomplete = location == accountIncompletePath;
+
+      final (gate: gate, user: _) = resolve();
+
+      switch (gate) {
+        case _Gate.unresolved:
+          // Hold on the splash. Anywhere else would either flash the login
+          // screen at a signed-in user or show a shell with no data in it.
+          return isSplash ? null : splashPath;
+
+        case _Gate.anonymous:
+          if (isAuthRoute) return null;
+          return '/login';
+
+        case _Gate.profileMissing:
+          return isIncomplete ? null : accountIncompletePath;
+
+        case _Gate.signedIn:
+          // Nothing to do on the splash but leave it, and an authenticated user
+          // has no business on the sign-in screen or the recovery screen.
+          if (isSplash || isAuthRoute || isIncomplete) return '/home';
+          return null;
+      }
+    },
+    routes: [
+      GoRoute(
+        path: splashPath,
+        builder: (context, state) => const SplashView(),
+      ),
+      GoRoute(
+        path: accountIncompletePath,
+        builder: (context, state) => const AccountIncompleteView(),
+      ),
+      GoRoute(path: '/login', builder: (context, state) => const LoginView()),
+      GoRoute(
+        path: '/register',
+        builder: (context, state) => const RegisterView(),
+      ),
+      GoRoute(path: '/home', builder: (context, state) => const HomeView()),
+      GoRoute(
+        path: '/apply-seller',
+        builder: (context, state) => const SellerApplicationView(),
+        redirect: (context, state) {
+          final signedIn = requireSignedIn(context, state);
+          if (signedIn != null) return signedIn;
+          // Already a seller: the application form has nothing to offer.
+          return resolve().user!.isSeller ? '/home' : null;
+        },
+      ),
+      GoRoute(
+        path: '/claims/new',
+        builder: (context, state) => const ClaimSubmitView(),
+        redirect: requireSignedIn,
+      ),
+      GoRoute(
+        path: '/profile',
+        builder: (context, state) => const ProfileView(),
+        redirect: requireSignedIn,
+      ),
+      GoRoute(
+        path: '/history',
+        builder: (context, state) => const SubmissionHistoryView(),
+        redirect: requireSignedIn,
+      ),
+      GoRoute(
+        path: '/wallet',
+        builder: (context, state) => const WalletLedgerView(),
+        redirect: requireSignedIn,
+      ),
+      GoRoute(
+        path: '/dispose/scan',
+        builder: (context, state) => const ScanView(),
+        redirect: requireSignedIn,
+      ),
+      GoRoute(
+        path: '/dispose/photo',
+        builder: (context, state) => const DisposalPhotoView(),
+        redirect: requireSignedIn,
+      ),
+      GoRoute(
+        path: '/dispose/location',
+        builder: (context, state) => const DisposalLocationView(),
+        redirect: requireSignedIn,
+      ),
+      GoRoute(
+        path: '/dispose/declare',
+        builder: (context, state) => const DisposalDeclareView(),
+        redirect: requireSignedIn,
+      ),
+      GoRoute(
+        path: '/admin/applications',
+        builder: (context, state) => const AdminApplicationsView(),
+        redirect: requireAdmin,
+      ),
+      GoRoute(
+        path: '/admin/claims',
+        builder: (context, state) => const AdminClaimsView(),
+        redirect: requireAdmin,
+      ),
+      GoRoute(
+        path: '/admin/bins',
+        builder: (context, state) => const AdminBinsView(),
+        redirect: requireAdmin,
+      ),
+      GoRoute(
+        path: '/admin/users',
+        builder: (context, state) => const AdminUsersView(),
+        redirect: requireAdmin,
+      ),
+      GoRoute(
+        path: '/admin/points',
+        builder: (context, state) => const PointsPolicyView(),
+        redirect: requireAdmin,
+      ),
+      GoRoute(
+        path: '/admin/disposals',
+        builder: (context, state) => const AdminDisposalsView(),
+        redirect: requireAdmin,
+      ),
+    ],
+  );
+});
+
+=========== FILE: lib/services/auth_service.dart ===========
+import 'package:firebase_auth/firebase_auth.dart';
+
+class AuthService {
+  final FirebaseAuth _auth = FirebaseAuth.instance;
+
+  Stream<User?> get authStateChanges => _auth.authStateChanges();
+
+  User? get currentUser => _auth.currentUser;
+
+  Future<UserCredential> signUp({
+    required String email,
+    required String password,
+  }) =>
+      _auth.createUserWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+
+  Future<UserCredential> signIn({
+    required String email,
+    required String password,
+  }) =>
+      _auth.signInWithEmailAndPassword(
+        email: email,
+        password: password,
+      );
+
+  Future<void> signOut() => _auth.signOut();
+}
+

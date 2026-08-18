@@ -21,6 +21,8 @@
 const { db, admin, serverTimestamp } = require('./firebase');
 const policyModule = require('./pointsPolicy');
 const { creditWalletInTransaction, SOURCES } = require('./award');
+// Push on a decision (F7.1).
+const pushModule = require('./push');
 
 /** The closed action vocabulary. Mirrors ClaimActionType in Dart. */
 const ACTION_TYPES = Object.freeze([
@@ -49,7 +51,7 @@ async function approveClaim({ claimId, adminUid }) {
   const firestore = db();
   const claimRef = firestore.collection('claims').doc(claimId);
 
-  return firestore.runTransaction(async (txn) => {
+  const result = await firestore.runTransaction(async (txn) => {
     // ---- every read first ----
     const claimSnap = await txn.get(claimRef);
     if (!claimSnap.exists) throw new Error('That claim no longer exists.');
@@ -129,6 +131,15 @@ async function approveClaim({ claimId, adminUid }) {
       weeklyQuota: policy.claimQuotaPerWeek,
     };
   });
+
+  // After the commit — see `approveDisposal` for why a send inside a transaction
+  // can fire several times for one decision.
+  await pushModule.notifyClaimApproved({
+    userId: result.userId,
+    pointsAwarded: result.pointsAwarded,
+  });
+
+  return result;
 }
 
 /**
@@ -146,11 +157,17 @@ async function rejectClaim({ claimId, adminUid, reason }) {
   const firestore = db();
   const claimRef = firestore.collection('claims').doc(claimId);
 
-  return firestore.runTransaction(async (txn) => {
+  // Captured inside the transaction: the returned shape is asserted exactly by
+  // `server/test/server.test.js`, so it cannot grow a `userId`. Retry-safe, for
+  // the same reason as `rejectDisposal`.
+  let notifyUid = null;
+
+  const result = await firestore.runTransaction(async (txn) => {
     const snap = await txn.get(claimRef);
     if (!snap.exists) throw new Error('That claim no longer exists.');
 
     const claim = snap.data();
+    notifyUid = claim.userId;
     if (claim.status !== 'pending') {
       throw new Error(`That claim has already been decided (${claim.status}).`);
     }
@@ -171,6 +188,13 @@ async function rejectClaim({ claimId, adminUid, reason }) {
 
     return { claimId, status: 'rejected', reason: reason.trim() };
   });
+
+  await pushModule.notifyClaimRejected({
+    userId: notifyUid,
+    reason: result.reason,
+  });
+
+  return result;
 }
 
 /**

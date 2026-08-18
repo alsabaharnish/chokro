@@ -18,6 +18,9 @@
 
 const { db, admin, serverTimestamp } = require('./firebase');
 const policyModule = require('./pointsPolicy');
+// Push on a decision (F7.1). No cycle: award.js -> push.js -> firebase.js, and
+// push.js requires nothing else.
+const pushModule = require('./push');
 
 /** Valid `source` values for a ledger entry (§6). */
 const SOURCES = Object.freeze({
@@ -99,7 +102,7 @@ async function approveDisposal({ disposalId, adminUid = null, flags = [] }) {
   const firestore = db();
   const disposalRef = firestore.collection('disposals').doc(disposalId);
 
-  return firestore.runTransaction(async (txn) => {
+  const result = await firestore.runTransaction(async (txn) => {
     // ---- reads first, all of them ----
     const disposalSnap = await txn.get(disposalRef);
     if (!disposalSnap.exists) {
@@ -201,6 +204,27 @@ async function approveDisposal({ disposalId, adminUid = null, flags = [] }) {
       status: adminUid ? 'manualApproved' : 'autoApproved',
     };
   });
+
+  // AFTER the commit, never inside it.
+  //
+  // Firestore retries a transaction body on contention, so a send inside one
+  // fires once per attempt — three copies of "50 points added" for one approval.
+  // The wallet write survives that because Firestore commits only one attempt;
+  // an HTTP call to FCM does not.
+  //
+  // The hook lives here rather than in the route handler because auto-approval
+  // reaches this function through `verifyDisposal`, so covering the decision
+  // function covers both paths and makes "one decision, one notification" an
+  // invariant of the thing that decides. `notifyDisposalApproved` swallows its
+  // own failures: by this line the balance is credited and the ledger written,
+  // and a dead token must not undo either.
+  await pushModule.notifyDisposalApproved({
+    userId: result.userId,
+    pointsAwarded: result.pointsAwarded,
+    status: result.status,
+  });
+
+  return result;
 }
 
 /**
@@ -217,13 +241,23 @@ async function rejectDisposal({ disposalId, adminUid, reason, flags = [] }) {
   const firestore = db();
   const disposalRef = firestore.collection('disposals').doc(disposalId);
 
-  return firestore.runTransaction(async (txn) => {
+  // Captured from inside the transaction because the returned object cannot
+  // carry it: `server/test/server.test.js` compares that shape exactly, so
+  // adding `userId` to it would fail an existing test for a cosmetic gain.
+  //
+  // Retry-safe. A retried body reassigns this, and the value left standing
+  // belongs to the attempt Firestore actually committed.
+  let notifyUid = null;
+
+  const result = await firestore.runTransaction(async (txn) => {
     const snap = await txn.get(disposalRef);
     if (!snap.exists) {
       throw new Error('That submission no longer exists.');
     }
 
     const disposal = snap.data();
+    notifyUid = disposal.userId;
+
     if (disposal.status !== 'pending') {
       throw new Error(
         `That submission has already been decided (${disposal.status}).`,
@@ -252,6 +286,16 @@ async function rejectDisposal({ disposalId, adminUid, reason, flags = [] }) {
 
     return { disposalId, status: 'rejected', reason: reason.trim() };
   });
+
+  // §7.4 requires the reason to reach the user, and this is the only channel
+  // that reaches them without them opening the app. Sent after the commit for
+  // the same reasons as the approval above.
+  await pushModule.notifyDisposalRejected({
+    userId: notifyUid,
+    reason: result.reason,
+  });
+
+  return result;
 }
 
 module.exports = {

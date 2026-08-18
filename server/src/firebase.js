@@ -110,6 +110,23 @@ function bucket() {
   return admin.storage().bucket();
 }
 
+/**
+ * Cloud Messaging, for push on a decision (F7.1).
+ *
+ * Exists so the send path does not depend on something else having initialised
+ * the app first. `admin.messaging()` called on an uninitialised app throws, and
+ * `push.js` previously reached for it directly — which worked only because
+ * `tokensFor` happens to call `db()` a few lines earlier. That is a real
+ * ordering dependency hiding inside an unrelated function, and reordering the
+ * two statements would have broken sending with an error about credentials.
+ *
+ * `firebase-admin ^13` already ships messaging, so this adds no dependency.
+ */
+function messaging() {
+  initFirebase();
+  return admin.messaging();
+}
+
 /** Server timestamp sentinel — never a clock value this process authored. */
 const serverTimestamp = () => admin.firestore.FieldValue.serverTimestamp();
 
@@ -122,6 +139,7 @@ module.exports = {
   db,
   auth,
   bucket,
+  messaging,
   serverTimestamp,
   increment,
 };
