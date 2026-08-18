@@ -26,7 +26,7 @@ class PointsPolicyService {
 
   /// Current policy. Any signed-in user may read it — the values are visible
   /// in the app anyway, as the amount a disposal is worth.
-  Future<PointsPolicy> fetch() async {
+  Future<PolicySnapshot> fetch() async {
     final response = await _send(
       () async => _client
           .get(ApiConfig.path('/config/points'), headers: await _headers())
@@ -36,7 +36,9 @@ class PointsPolicyService {
 
     if (response.statusCode == 200) {
       final body = _decode(response.body);
-      return PointsPolicy.fromJson(body);
+      // The provenance rides alongside the policy numbers in the same object,
+      // so the editor gets both from one request (F3.3).
+      return PolicySnapshot.fromJson(body);
     }
 
     throw PolicyException(_messageFor(response, 'The policy could not be '

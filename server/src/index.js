@@ -374,10 +374,54 @@ app.post('/bins/:id/active', requireAuth, requireAdmin, async (req, res) => {
 // ---------------------------------------------------------------------------
 
 /** Current policy, with defaults filled in for anything the document omits. */
+/**
+ * Reads the points policy, with the provenance of the last change (F3.3).
+ *
+ * The policy numbers are returned at the top level, exactly as before — the
+ * Flutter client's `PointsPolicy.fromJson` reads the keys it knows and ignores
+ * the rest, so the three extra fields are additive and no existing caller
+ * changes.
+ *
+ * The provenance is the point. `POST /config/points` has always recorded
+ * `updatedAt` and `updatedBy`, and `policyModule.fromDoc` strips both because
+ * `validate()` depends on an exact key set — so nothing ever surfaced them. This
+ * is a setting that defines the economy and that any administrator can change,
+ * and an administrator opening the editor could not see whether they were looking
+ * at someone's deliberate settings from this morning or at untouched defaults.
+ *
+ * `updatedByName` is resolved here rather than on the client because the server
+ * already holds Admin SDK access; a uid is not something to show a person.
+ */
 app.get('/config/points', requireAuth, async (req, res) => {
   const { db } = require('./firebase');
   const snap = await db().collection('config').doc('points').get();
-  res.json(policyModule.fromDoc(snap.exists ? snap.data() : null));
+  const data = snap.exists ? snap.data() : null;
+
+  const policy = policyModule.fromDoc(data);
+
+  // No document means nothing has ever been saved and these are the defaults
+  // from §7.3. Reported as nulls rather than invented values.
+  let updatedAt = null;
+  let updatedBy = null;
+  let updatedByName = null;
+
+  if (data) {
+    updatedAt = data.updatedAt?.toDate?.()?.toISOString() ?? null;
+    updatedBy = data.updatedBy ?? null;
+
+    if (updatedBy) {
+      try {
+        const editor = await db().collection('users').doc(updatedBy).get();
+        updatedByName = editor.exists ? editor.data().name || null : null;
+      } catch (err) {
+        // A name is a convenience. Failing to resolve it must not fail the
+        // policy read, which every award decision on the client depends on.
+        console.error('Could not resolve the policy editor name:', err.message);
+      }
+    }
+  }
+
+  res.json({ ...policy, updatedAt, updatedBy, updatedByName });
 });
 
 /**

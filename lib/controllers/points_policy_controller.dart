@@ -12,8 +12,21 @@ final pointsPolicyServiceProvider = Provider<PointsPolicyService>((ref) {
 /// A [FutureProvider] rather than a stream: the policy changes rarely and only
 /// by administrator action, so a listener on the document would cost more than
 /// it returns. The editor invalidates this after a successful save.
-final pointsPolicyProvider = FutureProvider.autoDispose<PointsPolicy>((ref) {
+/// The policy and the provenance of its last change, from one request.
+final policySnapshotProvider =
+    FutureProvider.autoDispose<PolicySnapshot>((ref) {
   return ref.watch(pointsPolicyServiceProvider).fetch();
+});
+
+/// Just the numbers, for callers that do not care who set them.
+///
+/// Derived from [policySnapshotProvider] rather than fetching again — every
+/// award calculation reads this, and provenance is not worth a second request.
+final pointsPolicyProvider = FutureProvider.autoDispose<PointsPolicy>((
+  ref,
+) async {
+  final snapshot = await ref.watch(policySnapshotProvider.future);
+  return snapshot.policy;
 });
 
 /// Save path for the editor.
@@ -33,7 +46,7 @@ class PointsPolicyEditor {
   /// `problems` when the server's validation refused the values.
   Future<PointsPolicy> save(PointsPolicy policy) async {
     final stored = await _ref.read(pointsPolicyServiceProvider).save(policy);
-    _ref.invalidate(pointsPolicyProvider);
+    _ref.invalidate(policySnapshotProvider);
     return stored;
   }
 }

@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../controllers/points_policy_controller.dart';
+import '../../core/label_format.dart';
 import '../../core/points_policy.dart';
 import '../../core/policy_fields.dart';
 import '../../services/points_policy_service.dart';
@@ -149,7 +150,7 @@ class _PointsPolicyViewState extends ConsumerState<PointsPolicyView> {
 
   @override
   Widget build(BuildContext context) {
-    final async = ref.watch(pointsPolicyProvider);
+    final async = ref.watch(policySnapshotProvider);
 
     return AppShell(
       title: 'Points policy',
@@ -161,11 +162,11 @@ class _PointsPolicyViewState extends ConsumerState<PointsPolicyView> {
             loading: () => const Center(child: CircularProgressIndicator()),
             error: (error, _) => _PolicyError(
               error: error,
-              onRetry: () => ref.invalidate(pointsPolicyProvider),
+              onRetry: () => ref.invalidate(policySnapshotProvider),
             ),
-            data: (policy) {
-              if (_loaded == null) _adoptLoaded(policy);
-              return _buildForm(context);
+            data: (snapshot) {
+              if (_loaded == null) _adoptLoaded(snapshot.policy);
+              return _buildForm(context, snapshot.provenance);
             },
           ),
         ),
@@ -173,7 +174,7 @@ class _PointsPolicyViewState extends ConsumerState<PointsPolicyView> {
     );
   }
 
-  Widget _buildForm(BuildContext context) {
+  Widget _buildForm(BuildContext context, PolicyProvenance provenance) {
     final theme = Theme.of(context);
     final base = _loaded!;
     final (policy: draft, parseErrors: parseErrors) = _readForm();
@@ -210,6 +211,8 @@ class _PointsPolicyViewState extends ConsumerState<PointsPolicyView> {
             ),
           ),
         ),
+        const SizedBox(height: 12),
+        _ProvenanceLine(provenance: provenance),
         const SizedBox(height: 20),
         for (final field in policyFields) ...[
           _PolicyInput(
@@ -405,6 +408,50 @@ class _PolicyError extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// Who last changed the policy, and when (F3.3).
+///
+/// The server has recorded this on every write since the endpoint existed and
+/// nothing ever showed it. On a screen where any administrator can change the
+/// economy, the values give no hint of their own history: a disposal award of 50
+/// reads the same whether it is the untouched default from §7.3 or something a
+/// colleague set an hour ago.
+class _ProvenanceLine extends StatelessWidget {
+  const _ProvenanceLine({required this.provenance});
+
+  final PolicyProvenance provenance;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    // "Nobody has changed this" is different information from "somebody set it
+    // to exactly the defaults", and only the first can be stated with certainty
+    // from an absent document.
+    final text = provenance.isUntouched
+        ? 'Never changed. These are the defaults.'
+        : 'Last changed by ${provenance.editor}, '
+            '${formatDateTime(provenance.updatedAt)}.';
+
+    return Row(
+      children: [
+        Icon(
+          provenance.isUntouched ? Icons.settings_suggest_outlined : Icons.person_outline,
+          size: 16,
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            text,
+            style: theme.textTheme.bodySmall
+                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          ),
+        ),
+      ],
     );
   }
 }

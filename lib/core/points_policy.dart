@@ -424,3 +424,64 @@ class IsoWeek {
     return utc.add(Duration(days: 4 - utc.weekday));
   }
 }
+
+/// Who last changed the points policy, and when (F3.3).
+///
+/// The server has recorded `updatedAt` and `updatedBy` on every policy write
+/// since the endpoint existed, and `fromDoc` strips both because `validate()`
+/// depends on an exact key set — so neither ever reached a person.
+///
+/// It matters because of what this screen is. The policy defines the economy, any
+/// administrator can change it, and the values give no hint of their own history:
+/// a disposal award of 50 looks identical whether it is the untouched default
+/// from §7.3 or something a colleague set an hour ago. An administrator about to
+/// change it should be able to tell those apart.
+class PolicyProvenance {
+  const PolicyProvenance({this.updatedAt, this.updatedBy, this.updatedByName});
+
+  /// Server time of the last write. Null when nothing has ever been saved.
+  final DateTime? updatedAt;
+
+  /// The editing administrator's uid, kept for the case where their name cannot
+  /// be resolved — a deleted account, or a failed lookup.
+  final String? updatedBy;
+
+  /// Resolved on the server, because a uid is not something to show a person.
+  final String? updatedByName;
+
+  static const unknown = PolicyProvenance();
+
+  factory PolicyProvenance.fromJson(Map<String, dynamic> json) {
+    final raw = json['updatedAt'];
+    return PolicyProvenance(
+      updatedAt: raw is String ? DateTime.tryParse(raw) : null,
+      updatedBy: json['updatedBy'] as String?,
+      updatedByName: json['updatedByName'] as String?,
+    );
+  }
+
+  /// True when the policy document does not exist, so these are the defaults.
+  ///
+  /// Worth stating outright on the screen: "nobody has changed this" is different
+  /// information from "somebody set it to exactly the defaults".
+  bool get isUntouched => updatedAt == null;
+
+  /// Whoever made the last change, as well as it can be named.
+  String get editor => updatedByName ?? updatedBy ?? 'an administrator';
+}
+
+/// A policy read together with the provenance of its last change.
+///
+/// One object so the editor gets both from a single request. Fetching provenance
+/// separately would double a call that every award calculation depends on.
+class PolicySnapshot {
+  const PolicySnapshot({required this.policy, required this.provenance});
+
+  final PointsPolicy policy;
+  final PolicyProvenance provenance;
+
+  factory PolicySnapshot.fromJson(Map<String, dynamic> json) => PolicySnapshot(
+        policy: PointsPolicy.fromJson(json),
+        provenance: PolicyProvenance.fromJson(json),
+      );
+}

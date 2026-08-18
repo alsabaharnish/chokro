@@ -14,6 +14,7 @@
  */
 
 const { auth, db } = require('./firebase');
+const { isActiveProfile, suspensionMessage } = require('./suspension');
 
 /**
  * Verifies the bearer token and attaches `req.user = { uid, role, status }`.
@@ -53,17 +54,28 @@ async function requireAuth(req, res, next) {
 
   const profile = snapshot.data();
 
-  if (profile.status !== 'active') {
+  // Resolved through the shared rule, NOT `profile.status !== 'active'`.
+  //
+  // A temporary suspension is never rewritten back to `active` — nothing is
+  // running that could do it — so a lapsed one is permanently
+  // `status: 'suspended'` plus a past date. The string comparison this replaces
+  // therefore refused every server call forever, while `firestore.rules` and the
+  // Flutter UI both treated the same user as active. See `suspension.js`.
+  if (!isActiveProfile(profile)) {
     return res.status(403).json({
       error: 'account_suspended',
-      message: 'This account is not active.',
+      message: suspensionMessage(profile),
     });
   }
 
   req.user = {
     uid: decoded.uid,
     role: profile.role || 'buyer',
+    // The stored value, which for a lapsed suspension still reads 'suspended'.
+    // Nothing downstream should compare this to 'active' — that is the mistake
+    // this change fixes. `isActiveProfile` is the only correct test.
     status: profile.status,
+    suspendedUntil: profile.suspendedUntil || null,
   };
 
   return next();
