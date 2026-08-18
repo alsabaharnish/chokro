@@ -9,6 +9,8 @@ import 'package:http/http.dart' as http;
 import '../core/api_config.dart';
 import '../models/bin_model.dart';
 
+import '../core/network_errors.dart';
+
 /// Bin registration through the trusted service (F2.1).
 ///
 /// Separate from [BinService], which reads bins from Firestore directly. The
@@ -124,20 +126,13 @@ class BinAdminService {
       return await request();
     } on TimeoutException catch (error) {
       _log('timed out $action', error);
-      throw const BinAdminException(
-        'The server took too long to respond. It may be starting up — try '
-        'again in a moment.',
-      );
+      throw BinAdminException(slowServerMessage);
     } on SocketException catch (error) {
       _log('socket failure $action', error);
-      throw const BinAdminException(
-        'Could not reach the server. Check your connection.',
-      );
+      throw BinAdminException(unreachableServerMessage);
     } on http.ClientException catch (error) {
       _log('client exception $action — on web, check CORS', error);
-      throw const BinAdminException(
-        'Could not reach the server. Check your connection.',
-      );
+      throw BinAdminException(unreachableServerMessage);
     } on BinAdminException {
       rethrow;
     } catch (error, stackTrace) {

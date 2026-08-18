@@ -8,6 +8,8 @@ import 'package:http/http.dart' as http;
 
 import '../core/api_config.dart';
 
+import '../core/network_errors.dart';
+
 /// Uploads disposal photographs through the trusted service.
 ///
 /// The image does not go to a storage bucket directly. It goes to the Node
@@ -58,15 +60,10 @@ class PhotoUploadService {
       // the first request back takes 30-60 seconds. Only this clause should
       // produce the "took too long" message.
       _log('timed out after ${ApiConfig.coldStartTimeout}', error);
-      throw const PhotoUploadException(
-        'The server took too long to respond. It may be starting up — try '
-        'again in a moment.',
-      );
+      throw PhotoUploadException(slowServerMessage);
     } on SocketException catch (error) {
       _log('socket failure — no route to the host', error);
-      throw const PhotoUploadException(
-        'Could not reach the server. Check your connection and try again.',
-      );
+      throw PhotoUploadException(unreachableServerMessage);
     } on http.ClientException catch (error) {
       // On the web build this is the CORS signature: the browser refuses the
       // request and `package:http` reports "XMLHttpRequest error" with no
@@ -74,9 +71,7 @@ class PhotoUploadService {
       // generic clause and read as a timeout. Check the origin against
       // ALLOWED_ORIGINS on the server before suspecting the network.
       _log('client exception — on web, check CORS and the origin', error);
-      throw const PhotoUploadException(
-        'Could not reach the server. Check your connection and try again.',
-      );
+      throw PhotoUploadException(unreachableServerMessage);
     } catch (error, stackTrace) {
       _log('unexpected failure sending the photo', error, stackTrace);
       throw const PhotoUploadException(

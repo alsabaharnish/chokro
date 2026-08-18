@@ -9,6 +9,8 @@ import 'package:http/http.dart' as http;
 import '../core/api_config.dart';
 import '../core/points_policy.dart';
 
+import '../core/network_errors.dart';
+
 /// Reads and writes `config/points` through the trusted service (F3.3).
 ///
 /// The policy is not written from the client even though an administrator is
@@ -115,20 +117,13 @@ class PointsPolicyService {
       return await request();
     } on TimeoutException catch (error) {
       _log('timed out $action', error);
-      throw const PolicyException(
-        'The server took too long to respond. It may be starting up — try '
-        'again in a moment.',
-      );
+      throw PolicyException(slowServerMessage);
     } on SocketException catch (error) {
       _log('socket failure $action', error);
-      throw const PolicyException(
-        'Could not reach the server. Check your connection.',
-      );
+      throw PolicyException(unreachableServerMessage);
     } on http.ClientException catch (error) {
       _log('client exception $action — on web, check CORS', error);
-      throw const PolicyException(
-        'Could not reach the server. Check your connection.',
-      );
+      throw PolicyException(unreachableServerMessage);
     } on PolicyException {
       rethrow;
     } catch (error, stackTrace) {

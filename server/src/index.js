@@ -55,7 +55,28 @@ app.use(
       // No origin: a native app, curl, or a same-origin request. Allowed.
       if (!origin) return callback(null, true);
       if (allowedOrigins.includes(origin)) return callback(null, true);
-      return callback(new Error(`Origin not allowed: ${origin}`));
+
+      // Refused, NOT an error.
+      //
+      // This used to `callback(new Error(...))`, which Express turned into a
+      // 500 carrying "Something went wrong. Check the server logs." An origin
+      // that is simply not on the list is not a server fault, and reporting it
+      // as one is actively misleading: the preflight failed with a 500 and no
+      // CORS header, so the browser blamed the network, the Flutter client
+      // reported "check your connection", and the actual cause — a port missing
+      // from ALLOWED_ORIGINS — was invisible from either end.
+      //
+      // Passing `false` omits the Access-Control-Allow-Origin header and lets
+      // the request complete normally. The browser then refuses it with the
+      // accurate message, naming the missing header.
+      //
+      // Logged unconditionally, because this line is how you find out which
+      // origin to add.
+      console.warn(
+        `[cors] refused origin ${origin}; ALLOWED_ORIGINS = ` +
+          `${allowedOrigins.join(', ') || '(empty)'}`,
+      );
+      return callback(null, false);
     },
   }),
 );

@@ -10,6 +10,8 @@ import 'package:http/http.dart' as http;
 import '../core/api_config.dart';
 import '../models/claim_model.dart';
 
+import '../core/network_errors.dart';
+
 /// Self-reported eco-action claims (F6.1–F6.4).
 ///
 /// Split along the trust boundary, like disposals: the client creates a pending
@@ -158,20 +160,13 @@ class ClaimService {
       return await request();
     } on TimeoutException catch (error) {
       _log('timed out $action', error);
-      throw const ClaimException(
-        'The server took too long to respond. It may be starting up — try '
-        'again in a moment.',
-      );
+      throw ClaimException(slowServerMessage);
     } on SocketException catch (error) {
       _log('socket failure $action', error);
-      throw const ClaimException(
-        'Could not reach the server. Check your connection.',
-      );
+      throw ClaimException(unreachableServerMessage);
     } on http.ClientException catch (error) {
       _log('client exception $action — on web, check CORS', error);
-      throw const ClaimException(
-        'Could not reach the server. Check your connection.',
-      );
+      throw ClaimException(unreachableServerMessage);
     } on ClaimException {
       rethrow;
     } catch (error, stackTrace) {

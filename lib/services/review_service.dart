@@ -8,6 +8,8 @@ import 'package:http/http.dart' as http;
 
 import '../core/api_config.dart';
 
+import '../core/network_errors.dart';
+
 /// Administrator decisions on pending submissions (F2.8).
 ///
 /// The approve button calls the trusted service; it does not write Firestore.
@@ -58,24 +60,17 @@ class ReviewService {
       // and the endpoint refuses a second decision with a 409, so retrying is
       // safe — a duplicate credit is not possible.
       _log('timed out after ${ApiConfig.coldStartTimeout}', error);
-      throw const ReviewException(
-        'The server took too long to respond. It may be starting up — try '
-        'again in a moment.',
-      );
+      throw ReviewException(slowServerMessage);
     } on SocketException catch (error) {
       _log('socket failure — no route to the host', error);
-      throw const ReviewException(
-        'Could not reach the server. Check your connection.',
-      );
+      throw ReviewException(unreachableServerMessage);
     } on http.ClientException catch (error) {
       // The review queue is web-primary, so this is the clause that matters
       // here. A CORS rejection arrives as a ClientException with no detail —
       // not as a SocketException — which is why it used to be reported as a
       // timeout. Run the web build on an origin listed in ALLOWED_ORIGINS.
       _log('client exception — on web, check CORS and the origin', error);
-      throw const ReviewException(
-        'Could not reach the server. Check your connection.',
-      );
+      throw ReviewException(unreachableServerMessage);
     } catch (error, stackTrace) {
       _log('unexpected failure recording the decision', error, stackTrace);
       throw const ReviewException(
