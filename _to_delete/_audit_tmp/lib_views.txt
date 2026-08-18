@@ -1,0 +1,5406 @@
+=========== FILE: lib/main.dart ===========
+import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'firebase_options.dart';
+import 'routing/router.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+  runApp(const ProviderScope(child: ChokroApp()));
+}
+
+class ChokroApp extends ConsumerWidget {
+  const ChokroApp({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final router = ref.watch(routerProvider);
+    return MaterialApp.router(
+      title: 'Chokro',
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: const Color(0xFF2E7D32)),
+        useMaterial3: true,
+      ),
+      routerConfig: router,
+    );
+  }
+}
+
+=========== FILE: lib/routing/router.dart ===========
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import '../controllers/auth_controller.dart';
+import '../views/auth/login_view.dart';
+import '../views/auth/register_view.dart';
+import '../views/home/home_view.dart';
+import '../views/seller_application/seller_application_view.dart';
+import '../views/admin/admin_applications_view.dart';
+import '../views/admin/admin_claims_view.dart';
+import '../views/claims/claim_submit_view.dart';
+import '../views/admin/admin_bins_view.dart';
+import '../views/admin/admin_users_view.dart';
+import '../views/admin/points_policy_view.dart';
+import '../views/history/submission_history_view.dart';
+import '../views/wallet/wallet_ledger_view.dart';
+import '../views/disposal/scan_view.dart';
+import '../views/disposal/photo_view.dart';
+import '../views/disposal/location_view.dart';
+import '../views/disposal/declare_view.dart';
+import '../views/admin/admin_disposals_view.dart';
+
+final routerProvider = Provider<GoRouter>((ref) {
+  final authState = ref.watch(firebaseAuthStateProvider);
+  final currentUser = ref.watch(currentUserProvider);
+
+  return GoRouter(
+    initialLocation: '/home',
+    redirect: (context, state) {
+      final isSignedIn = authState.value != null;
+      final isAuthRoute =
+          state.matchedLocation == '/login' ||
+          state.matchedLocation == '/register';
+
+      if (!isSignedIn && !isAuthRoute) return '/login';
+      if (isSignedIn && isAuthRoute) return '/home';
+      return null;
+    },
+    routes: [
+      GoRoute(path: '/login', builder: (context, state) => const LoginView()),
+      GoRoute(
+        path: '/register',
+        builder: (context, state) => const RegisterView(),
+      ),
+      GoRoute(path: '/home', builder: (context, state) => const HomeView()),
+      GoRoute(
+        path: '/apply-seller',
+        builder: (context, state) => const SellerApplicationView(),
+        redirect: (context, state) {
+          final user = currentUser.value;
+          if (user == null) return '/login';
+          if (user.isSeller) return '/home';
+          return null;
+        },
+      ),
+      GoRoute(
+        path: '/admin/applications',
+        builder: (context, state) => const AdminApplicationsView(),
+        redirect: (context, state) {
+          final user = currentUser.value;
+          if (user == null) return '/login';
+          if (!user.isAdmin) return '/home';
+          return null;
+        },
+      ),
+      GoRoute(
+        path: '/claims/new',
+        builder: (context, state) => const ClaimSubmitView(),
+        redirect: (context, state) {
+          final user = currentUser.value;
+          if (user == null) return '/login';
+          return null;
+        },
+      ),
+      GoRoute(
+        path: '/admin/claims',
+        builder: (context, state) => const AdminClaimsView(),
+        redirect: (context, state) {
+          final user = currentUser.value;
+          if (user == null) return '/login';
+          if (!user.isAdmin) return '/home';
+          return null;
+        },
+      ),
+      GoRoute(
+        path: '/admin/bins',
+        builder: (context, state) => const AdminBinsView(),
+        redirect: (context, state) {
+          final user = currentUser.value;
+          if (user == null) return '/login';
+          if (!user.isAdmin) return '/home';
+          return null;
+        },
+      ),
+      GoRoute(
+        path: '/admin/users',
+        builder: (context, state) => const AdminUsersView(),
+        redirect: (context, state) {
+          final user = currentUser.value;
+          if (user == null) return '/login';
+          if (!user.isAdmin) return '/home';
+          return null;
+        },
+      ),
+      GoRoute(
+        path: '/admin/points',
+        builder: (context, state) => const PointsPolicyView(),
+        redirect: (context, state) {
+          final user = currentUser.value;
+          if (user == null) return '/login';
+          if (!user.isAdmin) return '/home';
+          return null;
+        },
+      ),
+      GoRoute(
+        path: '/history',
+        builder: (context, state) => const SubmissionHistoryView(),
+        redirect: (context, state) {
+          final user = currentUser.value;
+          if (user == null) return '/login';
+          return null;
+        },
+      ),
+      GoRoute(
+        path: '/wallet',
+        builder: (context, state) => const WalletLedgerView(),
+        redirect: (context, state) {
+          final user = currentUser.value;
+          if (user == null) return '/login';
+          return null;
+        },
+      ),
+      GoRoute(
+        path: '/dispose/scan',
+        builder: (context, state) => const ScanView(),
+        redirect: (context, state) {
+          final user = currentUser.value;
+          if (user == null) return '/login';
+          return null;
+        },
+      ),
+      GoRoute(
+        path: '/dispose/photo',
+        builder: (context, state) => const DisposalPhotoView(),
+        redirect: (context, state) {
+          final user = currentUser.value;
+          if (user == null) return '/login';
+          return null;
+        },
+      ),
+      GoRoute(
+        path: '/dispose/location',
+        builder: (context, state) => const DisposalLocationView(),
+        redirect: (context, state) {
+          final user = currentUser.value;
+          if (user == null) return '/login';
+          return null;
+        },
+      ),
+      GoRoute(
+        path: '/dispose/declare',
+        builder: (context, state) => const DisposalDeclareView(),
+        redirect: (context, state) {
+          final user = currentUser.value;
+          if (user == null) return '/login';
+          return null;
+        },
+      ),
+      GoRoute(
+        path: '/admin/disposals',
+        builder: (context, state) => const AdminDisposalsView(),
+        redirect: (context, state) {
+          final user = currentUser.value;
+          if (user == null) return '/login';
+          if (!user.isAdmin) return '/home';
+          return null;
+        },
+      ),
+    ],
+  );
+});
+
+=========== FILE: lib/views/admin/admin_applications_view.dart ===========
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
+import '../../controllers/seller_application_controller.dart';
+import '../../models/seller_application_model.dart';
+import '../shared/app_shell.dart';
+
+class AdminApplicationsView extends ConsumerWidget {
+  const AdminApplicationsView({super.key});
+
+  Future<void> _approve(
+      BuildContext context, WidgetRef ref, SellerApplicationModel app) async {
+    await ref
+        .read(sellerApplicationControllerProvider.notifier)
+        .approve(app.id);
+    if (!context.mounted) return;
+    final error = ref.read(sellerApplicationControllerProvider).error;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(error?.toString() ??
+            '${app.businessName} approved — applicant is now a seller'),
+        backgroundColor: error != null ? Colors.red : null,
+      ),
+    );
+  }
+
+  Future<void> _reject(
+      BuildContext context, WidgetRef ref, SellerApplicationModel app) async {
+    final controller = TextEditingController();
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Reject ${app.businessName}'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          maxLines: 3,
+          decoration: const InputDecoration(
+            labelText: 'Reason (shown to the applicant)',
+            border: OutlineInputBorder(),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final text = controller.text.trim();
+              if (text.isNotEmpty) Navigator.pop(context, text);
+            },
+            child: const Text('Reject'),
+          ),
+        ],
+      ),
+    );
+    if (reason == null) return;
+
+    await ref
+        .read(sellerApplicationControllerProvider.notifier)
+        .reject(app.id, reason);
+    if (!context.mounted) return;
+    final error = ref.read(sellerApplicationControllerProvider).error;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(error?.toString() ?? 'Application rejected'),
+        backgroundColor: error != null ? Colors.red : null,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final pendingAsync = ref.watch(pendingApplicationsProvider);
+    final theme = Theme.of(context);
+    final dateFormat = DateFormat('d MMM y, h:mm a');
+
+    return AppShell(
+      title: 'Seller applications',
+      child: pendingAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Text('Could not load the queue: $e'),
+          ),
+        ),
+        data: (apps) {
+          if (apps.isEmpty) {
+            return Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.inbox_outlined,
+                      size: 48, color: theme.colorScheme.outline),
+                  const SizedBox(height: 12),
+                  const Text('Nothing pending review'),
+                ],
+              ),
+            );
+          }
+
+          return ListView.builder(
+            padding: const EdgeInsets.all(24),
+            itemCount: apps.length,
+            itemBuilder: (context, i) {
+              final app = apps[i];
+              return Center(
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 720),
+                  child: Card(
+                    margin: const EdgeInsets.only(bottom: 16),
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(app.businessName,
+                              style: theme.textTheme.titleLarge),
+                          const SizedBox(height: 4),
+                          Text(
+                            'Submitted ${dateFormat.format(app.createdAt)}',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(app.description),
+                          const SizedBox(height: 20),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.end,
+                            children: [
+                              TextButton(
+                                onPressed: () => _reject(context, ref, app),
+                                child: const Text('Reject'),
+                              ),
+                              const SizedBox(width: 8),
+                              FilledButton(
+                                onPressed: () => _approve(context, ref, app),
+                                child: const Text('Approve'),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            },
+          );
+        },
+      ),
+    );
+  }
+}
+
+=========== FILE: lib/views/admin/admin_bins_view.dart ===========
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:qr_flutter/qr_flutter.dart';
+
+import '../../controllers/admin_bins_controller.dart';
+import '../../core/label_format.dart';
+import '../../models/bin_model.dart';
+import '../../services/bin_admin_service.dart';
+import '../shared/app_shell.dart';
+
+/// Bin registration and QR generation (F2.1).
+///
+/// Coordinates are typed here. Capturing them from a live GPS fix while
+/// standing at the bin is the mobile refinement and is not wired yet — typed
+/// entry is what the web build wants regardless, and it is enough to register
+/// the bins a demo needs.
+class AdminBinsView extends ConsumerStatefulWidget {
+  const AdminBinsView({super.key});
+
+  static const double _maxContentWidth = 820;
+
+  @override
+  ConsumerState<AdminBinsView> createState() => _AdminBinsViewState();
+}
+
+class _AdminBinsViewState extends ConsumerState<AdminBinsView> {
+  final _label = TextEditingController();
+  final _lat = TextEditingController();
+  final _lng = TextEditingController();
+  final _radius = TextEditingController(text: '50');
+
+  bool _saving = false;
+  List<String> _problems = const [];
+
+  @override
+  void dispose() {
+    _label.dispose();
+    _lat.dispose();
+    _lng.dispose();
+    _radius.dispose();
+    super.dispose();
+  }
+
+  Future<void> _register() async {
+    final lat = double.tryParse(_lat.text.trim());
+    final lng = double.tryParse(_lng.text.trim());
+    final radius = double.tryParse(_radius.text.trim());
+
+    final local = <String>[
+      if (_label.text.trim().isEmpty) 'Bin label is required.',
+      if (lat == null) 'Latitude must be a number.',
+      if (lng == null) 'Longitude must be a number.',
+      if (radius == null) 'Radius must be a number.',
+    ];
+
+    if (local.isNotEmpty) {
+      setState(() => _problems = local);
+      return;
+    }
+
+    setState(() {
+      _saving = true;
+      _problems = const [];
+    });
+
+    try {
+      final bin = await ref.read(adminBinActionsProvider).register(
+            label: _label.text.trim(),
+            lat: lat!,
+            lng: lng!,
+            radiusMeters: radius!,
+          );
+
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _label.clear();
+        _lat.clear();
+        _lng.clear();
+        _radius.text = '50';
+      });
+
+      await _showQr(bin);
+    } on BinAdminException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _problems =
+            error.problems.isEmpty ? [error.message] : error.problems;
+      });
+    }
+  }
+
+  Future<void> _showQr(BinModel bin) async {
+    await showDialog<void>(
+      context: context,
+      builder: (context) => _QrDialog(bin: bin),
+    );
+  }
+
+  Future<void> _toggle(BinModel bin) async {
+    final id = bin.id;
+    if (id == null) return;
+
+    try {
+      await ref
+          .read(adminBinActionsProvider)
+          .setActive(binId: id, active: !bin.active);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            bin.active ? '${bin.label} closed.' : '${bin.label} reopened.',
+          ),
+        ),
+      );
+    } on BinAdminException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error.message)));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final async = ref.watch(allBinsProvider);
+    final theme = Theme.of(context);
+
+    return AppShell(
+      title: 'Bins',
+      child: Center(
+        child: ConstrainedBox(
+          constraints:
+              const BoxConstraints(maxWidth: AdminBinsView._maxContentWidth),
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+            children: [
+              Text('Register a bin',
+                  style: theme.textTheme.titleMedium
+                      ?.copyWith(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              Text(
+                'The QR payload is generated by the server, so it is unique '
+                'across every bin. Print the code and attach it to the bin.',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 14),
+              TextField(
+                controller: _label,
+                decoration: const InputDecoration(
+                  labelText: 'Label',
+                  hintText: 'Merul Badda — Block C gate',
+                  border: OutlineInputBorder(),
+                  isDense: true,
+                ),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Expanded(
+                    child: TextField(
+                      controller: _lat,
+                      keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true, signed: true),
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(r'[0-9.\-]')),
+                      ],
+                      decoration: const InputDecoration(
+                        labelText: 'Latitude',
+                        hintText: '23.7808',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextField(
+                      controller: _lng,
+                      keyboardType: const TextInputType.numberWithOptions(
+                          decimal: true, signed: true),
+                      inputFormatters: [
+                        FilteringTextInputFormatter.allow(RegExp(r'[0-9.\-]')),
+                      ],
+                      decoration: const InputDecoration(
+                        labelText: 'Longitude',
+                        hintText: '90.4074',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  SizedBox(
+                    width: 120,
+                    child: TextField(
+                      controller: _radius,
+                      keyboardType: TextInputType.number,
+                      inputFormatters: [
+                        FilteringTextInputFormatter.digitsOnly,
+                      ],
+                      decoration: const InputDecoration(
+                        labelText: 'Radius',
+                        suffixText: 'm',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 6),
+              Text(
+                'A tight radius is a stronger proof of presence. 50 m suits a '
+                'street bin; an open compound may need more.',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              ),
+              if (_problems.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                for (final problem in _problems)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(
+                      '• $problem',
+                      style: theme.textTheme.bodySmall
+                          ?.copyWith(color: theme.colorScheme.error),
+                    ),
+                  ),
+              ],
+              const SizedBox(height: 14),
+              FilledButton.icon(
+                onPressed: _saving ? null : _register,
+                icon: _saving
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.add_location_alt_outlined),
+                label: Text(_saving ? 'Registering…' : 'Register bin'),
+              ),
+              const SizedBox(height: 28),
+              Text('Registered bins',
+                  style: theme.textTheme.titleMedium
+                      ?.copyWith(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 10),
+              async.when(
+                loading: () => const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Center(child: CircularProgressIndicator()),
+                ),
+                error: (error, _) => Text('Bins did not load: $error'),
+                data: (bins) {
+                  if (bins.isEmpty) {
+                    return Text(
+                      'No bins yet. Nothing can be scanned until one exists.',
+                      style: theme.textTheme.bodySmall,
+                    );
+                  }
+                  final sorted = [...bins]
+                    ..sort((a, b) => a.label.compareTo(b.label));
+                  return Column(
+                    children: [
+                      for (final bin in sorted)
+                        _BinCard(
+                          bin: bin,
+                          onShowQr: () => _showQr(bin),
+                          onToggle: () => _toggle(bin),
+                        ),
+                    ],
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BinCard extends StatelessWidget {
+  const _BinCard({
+    required this.bin,
+    required this.onShowQr,
+    required this.onToggle,
+  });
+
+  final BinModel bin;
+  final VoidCallback onShowQr;
+  final VoidCallback onToggle;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      margin: const EdgeInsets.only(bottom: 8),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: [
+            Icon(
+              bin.active ? Icons.delete_outline : Icons.block,
+              color: bin.active
+                  ? theme.colorScheme.primary
+                  : theme.colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(bin.label,
+                      style: theme.textTheme.titleSmall
+                          ?.copyWith(fontWeight: FontWeight.w700)),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${bin.lat.toStringAsFixed(5)}, '
+                    '${bin.lng.toStringAsFixed(5)} · '
+                    '${bin.radiusMeters.round()} m'
+                    '${bin.active ? '' : ' · closed'}',
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                  if (bin.createdAt != null)
+                    Text(
+                      'Registered ${formatAge(bin.createdAt)}',
+                      style: theme.textTheme.labelSmall
+                          ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    ),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: 'Show QR code',
+              onPressed: onShowQr,
+              icon: const Icon(Icons.qr_code_2),
+            ),
+            TextButton(
+              onPressed: onToggle,
+              child: Text(bin.active ? 'Close' : 'Reopen'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _QrDialog extends StatelessWidget {
+  const _QrDialog({required this.bin});
+
+  final BinModel bin;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return AlertDialog(
+      title: Text(bin.label),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          // White background regardless of theme — a dark-mode QR code
+          // photographs badly and some scanners refuse it outright.
+          Container(
+            padding: const EdgeInsets.all(16),
+            color: Colors.white,
+            child: QrImageView(
+              data: bin.qrPayload,
+              version: QrVersions.auto,
+              size: 220,
+              backgroundColor: Colors.white,
+            ),
+          ),
+          const SizedBox(height: 14),
+          SelectableText(
+            bin.qrPayload,
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodySmall
+                ?.copyWith(fontFamily: 'monospace'),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'Print this and attach it to the bin. On the web build, Ctrl+P '
+            'prints the page.',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodySmall
+                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          ),
+        ],
+      ),
+      actions: [
+        TextButton(
+          onPressed: () {
+            Clipboard.setData(ClipboardData(text: bin.qrPayload));
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('Payload copied.')),
+            );
+          },
+          child: const Text('Copy payload'),
+        ),
+        FilledButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Done'),
+        ),
+      ],
+    );
+  }
+}
+
+=========== FILE: lib/views/admin/admin_claims_view.dart ===========
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../controllers/claim_controller.dart';
+import '../../core/label_format.dart';
+import '../../models/claim_model.dart';
+import '../shared/app_shell.dart';
+
+/// The claims review queue (F6.3).
+///
+/// Every card shows the submitter's **earlier claims** alongside the pending
+/// one. That is not a convenience: with no geofence, no distance check and no
+/// cross-user hash index, an administrator noticing "this is the same compost
+/// heap as last week" is one of the few real defences this route has (§7.4).
+class AdminClaimsView extends ConsumerWidget {
+  const AdminClaimsView({super.key});
+
+  static const double _maxContentWidth = 820;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final pending = ref.watch(pendingClaimsProvider);
+    final ui = ref.watch(claimReviewControllerProvider);
+    final theme = Theme.of(context);
+
+    ref.listen(claimReviewControllerProvider, (previous, next) {
+      final message = next.error ?? next.lastMessage;
+      if (message == null) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(message)));
+      ref.read(claimReviewControllerProvider.notifier).clearMessages();
+    });
+
+    return AppShell(
+      title: 'Claim review',
+      child: Center(
+        child: ConstrainedBox(
+          constraints:
+              const BoxConstraints(maxWidth: AdminClaimsView._maxContentWidth),
+          child: pending.when(
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (error, _) => Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Text('The queue did not load: $error'),
+              ),
+            ),
+            data: (claims) {
+              if (claims.isEmpty) {
+                return Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(32),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.done_all,
+                            size: 44,
+                            color: theme.colorScheme.onSurfaceVariant),
+                        const SizedBox(height: 14),
+                        Text('Nothing waiting',
+                            style: theme.textTheme.titleMedium),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Self-reported eco-actions appear here for review.',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              }
+
+              return ListView.separated(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+                itemCount: claims.length,
+                separatorBuilder: (_, _) => const SizedBox(height: 12),
+                itemBuilder: (context, index) => _ClaimCard(
+                  claim: claims[index],
+                  isBusy: ui.isBusy(claims[index].id ?? ''),
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ClaimCard extends ConsumerWidget {
+  const _ClaimCard({required this.claim, required this.isBusy});
+
+  final ClaimModel claim;
+  final bool isBusy;
+
+  Future<void> _reject(BuildContext context, WidgetRef ref) async {
+    final controller = TextEditingController();
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Reject this claim'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'The user is shown this, so write it for them to read.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: controller,
+              autofocus: true,
+              maxLines: 3,
+              decoration: const InputDecoration(
+                hintText: 'The photo does not show the action described.',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(controller.text),
+            child: const Text('Reject'),
+          ),
+        ],
+      ),
+    );
+
+    if (reason == null || !context.mounted) return;
+    await ref
+        .read(claimReviewControllerProvider.notifier)
+        .reject(claim.id ?? '', reason);
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final submitter = ref.watch(claimSubmitterProvider(claim.userId));
+
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: CachedNetworkImage(
+                    imageUrl: claim.photoUrl,
+                    width: 110,
+                    height: 110,
+                    fit: BoxFit.cover,
+                    placeholder: (_, _) => Container(
+                      width: 110,
+                      height: 110,
+                      color: theme.colorScheme.surfaceContainerHighest,
+                    ),
+                    errorWidget: (_, _, _) => Container(
+                      width: 110,
+                      height: 110,
+                      color: theme.colorScheme.surfaceContainerHighest,
+                      child: const Icon(Icons.broken_image_outlined),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        claim.actionType.label,
+                        style: theme.textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        claim.actionType.evidenceHint,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      submitter.when(
+                        loading: () => const SizedBox(height: 14),
+                        error: (_, _) => const SizedBox.shrink(),
+                        data: (user) => Text(
+                          user == null
+                              ? 'Unknown submitter'
+                              : '${user.name} · ${user.email}',
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ),
+                      Text(
+                        'Submitted ${formatAge(claim.createdAt)}',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            _PreviousClaims(userId: claim.userId, currentId: claim.id),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                if (isBusy)
+                  const Padding(
+                    padding: EdgeInsets.only(right: 12),
+                    child: SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                TextButton(
+                  onPressed: isBusy ? null : () => _reject(context, ref),
+                  style: TextButton.styleFrom(
+                      foregroundColor: theme.colorScheme.error),
+                  child: const Text('Reject'),
+                ),
+                const SizedBox(width: 8),
+                FilledButton(
+                  onPressed: isBusy
+                      ? null
+                      : () => ref
+                          .read(claimReviewControllerProvider.notifier)
+                          .approve(claim.id ?? ''),
+                  child: const Text('Approve'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// This user's earlier claims, so a recycled photograph is visible.
+class _PreviousClaims extends ConsumerWidget {
+  const _PreviousClaims({required this.userId, required this.currentId});
+
+  final String userId;
+  final String? currentId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final history = ref.watch(claimHistoryForReviewProvider(userId));
+
+    return history.when(
+      loading: () => const SizedBox(height: 20),
+      error: (_, _) => const SizedBox.shrink(),
+      data: (claims) {
+        final previous =
+            claims.where((c) => c.id != currentId).take(6).toList();
+
+        if (previous.isEmpty) {
+          return Text(
+            'First claim from this user.',
+            style: theme.textTheme.labelSmall
+                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          );
+        }
+
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              'Earlier claims from this user',
+              style: theme.textTheme.labelMedium
+                  ?.copyWith(fontWeight: FontWeight.w700),
+            ),
+            const SizedBox(height: 6),
+            SizedBox(
+              height: 58,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                itemCount: previous.length,
+                separatorBuilder: (_, _) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  final claim = previous[index];
+                  return Tooltip(
+                    message: '${claim.actionType.label}\n'
+                        '${claim.userFacingStatus} · '
+                        '${formatAge(claim.createdAt)}',
+                    child: Stack(
+                      children: [
+                        ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: CachedNetworkImage(
+                            imageUrl: claim.photoUrl,
+                            width: 58,
+                            height: 58,
+                            fit: BoxFit.cover,
+                            placeholder: (_, _) => Container(
+                              width: 58,
+                              height: 58,
+                              color: theme.colorScheme.surfaceContainerHighest,
+                            ),
+                            errorWidget: (_, _, _) => Container(
+                              width: 58,
+                              height: 58,
+                              color: theme.colorScheme.surfaceContainerHighest,
+                            ),
+                          ),
+                        ),
+                        Positioned(
+                          right: 2,
+                          bottom: 2,
+                          child: Icon(
+                            claim.status.isApproved
+                                ? Icons.check_circle
+                                : claim.status.isRejected
+                                    ? Icons.cancel
+                                    : Icons.hourglass_empty,
+                            size: 13,
+                            color: claim.status.isApproved
+                                ? theme.colorScheme.primary
+                                : theme.colorScheme.error,
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+=========== FILE: lib/views/admin/admin_disposals_view.dart ===========
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../controllers/admin_review_controller.dart';
+import '../../core/geo.dart';
+import '../../models/disposal_model.dart';
+import '../shared/app_shell.dart';
+
+/// Administrator review queue (F2.7, F2.8).
+///
+/// Shows every pending submission with the evidence needed to decide: the
+/// photograph, what the user declared, how far from the bin they were, and any
+/// flags the server raised. A queue that shows a photo and nothing else forces
+/// the administrator to guess, which is how rubber-stamping starts.
+///
+/// Both buttons call the trusted service. Nothing on this screen writes
+/// Firestore — an administrator cannot credit a wallet from a client, and there
+/// is a rules test asserting exactly that.
+class AdminDisposalsView extends ConsumerWidget {
+  const AdminDisposalsView({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final pending = ref.watch(pendingDisposalsProvider);
+    final ui = ref.watch(adminReviewControllerProvider);
+    final theme = Theme.of(context);
+
+    ref.listen(adminReviewControllerProvider, (previous, next) {
+      final messenger = ScaffoldMessenger.of(context);
+      if (next.error != null) {
+        messenger.showSnackBar(SnackBar(
+          content: Text(next.error!),
+          backgroundColor: theme.colorScheme.error,
+        ));
+      } else if (next.lastMessage != null) {
+        messenger.showSnackBar(SnackBar(content: Text(next.lastMessage!)));
+      }
+    });
+
+    return AppShell(
+      title: 'Review queue',
+      child: pending.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (err, _) => _QueueError(error: err, theme: theme),
+        data: (disposals) {
+          if (disposals.isEmpty) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(Icons.inbox_outlined,
+                        size: 56, color: theme.colorScheme.onSurfaceVariant),
+                    const SizedBox(height: 16),
+                    Text('Nothing waiting', style: theme.textTheme.titleMedium),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Submissions needing a human decision appear here.',
+                      style: theme.textTheme.bodySmall,
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              ),
+            );
+          }
+
+          return ListView.builder(
+            padding: const EdgeInsets.all(16),
+            itemCount: disposals.length,
+            itemBuilder: (context, index) => Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 720),
+                child: _DisposalCard(
+                  disposal: disposals[index],
+                  isBusy: ui.isBusy(disposals[index].id ?? ''),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _DisposalCard extends ConsumerWidget {
+  final DisposalModel disposal;
+  final bool isBusy;
+
+  const _DisposalCard({required this.disposal, required this.isBusy});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final controller = ref.read(adminReviewControllerProvider.notifier);
+    final submitter = ref.watch(submitterProvider(disposal.userId));
+    final bin = ref.watch(binForReviewProvider(disposal.binId));
+
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      margin: const EdgeInsets.only(bottom: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // ── Photograph ────────────────────────────────────────────────────
+          AspectRatio(
+            aspectRatio: 4 / 3,
+            child: Image.network(
+              disposal.photoUrl,
+              fit: BoxFit.cover,
+              loadingBuilder: (context, child, progress) => progress == null
+                  ? child
+                  : const Center(child: CircularProgressIndicator()),
+              errorBuilder: (context, error, stack) => ColoredBox(
+                color: theme.colorScheme.surfaceContainerHighest,
+                child: const Center(child: Icon(Icons.broken_image_outlined)),
+              ),
+            ),
+          ),
+
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  submitter.maybeWhen(
+                    data: (user) => user?.name ?? disposal.userId,
+                    orElse: () => disposal.userId,
+                  ),
+                  style: theme.textTheme.titleMedium
+                      ?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 12),
+
+                // ── Evidence ──────────────────────────────────────────────
+                _Fact(
+                  icon: Icons.category_outlined,
+                  label: 'Declared',
+                  value: '${disposal.declaredItemCount} × '
+                      '${disposal.itemType.label}',
+                ),
+                _Fact(
+                  icon: Icons.delete_outline,
+                  label: 'Bin',
+                  value: bin.maybeWhen(
+                    data: (b) => b?.label ?? disposal.binId,
+                    orElse: () => disposal.binId,
+                  ),
+                ),
+                _Fact(
+                  icon: Icons.straighten,
+                  label: 'Distance',
+                  // The client's figure. The server recomputed it from the
+                  // stored coordinates before this row appeared — a discrepancy
+                  // between the two is itself a signal.
+                  value: '${formatDistance(disposal.distanceMeters)} (reported)',
+                ),
+                if (disposal.createdAt != null)
+                  _Fact(
+                    icon: Icons.schedule,
+                    label: 'Submitted',
+                    value: _relative(disposal.createdAt!),
+                  ),
+
+                // ── Flags ─────────────────────────────────────────────────
+                if (disposal.hasFlags) ...[
+                  const SizedBox(height: 12),
+                  ...disposal.flags.map(
+                    (flag) => Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Icon(Icons.flag_outlined,
+                              size: 18, color: theme.colorScheme.error),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              flag.explanation,
+                              style: theme.textTheme.bodySmall
+                                  ?.copyWith(color: theme.colorScheme.error),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+
+                const SizedBox(height: 16),
+
+                if (isBusy)
+                  const Center(child: CircularProgressIndicator())
+                else
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: () => _askReason(context, controller),
+                          icon: const Icon(Icons.close),
+                          label: const Text('Reject'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: theme.colorScheme.error,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: () =>
+                              controller.approve(disposal.id ?? ''),
+                          icon: const Icon(Icons.check),
+                          label: const Text('Approve'),
+                        ),
+                      ),
+                    ],
+                  ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// Rejection requires a reason, and the user is shown it. A rejection with no
+  /// explanation is indistinguishable from the system being broken, and it makes
+  /// an appeal impossible to answer.
+  Future<void> _askReason(
+    BuildContext context,
+    AdminReviewController controller,
+  ) async {
+    final textController = TextEditingController();
+
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Why are you rejecting this?'),
+        content: TextField(
+          controller: textController,
+          autofocus: true,
+          maxLines: 3,
+          decoration: const InputDecoration(
+            hintText: 'The photo does not show the declared items.',
+            border: OutlineInputBorder(),
+            helperText: 'This is shown to the user.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(textController.text),
+            child: const Text('Reject'),
+          ),
+        ],
+      ),
+    );
+
+    if (reason != null && reason.trim().isNotEmpty) {
+      await controller.reject(disposal.id ?? '', reason);
+    }
+  }
+
+  static String _relative(DateTime when) {
+    final diff = DateTime.now().difference(when);
+    if (diff.inMinutes < 1) return 'just now';
+    if (diff.inMinutes < 60) return '${diff.inMinutes} min ago';
+    if (diff.inHours < 24) return '${diff.inHours} h ago';
+    return '${diff.inDays} d ago';
+  }
+}
+
+class _Fact extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final String value;
+
+  const _Fact({required this.icon, required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 18, color: theme.colorScheme.onSurfaceVariant),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 78,
+            child: Text(label, style: theme.textTheme.bodySmall),
+          ),
+          Expanded(
+            child: Text(value, style: theme.textTheme.bodyMedium),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _QueueError extends StatelessWidget {
+  final Object error;
+  final ThemeData theme;
+
+  const _QueueError({required this.error, required this.theme});
+
+  @override
+  Widget build(BuildContext context) {
+    // A missing composite index is the overwhelmingly likely cause the first
+    // time this screen runs: the query filters on status and orders by
+    // createdAt, which Firestore cannot serve from single-field indexes.
+    final text = error.toString();
+    final needsIndex = text.contains('index');
+
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.error_outline, size: 48, color: theme.colorScheme.error),
+            const SizedBox(height: 16),
+            Text(
+              needsIndex
+                  ? 'This query needs a Firestore composite index. Open the '
+                      'console link in the debug output to create it — it takes '
+                      'about a minute to build.'
+                  : 'Could not load the queue.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodyMedium,
+            ),
+            const SizedBox(height: 12),
+            Text(
+              text,
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+=========== FILE: lib/views/admin/admin_users_view.dart ===========
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../controllers/admin_users_controller.dart';
+import '../../controllers/current_user_provider.dart';
+import '../../core/label_format.dart';
+import '../../models/user_model.dart';
+import '../shared/app_shell.dart';
+
+/// Administrator account management (F5.2) with temporary suspension (F5.3).
+///
+/// The list distinguishes four states, not two. "Suspended" and "suspension
+/// lapsed" look identical in the `status` field — both read `suspended` — and
+/// telling them apart is the whole point of the screen: it explains why an
+/// account marked suspended is submitting again.
+class AdminUsersView extends ConsumerStatefulWidget {
+  const AdminUsersView({super.key});
+
+  static const double _maxContentWidth = 820;
+
+  @override
+  ConsumerState<AdminUsersView> createState() => _AdminUsersViewState();
+}
+
+enum _Filter { all, active, suspended }
+
+class _AdminUsersViewState extends ConsumerState<AdminUsersView> {
+  final TextEditingController _search = TextEditingController();
+  _Filter _filter = _Filter.all;
+
+  @override
+  void dispose() {
+    _search.dispose();
+    super.dispose();
+  }
+
+  List<UserModel> _visible(List<UserModel> users) {
+    final query = _search.text.trim().toLowerCase();
+    final now = DateTime.now();
+
+    final filtered = users.where((user) {
+      final matchesQuery = query.isEmpty ||
+          user.name.toLowerCase().contains(query) ||
+          user.email.toLowerCase().contains(query);
+      if (!matchesQuery) return false;
+
+      return switch (_filter) {
+        _Filter.all => true,
+        _Filter.active => user.isActiveAt(now),
+        _Filter.suspended => !user.isActiveAt(now),
+      };
+    }).toList();
+
+    // Blocked accounts first — the reason to open this screen is usually one of
+    // them — then lapsed suspensions, then everyone else by name.
+    filtered.sort((a, b) {
+      int rank(UserModel u) {
+        if (!u.isActiveAt(now)) return 0;
+        if (u.hasLapsedSuspension) return 1;
+        return 2;
+      }
+
+      final byRank = rank(a).compareTo(rank(b));
+      if (byRank != 0) return byRank;
+      return a.name.toLowerCase().compareTo(b.name.toLowerCase());
+    });
+
+    return filtered;
+  }
+
+  Future<void> _suspend(UserModel user) async {
+    final choice = await showDialog<Duration?>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        title: Text('Suspend ${user.name}'),
+        children: [
+          for (final option in const [
+            (label: '24 hours', duration: Duration(hours: 24)),
+            (label: '7 days', duration: Duration(days: 7)),
+            (label: '30 days', duration: Duration(days: 30)),
+          ])
+            SimpleDialogOption(
+              onPressed: () => Navigator.of(context).pop(option.duration),
+              child: Text(option.label),
+            ),
+          const Divider(),
+          SimpleDialogOption(
+            onPressed: () => Navigator.of(context).pop(const Duration()),
+            child: Text(
+              'Indefinitely',
+              style: TextStyle(color: Theme.of(context).colorScheme.error),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 12, 24, 8),
+            child: Text(
+              'A timed suspension lifts itself when the date passes. Nothing '
+              'has to run for that to happen — the expiry is checked whenever '
+              'the account tries to act.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (choice == null || !mounted) return;
+
+    // Duration.zero is the sentinel for "indefinitely" — SimpleDialogOption
+    // cannot return null and be distinguished from a dismissal.
+    final until =
+        choice == const Duration() ? null : DateTime.now().add(choice);
+
+    await _run(
+      () => ref.read(adminUserActionsProvider).suspend(user.uid, until: until),
+      success: until == null
+          ? '${user.name} suspended indefinitely.'
+          : '${user.name} suspended until ${formatDateTime(until)}.',
+    );
+  }
+
+  Future<void> _reinstate(UserModel user) async {
+    await _run(
+      () => ref.read(adminUserActionsProvider).reinstate(user.uid),
+      success: '${user.name} reinstated.',
+    );
+  }
+
+  Future<void> _run(Future<void> Function() action,
+      {required String success}) async {
+    try {
+      await action();
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(success)));
+    } catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('That did not work: $error')),
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final async = ref.watch(allUsersProvider);
+    final currentUid = ref.watch(currentUidProvider);
+
+    return AppShell(
+      title: 'Accounts',
+      child: Center(
+        child: ConstrainedBox(
+          constraints:
+              const BoxConstraints(maxWidth: AdminUsersView._maxContentWidth),
+          child: async.when(
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (error, _) => Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Text('Accounts did not load: $error'),
+              ),
+            ),
+            data: (users) {
+              final visible = _visible(users);
+              return Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+                    child: TextField(
+                      controller: _search,
+                      onChanged: (_) => setState(() {}),
+                      decoration: const InputDecoration(
+                        prefixIcon: Icon(Icons.search),
+                        hintText: 'Search by name or email',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 16),
+                    child: Row(
+                      children: [
+                        for (final filter in _Filter.values)
+                          Padding(
+                            padding: const EdgeInsets.only(right: 8),
+                            child: ChoiceChip(
+                              label: Text(humanise(filter.name)),
+                              selected: _filter == filter,
+                              onSelected: (_) =>
+                                  setState(() => _filter = filter),
+                            ),
+                          ),
+                        const Spacer(),
+                        Text('${visible.length} of ${users.length}',
+                            style: Theme.of(context).textTheme.labelSmall),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Expanded(
+                    child: visible.isEmpty
+                        ? const Center(child: Text('No accounts match.'))
+                        : ListView.separated(
+                            padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
+                            itemCount: visible.length,
+                            separatorBuilder: (_, _) =>
+                                const SizedBox(height: 8),
+                            itemBuilder: (context, index) => _UserCard(
+                              user: visible[index],
+                              isSelf: visible[index].uid == currentUid,
+                              onSuspend: () => _suspend(visible[index]),
+                              onReinstate: () => _reinstate(visible[index]),
+                            ),
+                          ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _UserCard extends StatelessWidget {
+  const _UserCard({
+    required this.user,
+    required this.isSelf,
+    required this.onSuspend,
+    required this.onReinstate,
+  });
+
+  final UserModel user;
+  final bool isSelf;
+  final VoidCallback onSuspend;
+  final VoidCallback onReinstate;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final blocked = !user.isActive;
+
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            CircleAvatar(
+              backgroundColor: blocked
+                  ? theme.colorScheme.errorContainer
+                  : theme.colorScheme.surfaceContainerHighest,
+              child: Text(
+                user.name.isEmpty ? '?' : user.name[0].toUpperCase(),
+                style: TextStyle(
+                  color: blocked
+                      ? theme.colorScheme.onErrorContainer
+                      : theme.colorScheme.onSurfaceVariant,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Flexible(
+                        child: Text(
+                          user.name,
+                          overflow: TextOverflow.ellipsis,
+                          style: theme.textTheme.titleSmall
+                              ?.copyWith(fontWeight: FontWeight.w700),
+                        ),
+                      ),
+                      if (isSelf) ...[
+                        const SizedBox(width: 6),
+                        Text('(you)', style: theme.textTheme.labelSmall),
+                      ],
+                    ],
+                  ),
+                  Text(
+                    user.email,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.bodySmall
+                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  ),
+                  const SizedBox(height: 8),
+                  Wrap(
+                    spacing: 6,
+                    runSpacing: 6,
+                    children: [
+                      _Pill(
+                        label: humanise(user.role),
+                        background: theme.colorScheme.surfaceContainerHighest,
+                        foreground: theme.colorScheme.onSurfaceVariant,
+                      ),
+                      _StateChip(user: user),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            if (isSelf)
+              Tooltip(
+                message: 'You cannot suspend your own account',
+                child: Icon(Icons.block,
+                    size: 18, color: theme.colorScheme.onSurfaceVariant),
+              )
+            else if (blocked)
+              TextButton(onPressed: onReinstate, child: const Text('Reinstate'))
+            else
+              TextButton(
+                onPressed: onSuspend,
+                style: TextButton.styleFrom(
+                    foregroundColor: theme.colorScheme.error),
+                child: const Text('Suspend'),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StateChip extends StatelessWidget {
+  const _StateChip({required this.user});
+
+  final UserModel user;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    if (user.isSuspendedIndefinitely) {
+      return _Pill(
+        label: 'Suspended indefinitely',
+        background: scheme.errorContainer,
+        foreground: scheme.onErrorContainer,
+      );
+    }
+
+    if (user.isSuspendedTemporarily) {
+      return _Pill(
+        label: 'Suspended until ${formatDateTime(user.suspendedUntil)}',
+        background: scheme.errorContainer,
+        foreground: scheme.onErrorContainer,
+      );
+    }
+
+    if (user.hasLapsedSuspension) {
+      // Status still reads 'suspended' in Firestore. Saying so prevents an
+      // administrator re-suspending someone whose time is already served.
+      return _Pill(
+        label: 'Suspension lapsed ${formatAge(user.suspendedUntil)}',
+        background: scheme.tertiaryContainer,
+        foreground: scheme.onTertiaryContainer,
+      );
+    }
+
+    return _Pill(
+      label: 'Active',
+      background: scheme.secondaryContainer,
+      foreground: scheme.onSecondaryContainer,
+    );
+  }
+}
+
+class _Pill extends StatelessWidget {
+  const _Pill({
+    required this.label,
+    required this.background,
+    required this.foreground,
+  });
+
+  final String label;
+  final Color background;
+  final Color foreground;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 4),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Text(
+        label,
+        style: Theme.of(context)
+            .textTheme
+            .labelSmall
+            ?.copyWith(color: foreground, fontWeight: FontWeight.w600),
+      ),
+    );
+  }
+}
+
+=========== FILE: lib/views/admin/points_policy_view.dart ===========
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../controllers/points_policy_controller.dart';
+import '../../core/points_policy.dart';
+import '../../core/policy_fields.dart';
+import '../../services/points_policy_service.dart';
+import '../shared/app_shell.dart';
+
+/// Administrator editor for the points policy (F3.3).
+///
+/// Three things this screen is careful about:
+///
+/// 1. **It validates live, but the server decides.** `PointsPolicy.validate()`
+///    runs on every keystroke so an administrator sees a broken invariant
+///    immediately, and the same check runs again server-side before the write.
+///    The client check is a courtesy, not the enforcement.
+/// 2. **It shows the change before committing it.** Editing this document
+///    changes the economy, so a save presents a from → to summary first.
+/// 3. **It says what a change does not do.** Past awards are snapshotted and
+///    are not rewritten — the most likely misunderstanding an administrator
+///    could have here.
+class PointsPolicyView extends ConsumerStatefulWidget {
+  const PointsPolicyView({super.key});
+
+  static const double _maxContentWidth = 720;
+
+  @override
+  ConsumerState<PointsPolicyView> createState() => _PointsPolicyViewState();
+}
+
+class _PointsPolicyViewState extends ConsumerState<PointsPolicyView> {
+  final Map<String, TextEditingController> _controllers = {};
+
+  /// The policy as the server last gave it to us. The baseline for the diff.
+  PointsPolicy? _loaded;
+
+  bool _saving = false;
+  List<String> _serverProblems = const [];
+
+  @override
+  void dispose() {
+    for (final controller in _controllers.values) {
+      controller.dispose();
+    }
+    super.dispose();
+  }
+
+  void _adoptLoaded(PointsPolicy policy) {
+    _loaded = policy;
+    for (final field in policyFields) {
+      final text = '${field.read(policy)}';
+      final existing = _controllers[field.key];
+      if (existing == null) {
+        _controllers[field.key] = TextEditingController(text: text);
+      } else {
+        existing.text = text;
+      }
+    }
+  }
+
+  /// Builds a policy from the current text, or null if any field is not a
+  /// whole number. Parse failures are reported separately from invariant
+  /// failures — "abc" and "claim pays more than disposal" are different
+  /// mistakes and deserve different messages.
+  ({PointsPolicy? policy, List<String> parseErrors}) _readForm() {
+    final base = _loaded;
+    if (base == null) return (policy: null, parseErrors: const []);
+
+    var draft = base;
+    final errors = <String>[];
+
+    for (final field in policyFields) {
+      final raw = _controllers[field.key]?.text.trim() ?? '';
+      final value = int.tryParse(raw);
+      if (value == null) {
+        errors.add('${field.label} must be a whole number.');
+        continue;
+      }
+      draft = field.write(draft, value);
+    }
+
+    return (policy: errors.isEmpty ? draft : null, parseErrors: errors);
+  }
+
+  Future<void> _save(PointsPolicy policy, List<PolicyChange> changes) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Apply these changes?'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final change in changes)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text(change.summary),
+              ),
+            const SizedBox(height: 12),
+            Text(
+              'Applies to decisions made from now on. Points already awarded '
+              'keep the value they were given.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Apply'),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true) return;
+
+    setState(() {
+      _saving = true;
+      _serverProblems = const [];
+    });
+
+    try {
+      final stored = await ref.read(pointsPolicyEditorProvider).save(policy);
+      if (!mounted) return;
+      setState(() {
+        _adoptLoaded(stored);
+        _saving = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Points policy updated.')),
+      );
+    } on PolicyException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _serverProblems = error.problems;
+      });
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(error.message)));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final async = ref.watch(pointsPolicyProvider);
+
+    return AppShell(
+      title: 'Points policy',
+      child: Center(
+        child: ConstrainedBox(
+          constraints:
+              const BoxConstraints(maxWidth: PointsPolicyView._maxContentWidth),
+          child: async.when(
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (error, _) => _PolicyError(
+              error: error,
+              onRetry: () => ref.invalidate(pointsPolicyProvider),
+            ),
+            data: (policy) {
+              if (_loaded == null) _adoptLoaded(policy);
+              return _buildForm(context);
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildForm(BuildContext context) {
+    final theme = Theme.of(context);
+    final base = _loaded!;
+    final (policy: draft, parseErrors: parseErrors) = _readForm();
+
+    final invariantProblems = draft?.validate() ?? const <String>[];
+    final changes = draft == null ? <PolicyChange>[] : diffPolicies(base, draft);
+    final canSave = !_saving &&
+        draft != null &&
+        invariantProblems.isEmpty &&
+        changes.isNotEmpty;
+
+    return ListView(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+      children: [
+        Card(
+          color: theme.colorScheme.surfaceContainerHighest,
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Icon(Icons.history_toggle_off,
+                    size: 18, color: theme.colorScheme.onSurfaceVariant),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Changes here affect future decisions only. Every award is '
+                    'snapshotted onto the submission that earned it, so past '
+                    'points keep the value they were given.',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SizedBox(height: 20),
+        for (final field in policyFields) ...[
+          _PolicyInput(
+            field: field,
+            controller: _controllers[field.key]!,
+            onChanged: () => setState(() {}),
+          ),
+          const SizedBox(height: 18),
+        ],
+        if (parseErrors.isNotEmpty)
+          _ProblemList(
+            title: 'Fix these entries',
+            problems: parseErrors,
+            tone: theme.colorScheme.error,
+          ),
+        if (invariantProblems.isNotEmpty)
+          _ProblemList(
+            title: 'These values are not allowed',
+            problems: invariantProblems,
+            tone: theme.colorScheme.error,
+          ),
+        if (_serverProblems.isNotEmpty)
+          _ProblemList(
+            title: 'The server refused the write',
+            problems: _serverProblems,
+            tone: theme.colorScheme.error,
+          ),
+        if (changes.isNotEmpty && invariantProblems.isEmpty) ...[
+          const SizedBox(height: 4),
+          _ProblemList(
+            title: 'Pending changes',
+            problems: changes.map((c) => c.summary).toList(growable: false),
+            tone: theme.colorScheme.primary,
+          ),
+        ],
+        const SizedBox(height: 20),
+        Row(
+          children: [
+            Expanded(
+              child: FilledButton.icon(
+                onPressed:
+                    canSave ? () => _save(draft, changes) : null,
+                icon: _saving
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.save_outlined),
+                label: Text(_saving ? 'Saving…' : 'Save policy'),
+              ),
+            ),
+            const SizedBox(width: 12),
+            OutlinedButton(
+              onPressed: _saving
+                  ? null
+                  : () => setState(() => _adoptLoaded(base)),
+              child: const Text('Revert'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        Center(
+          child: TextButton(
+            onPressed: _saving
+                ? null
+                : () => setState(() {
+                      for (final field in policyFields) {
+                        _controllers[field.key]!.text =
+                            '${field.read(PointsPolicy.defaults)}';
+                      }
+                    }),
+            child: const Text('Load section 7.3 defaults'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _PolicyInput extends StatelessWidget {
+  const _PolicyInput({
+    required this.field,
+    required this.controller,
+    required this.onChanged,
+  });
+
+  final PolicyField field;
+  final TextEditingController controller;
+  final VoidCallback onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          onChanged: (_) => onChanged(),
+          decoration: InputDecoration(
+            labelText: field.label,
+            suffixText: field.suffix,
+            border: const OutlineInputBorder(),
+            isDense: true,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          field.help,
+          style: theme.textTheme.bodySmall
+              ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+        ),
+      ],
+    );
+  }
+}
+
+class _ProblemList extends StatelessWidget {
+  const _ProblemList({
+    required this.title,
+    required this.problems,
+    required this.tone,
+  });
+
+  final String title;
+  final List<String> problems;
+  final Color tone;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            title,
+            style: theme.textTheme.labelLarge
+                ?.copyWith(color: tone, fontWeight: FontWeight.w700),
+          ),
+          const SizedBox(height: 6),
+          for (final problem in problems)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('• ', style: theme.textTheme.bodySmall),
+                  Expanded(
+                    child: Text(problem, style: theme.textTheme.bodySmall),
+                  ),
+                ],
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PolicyError extends StatelessWidget {
+  const _PolicyError({required this.error, required this.onRetry});
+
+  final Object error;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.cloud_off_outlined,
+                size: 40, color: theme.colorScheme.error),
+            const SizedBox(height: 14),
+            Text('The policy did not load', style: theme.textTheme.titleMedium),
+            const SizedBox(height: 6),
+            Text(
+              '$error',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 16),
+            FilledButton.tonal(
+                onPressed: onRetry, child: const Text('Try again')),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+=========== FILE: lib/views/auth/login_view.dart ===========
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import '../../controllers/auth_controller.dart';
+
+class LoginView extends ConsumerStatefulWidget {
+  const LoginView({super.key});
+
+  @override
+  ConsumerState<LoginView> createState() => _LoginViewState();
+}
+
+class _LoginViewState extends ConsumerState<LoginView> {
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  bool _obscurePassword = true;
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+    await ref.read(authControllerProvider.notifier).signIn(
+          email: _emailController.text.trim(),
+          password: _passwordController.text,
+        );
+    if (mounted) {
+      final error = ref.read(authControllerProvider).error;
+      if (error != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error.toString()), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final authState = ref.watch(authControllerProvider);
+    final isLoading = authState.isLoading;
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 400),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Icon(Icons.eco, size: 64, color: theme.colorScheme.primary),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Chokro',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.headlineMedium?.copyWith(
+                        fontWeight: FontWeight.bold,
+                        color: theme.colorScheme.primary,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    Text(
+                      'Sign in to continue',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                    const SizedBox(height: 32),
+                    TextFormField(
+                      controller: _emailController,
+                      keyboardType: TextInputType.emailAddress,
+                      decoration: const InputDecoration(
+                        labelText: 'Email',
+                        prefixIcon: Icon(Icons.email_outlined),
+                        border: OutlineInputBorder(),
+                      ),
+                      validator: (v) =>
+                          v == null || !v.contains('@') ? 'Enter a valid email' : null,
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _passwordController,
+                      obscureText: _obscurePassword,
+                      decoration: InputDecoration(
+                        labelText: 'Password',
+                        prefixIcon: const Icon(Icons.lock_outlined),
+                        border: const OutlineInputBorder(),
+                        suffixIcon: IconButton(
+                          icon: Icon(_obscurePassword
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined),
+                          onPressed: () =>
+                              setState(() => _obscurePassword = !_obscurePassword),
+                        ),
+                      ),
+                      validator: (v) =>
+                          v == null || v.length < 6 ? 'Minimum 6 characters' : null,
+                    ),
+                    const SizedBox(height: 24),
+                    FilledButton(
+                      onPressed: isLoading ? null : _submit,
+                      child: isLoading
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('Sign In'),
+                    ),
+                    const SizedBox(height: 16),
+                    TextButton(
+                      onPressed: () => context.go('/register'),
+                      child: const Text("Don't have an account? Register"),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+=========== FILE: lib/views/auth/register_view.dart ===========
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import '../../controllers/auth_controller.dart';
+
+class RegisterView extends ConsumerStatefulWidget {
+  const RegisterView({super.key});
+
+  @override
+  ConsumerState<RegisterView> createState() => _RegisterViewState();
+}
+
+class _RegisterViewState extends ConsumerState<RegisterView> {
+  final _nameController = TextEditingController();
+  final _emailController = TextEditingController();
+  final _passwordController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  bool _obscurePassword = true;
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _emailController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+    await ref.read(authControllerProvider.notifier).signUp(
+          name: _nameController.text.trim(),
+          email: _emailController.text.trim(),
+          password: _passwordController.text,
+        );
+    if (mounted) {
+      final error = ref.read(authControllerProvider).error;
+      if (error != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(error.toString()), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final authState = ref.watch(authControllerProvider);
+    final isLoading = authState.isLoading;
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 400),
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Icon(Icons.eco, size: 64, color: theme.colorScheme.primary),
+                    const SizedBox(height: 16),
+                    Text(
+                      'Create an account',
+                      textAlign: TextAlign.center,
+                      style: theme.textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                    const SizedBox(height: 32),
+                    TextFormField(
+                      controller: _nameController,
+                      textCapitalization: TextCapitalization.words,
+                      decoration: const InputDecoration(
+                        labelText: 'Full name',
+                        prefixIcon: Icon(Icons.person_outlined),
+                        border: OutlineInputBorder(),
+                      ),
+                      validator: (v) => v == null || v.trim().isEmpty
+                          ? 'Enter your name'
+                          : null,
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _emailController,
+                      keyboardType: TextInputType.emailAddress,
+                      decoration: const InputDecoration(
+                        labelText: 'Email',
+                        prefixIcon: Icon(Icons.email_outlined),
+                        border: OutlineInputBorder(),
+                      ),
+                      validator: (v) => v == null || !v.contains('@')
+                          ? 'Enter a valid email'
+                          : null,
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _passwordController,
+                      obscureText: _obscurePassword,
+                      decoration: InputDecoration(
+                        labelText: 'Password',
+                        prefixIcon: const Icon(Icons.lock_outlined),
+                        border: const OutlineInputBorder(),
+                        suffixIcon: IconButton(
+                          icon: Icon(_obscurePassword
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined),
+                          onPressed: () => setState(
+                              () => _obscurePassword = !_obscurePassword),
+                        ),
+                      ),
+                      validator: (v) => v == null || v.length < 6
+                          ? 'Minimum 6 characters'
+                          : null,
+                    ),
+                    const SizedBox(height: 24),
+                    FilledButton(
+                      onPressed: isLoading ? null : _submit,
+                      child: isLoading
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Text('Create account'),
+                    ),
+                    const SizedBox(height: 16),
+                    TextButton(
+                      onPressed: () => context.go('/login'),
+                      child: const Text('Already have an account? Sign in'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+=========== FILE: lib/views/claims/claim_submit_view.dart ===========
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../controllers/claim_controller.dart';
+import '../../core/label_format.dart';
+import '../../models/claim_model.dart';
+import '../shared/app_shell.dart';
+
+/// Submitting a self-reported eco-action (F6.1, F6.2, F6.4).
+///
+/// The screen is honest with the user about what this route is. A claim pays
+/// less than a disposal and always waits for a person, and saying so up front
+/// is better than letting someone expect an instant credit and feel cheated.
+class ClaimSubmitView extends ConsumerWidget {
+  const ClaimSubmitView({super.key});
+
+  static const double _maxContentWidth = 640;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final draft = ref.watch(claimDraftProvider);
+    final quota = ref.watch(claimQuotaProvider);
+    final theme = Theme.of(context);
+
+    if (draft.submittedId != null) {
+      return const _ClaimSubmitted();
+    }
+
+    return AppShell(
+      title: 'Log an eco-action',
+      child: Center(
+        child: ConstrainedBox(
+          constraints:
+              const BoxConstraints(maxWidth: ClaimSubmitView._maxContentWidth),
+          child: ListView(
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
+            children: [
+              quota.when(
+                loading: () => const LinearProgressIndicator(),
+                error: (error, _) => _Notice(
+                  icon: Icons.cloud_off_outlined,
+                  tone: theme.colorScheme.onSurfaceVariant,
+                  text: 'Your weekly quota could not be checked. You can still '
+                      'submit; the server will decide.',
+                ),
+                data: (q) => _Notice(
+                  icon: q.isExhausted
+                      ? Icons.block
+                      : Icons.calendar_today_outlined,
+                  tone: q.isExhausted
+                      ? theme.colorScheme.error
+                      : theme.colorScheme.onSurfaceVariant,
+                  text: q.summary,
+                ),
+              ),
+              const SizedBox(height: 8),
+              _Notice(
+                icon: Icons.person_search_outlined,
+                tone: theme.colorScheme.onSurfaceVariant,
+                text: 'Every eco-action is checked by a person, so points '
+                    'arrive after review rather than straight away. Disposals '
+                    'at a registered bin are verified automatically and pay '
+                    'more.',
+              ),
+              const SizedBox(height: 20),
+              Text('What did you do?',
+                  style: theme.textTheme.titleMedium
+                      ?.copyWith(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 10),
+              // RadioGroup owns the selection and the callback; the tiles
+              // below only declare their value. Flutter 3.32 deprecated the
+              // per-tile groupValue/onChanged pair.
+              RadioGroup<ClaimActionType>(
+                groupValue: draft.actionType,
+                onChanged: (value) {
+                  if (value != null) {
+                    ref.read(claimDraftProvider.notifier).setActionType(value);
+                  }
+                },
+                child: Column(
+                  children: [
+                    for (final type in ClaimActionType.values)
+                      RadioListTile<ClaimActionType>(
+                        value: type,
+                        title: Text(type.label),
+                        subtitle: Text(
+                          type.evidenceHint,
+                          style: theme.textTheme.bodySmall,
+                        ),
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              Text('Evidence',
+                  style: theme.textTheme.titleMedium
+                      ?.copyWith(fontWeight: FontWeight.bold)),
+              const SizedBox(height: 4),
+              Text(
+                draft.actionType?.evidenceHint ??
+                    'Choose an action above, then photograph it.',
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 12),
+              if (draft.hasPhoto)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.file(
+                    File(draft.photoPath!),
+                    height: 220,
+                    width: double.infinity,
+                    fit: BoxFit.cover,
+                  ),
+                ),
+              if (draft.hasPhoto) const SizedBox(height: 10),
+              OutlinedButton.icon(
+                onPressed: draft.isCapturing || draft.isSubmitting
+                    ? null
+                    : () =>
+                        ref.read(claimDraftProvider.notifier).capturePhoto(),
+                icon: draft.isCapturing
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.photo_camera_outlined),
+                label: Text(
+                  draft.hasPhoto ? 'Retake photo' : 'Take photo',
+                ),
+              ),
+              if (draft.error != null) ...[
+                const SizedBox(height: 14),
+                Text(
+                  draft.error!,
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: theme.colorScheme.error),
+                ),
+              ],
+              const SizedBox(height: 22),
+              FilledButton.icon(
+                onPressed: draft.isReadyToSubmit && !draft.isSubmitting
+                    ? () => ref.read(claimDraftProvider.notifier).submit()
+                    : null,
+                icon: draft.isSubmitting
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Icon(Icons.send_outlined),
+                label: Text(draft.isSubmitting ? 'Submitting…' : 'Submit claim'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ClaimSubmitted extends ConsumerWidget {
+  const _ClaimSubmitted();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    return AppShell(
+      title: 'Claim submitted',
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.check_circle_outline,
+                  size: 56, color: theme.colorScheme.primary),
+              const SizedBox(height: 16),
+              Text('Sent for review', style: theme.textTheme.titleLarge),
+              const SizedBox(height: 8),
+              Text(
+                'A reviewer will look at your photo. Points are added to your '
+                'wallet only if it is approved, and you will be told either '
+                'way.',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodySmall
+                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              ),
+              const SizedBox(height: 24),
+              FilledButton(
+                onPressed: () =>
+                    ref.read(claimDraftProvider.notifier).reset(),
+                child: const Text('Log another'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// A user's own claim history, appended to the submission screen's flow.
+class ClaimHistoryList extends ConsumerWidget {
+  const ClaimHistoryList({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final claims = ref.watch(userClaimsProvider);
+
+    return claims.when(
+      loading: () => const Center(child: CircularProgressIndicator()),
+      error: (error, _) => Text('Claims did not load: $error'),
+      data: (items) {
+        if (items.isEmpty) {
+          return Text(
+            'No eco-actions logged yet.',
+            style: theme.textTheme.bodySmall,
+          );
+        }
+        return Column(
+          children: [
+            for (final claim in items)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(
+                  claim.status.isApproved
+                      ? Icons.check_circle_outline
+                      : claim.status.isRejected
+                          ? Icons.cancel_outlined
+                          : Icons.hourglass_empty_outlined,
+                  color: claim.status.isApproved
+                      ? theme.colorScheme.primary
+                      : claim.status.isRejected
+                          ? theme.colorScheme.error
+                          : theme.colorScheme.onSurfaceVariant,
+                ),
+                title: Text(claim.actionType.label),
+                subtitle: Text(
+                  [
+                    claim.userFacingStatus,
+                    formatAge(claim.createdAt),
+                    if (claim.status.isRejected && claim.rejectionReason != null)
+                      claim.rejectionReason!,
+                  ].join(' · '),
+                  style: theme.textTheme.bodySmall,
+                ),
+                trailing: claim.status.isApproved
+                    ? Text(
+                        '+${claim.creditedPoints}',
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: theme.colorScheme.primary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      )
+                    : null,
+              ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _Notice extends StatelessWidget {
+  const _Notice({required this.icon, required this.tone, required this.text});
+
+  final IconData icon;
+  final Color tone;
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(icon, size: 16, color: tone),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            text,
+            style: Theme.of(context)
+                .textTheme
+                .bodySmall
+                ?.copyWith(color: tone),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+=========== FILE: lib/views/disposal/declare_view.dart ===========
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../controllers/auth_controller.dart';
+import '../../controllers/disposal_controller.dart';
+import '../../core/geo.dart';
+import '../../models/disposal_model.dart';
+
+/// Step 4 of the disposal flow (F2.9): declare what is being disposed of, review
+/// the submission, and write it.
+///
+/// The declared count and type are what the automated screen checks the
+/// photograph against. They are not verification on their own — a user can type
+/// any number — but a declaration that disagrees with the photograph is a signal
+/// worth flagging, and asking for it costs one screen.
+class DisposalDeclareView extends ConsumerWidget {
+  const DisposalDeclareView({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final draft = ref.watch(disposalDraftProvider);
+    final controller = ref.read(disposalDraftProvider.notifier);
+    final userAsync = ref.watch(currentUserProvider);
+    final theme = Theme.of(context);
+    final bin = draft.bin;
+
+    if (draft.submittedId != null) {
+      return _SubmittedView(
+        theme: theme,
+        onDone: () {
+          controller.reset();
+          context.go('/home');
+        },
+      );
+    }
+
+    if (bin == null || !draft.hasPhoto || !draft.hasLocation) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Confirm disposal')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('This submission is incomplete. Start again.'),
+                const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: () {
+                    controller.reset();
+                    context.go('/home');
+                  },
+                  child: const Text('Back to home'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Confirm disposal')),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 600),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                // ── What are you disposing of ───────────────────────────────
+                Text('What are you disposing of?',
+                    style: theme.textTheme.titleMedium),
+                const SizedBox(height: 12),
+
+                DropdownButtonFormField<DisposalItemType>(
+                  initialValue: draft.itemType,
+                  decoration: const InputDecoration(
+                    labelText: 'Material',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: DisposalItemType.values
+                      .map((type) => DropdownMenuItem(
+                            value: type,
+                            child: Text(type.label),
+                          ))
+                      .toList(),
+                  onChanged: (type) {
+                    if (type != null) controller.setItemType(type);
+                  },
+                ),
+
+                const SizedBox(height: 20),
+
+                Text('How many items?', style: theme.textTheme.titleMedium),
+                const SizedBox(height: 4),
+                Text(
+                  'Count what is visible in your photo.',
+                  style: theme.textTheme.bodySmall,
+                ),
+                const SizedBox(height: 12),
+
+                Card(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 8),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        IconButton.filledTonal(
+                          onPressed: draft.declaredItemCount > 1
+                              ? () => controller
+                                  .setItemCount(draft.declaredItemCount - 1)
+                              : null,
+                          icon: const Icon(Icons.remove),
+                        ),
+                        Text(
+                          '${draft.declaredItemCount}',
+                          style: theme.textTheme.headlineMedium
+                              ?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                        IconButton.filledTonal(
+                          onPressed: draft.declaredItemCount < 100
+                              ? () => controller
+                                  .setItemCount(draft.declaredItemCount + 1)
+                              : null,
+                          icon: const Icon(Icons.add),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SizedBox(height: 24),
+                const Divider(),
+                const SizedBox(height: 12),
+
+                // ── Review ──────────────────────────────────────────────────
+                Text('Review', style: theme.textTheme.titleMedium),
+                const SizedBox(height: 12),
+
+                Card(
+                  child: Column(
+                    children: [
+                      ListTile(
+                        leading: const Icon(Icons.delete_outline),
+                        title: Text(bin.label),
+                        subtitle: Text(draft.distanceMeters == null
+                            ? 'Location captured'
+                            : '${formatDistance(draft.distanceMeters!)} away'),
+                      ),
+                      const Divider(height: 1),
+                      ListTile(
+                        leading: ClipRRect(
+                          borderRadius: BorderRadius.circular(6),
+                          child: Image.file(
+                            File(draft.photoPath!),
+                            width: 48,
+                            height: 48,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                        title: Text(draft.itemType.label),
+                        subtitle: Text(
+                            '${draft.declaredItemCount} item'
+                            '${draft.declaredItemCount == 1 ? '' : 's'}'),
+                      ),
+                    ],
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
+                Card(
+                  color: theme.colorScheme.surfaceContainerHighest,
+                  child: Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Row(
+                      children: [
+                        Icon(Icons.schedule,
+                            color: theme.colorScheme.onSurfaceVariant),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Text(
+                            'Your submission is checked before points are '
+                            'added. You will be told the outcome either way.',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                if (draft.error != null) ...[
+                  const SizedBox(height: 16),
+                  Card(
+                    color: theme.colorScheme.errorContainer,
+                    child: Padding(
+                      padding: const EdgeInsets.all(16),
+                      child: Row(
+                        children: [
+                          Icon(Icons.error_outline,
+                              color: theme.colorScheme.onErrorContainer),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              draft.error!,
+                              style: TextStyle(
+                                  color: theme.colorScheme.onErrorContainer),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+
+                const SizedBox(height: 24),
+
+                if (draft.isSubmitting)
+                  const Center(child: CircularProgressIndicator())
+                else
+                  FilledButton.icon(
+                    onPressed: () async {
+                      final user = userAsync.value;
+                      if (user == null) return;
+                      await controller.submit(uid: user.uid);
+                    },
+                    icon: const Icon(Icons.send),
+                    label: const Text('Submit disposal'),
+                  ),
+                const SizedBox(height: 32),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SubmittedView extends StatelessWidget {
+  final ThemeData theme;
+  final VoidCallback onDone;
+
+  const _SubmittedView({required this.theme, required this.onDone});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.check_circle,
+                    size: 72, color: theme.colorScheme.primary),
+                const SizedBox(height: 24),
+                Text(
+                  'Submitted',
+                  style: theme.textTheme.headlineSmall
+                      ?.copyWith(fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  'Your disposal is being checked. Points are added once it is '
+                  'approved, and you can follow it in your history.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 32),
+                FilledButton(
+                  onPressed: onDone,
+                  child: const Text('Done'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+=========== FILE: lib/views/disposal/location_view.dart ===========
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../core/geo.dart';
+import '../../controllers/disposal_controller.dart';
+import '../../services/location_service.dart';
+
+/// Step 3 of the disposal flow (F2.4, F2.5): capture a location fix and check it
+/// against the bin's geofence.
+///
+/// The distance shown here is computed on the device and is **feedback only**.
+/// The server recomputes it from the stored coordinates when it decides. Showing
+/// it anyway is worth the duplication: a user who is 200 m away should find out
+/// before photographing a bag, not after submitting.
+class DisposalLocationView extends ConsumerWidget {
+  const DisposalLocationView({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final draft = ref.watch(disposalDraftProvider);
+    final controller = ref.read(disposalDraftProvider.notifier);
+    final theme = Theme.of(context);
+    final bin = draft.bin;
+
+    if (bin == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Check location')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text('Scan a bin code first.'),
+                const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Back'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    final location = draft.location;
+    final distance = draft.distanceMeters;
+    final withinRadius = draft.isWithinRadius;
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Check location')),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 600),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.delete_outline),
+                    title: Text(bin.label),
+                    subtitle: Text('Accepts submissions within '
+                        '${bin.radiusMeters.round()} m'),
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                Text('Where you are', style: theme.textTheme.titleMedium),
+                const SizedBox(height: 4),
+                Text(
+                  'Your position is checked against the bin. This is what makes '
+                  'a disposal verifiable rather than just claimed.',
+                  style: theme.textTheme.bodySmall,
+                ),
+                const SizedBox(height: 16),
+
+                if (location == null || location.outcome == LocationOutcome.idle)
+                  _Placeholder(theme: theme)
+                else if (draft.isLocating)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 32),
+                    child: Center(child: CircularProgressIndicator()),
+                  )
+                else if (location.hasFix)
+                  _FixResult(
+                    theme: theme,
+                    distance: distance,
+                    withinRadius: withinRadius,
+                    radius: bin.radiusMeters,
+                    accuracy: location.accuracyMeters,
+                    lowAccuracy: location.isLowAccuracy,
+                  )
+                else
+                  _LocationProblem(
+                    theme: theme,
+                    location: location,
+                    onOpenSettings: controller.openLocationSettings,
+                  ),
+
+                const SizedBox(height: 24),
+
+                if (!draft.isLocating) ...[
+                  FilledButton.icon(
+                    onPressed: controller.captureLocation,
+                    icon: const Icon(Icons.my_location),
+                    label: Text(location != null && location.hasFix
+                        ? 'Check again'
+                        : 'Check my location'),
+                  ),
+                  const SizedBox(height: 12),
+                  FilledButton.icon(
+                    // Only offered once the fix puts the user inside the bin's
+                    // radius. The server checks this again and does not trust
+                    // the client's answer (F2.5) — but letting someone walk
+                    // through the rest of the flow only to be refused would be
+                    // a poor experience.
+                    onPressed: withinRadius
+                        ? () => context.push('/dispose/declare')
+                        : null,
+                    icon: const Icon(Icons.checklist),
+                    label: const Text('Continue'),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _Placeholder extends StatelessWidget {
+  final ThemeData theme;
+  const _Placeholder({required this.theme});
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      color: theme.colorScheme.surfaceContainerHighest,
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Row(
+          children: [
+            Icon(Icons.location_searching,
+                color: theme.colorScheme.onSurfaceVariant),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Text(
+                'Stand next to the bin, then check your location.',
+                style: theme.textTheme.bodyMedium,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _FixResult extends StatelessWidget {
+  final ThemeData theme;
+  final double? distance;
+  final bool withinRadius;
+  final double radius;
+  final double? accuracy;
+  final bool lowAccuracy;
+
+  const _FixResult({
+    required this.theme,
+    required this.distance,
+    required this.withinRadius,
+    required this.radius,
+    required this.accuracy,
+    required this.lowAccuracy,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final good = withinRadius;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Card(
+          color: good
+              ? theme.colorScheme.primaryContainer
+              : theme.colorScheme.errorContainer,
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Row(
+              children: [
+                Icon(
+                  good ? Icons.check_circle : Icons.location_off,
+                  size: 32,
+                  color: good
+                      ? theme.colorScheme.onPrimaryContainer
+                      : theme.colorScheme.onErrorContainer,
+                ),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        distance == null
+                            ? 'Distance unknown'
+                            : '${formatDistance(distance!)} from the bin',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
+                          color: good
+                              ? theme.colorScheme.onPrimaryContainer
+                              : theme.colorScheme.onErrorContainer,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        good
+                            ? 'You are within the ${radius.round()} m radius.'
+                            : 'Too far away. Move closer than ${radius.round()} m '
+                                'and check again.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: good
+                              ? theme.colorScheme.onPrimaryContainer
+                              : theme.colorScheme.onErrorContainer,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+        if (accuracy != null) ...[
+          const SizedBox(height: 8),
+          Text(
+            'Fix accurate to about ${accuracy!.round()} m'
+            '${lowAccuracy ? ' — move into the open for a better fix' : ''}',
+            style: theme.textTheme.bodySmall,
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _LocationProblem extends StatelessWidget {
+  final ThemeData theme;
+  final LocationResult location;
+  final VoidCallback onOpenSettings;
+
+  const _LocationProblem({
+    required this.theme,
+    required this.location,
+    required this.onOpenSettings,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final needsSettings =
+        location.outcome == LocationOutcome.deniedForever ||
+            location.outcome == LocationOutcome.serviceDisabled;
+
+    return Card(
+      color: theme.colorScheme.errorContainer,
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.error_outline,
+                    color: theme.colorScheme.onErrorContainer),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    location.displayMessage,
+                    style: TextStyle(
+                        color: theme.colorScheme.onErrorContainer),
+                  ),
+                ),
+              ],
+            ),
+            if (needsSettings) ...[
+              const SizedBox(height: 12),
+              OutlinedButton(
+                onPressed: onOpenSettings,
+                child: const Text('Open settings'),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+=========== FILE: lib/views/disposal/photo_view.dart ===========
+import 'dart:io';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+
+import '../../controllers/disposal_controller.dart';
+
+/// Step 2 of the disposal flow (F2.3): photograph the disposal.
+///
+/// The photo is captured and compressed here but **not uploaded** — upload
+/// happens at submission, once the user has committed to the whole thing.
+/// Uploading eagerly would leave orphaned files in Storage every time someone
+/// backs out, and Storage has no automatic cleanup.
+class DisposalPhotoView extends ConsumerWidget {
+  const DisposalPhotoView({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final draft = ref.watch(disposalDraftProvider);
+    final controller = ref.read(disposalDraftProvider.notifier);
+    final theme = Theme.of(context);
+    final bin = draft.bin;
+
+    // Reached without a resolved bin — deep link, or a hot restart wiping state.
+    if (bin == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Photograph disposal')),
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.qr_code_scanner, size: 48),
+                const SizedBox(height: 16),
+                const Text(
+                  'Scan a bin code first.',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Back to scanner'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      appBar: AppBar(title: const Text('Photograph disposal')),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(20),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 600),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Card(
+                  child: ListTile(
+                    leading: const Icon(Icons.delete_outline),
+                    title: Text(bin.label),
+                    subtitle: Text('Radius ${bin.radiusMeters.round()} m'),
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                Text('Your photo', style: theme.textTheme.titleMedium),
+                const SizedBox(height: 4),
+                Text(
+                  'Show the items and the bin in one frame. This is what an '
+                  'administrator sees if your submission needs review.',
+                  style: theme.textTheme.bodySmall,
+                ),
+                const SizedBox(height: 12),
+
+                AspectRatio(
+                  aspectRatio: 4 / 3,
+                  child: Container(
+                    decoration: BoxDecoration(
+                      color: theme.colorScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: theme.dividerColor),
+                    ),
+                    clipBehavior: Clip.antiAlias,
+                    child: draft.hasPhoto
+                        ? Image.file(
+                            File(draft.photoPath!),
+                            fit: BoxFit.cover,
+                            // A cached decode of a replaced file can show the
+                            // previous image; the key forces a fresh decode.
+                            key: ValueKey(draft.photoPath),
+                          )
+                        : Center(
+                            child: Column(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(
+                                  Icons.photo_camera_outlined,
+                                  size: 40,
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                                const SizedBox(height: 8),
+                                Text(
+                                  'No photo yet',
+                                  style: theme.textTheme.bodySmall,
+                                ),
+                              ],
+                            ),
+                          ),
+                  ),
+                ),
+
+                if (draft.compressionSavingPercent != null) ...[
+                  const SizedBox(height: 8),
+                  Text(
+                    'Compressed ${_kb(draft.originalBytes!)} → '
+                    '${_kb(draft.compressedBytes!)} '
+                    '(${draft.compressionSavingPercent}% smaller, '
+                    'location metadata removed)',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ],
+
+                if (draft.error != null) ...[
+                  const SizedBox(height: 12),
+                  Card(
+                    color: theme.colorScheme.errorContainer,
+                    child: Padding(
+                      padding: const EdgeInsets.all(12),
+                      child: Row(
+                        children: [
+                          Icon(Icons.error_outline,
+                              color: theme.colorScheme.onErrorContainer),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Text(
+                              draft.error!,
+                              style: TextStyle(
+                                color: theme.colorScheme.onErrorContainer,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+
+                const SizedBox(height: 20),
+
+                if (draft.isCapturing)
+                  const Center(child: CircularProgressIndicator())
+                else if (draft.hasPhoto)
+                  Row(
+                    children: [
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: controller.capturePhoto,
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Retake'),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: FilledButton.icon(
+                          onPressed: () => context.push('/dispose/location'),
+                          icon: const Icon(Icons.my_location),
+                          label: const Text('Continue'),
+                        ),
+                      ),
+                    ],
+                  )
+                else
+                  FilledButton.icon(
+                    onPressed: controller.capturePhoto,
+                    icon: const Icon(Icons.photo_camera),
+                    label: const Text('Take photo'),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  static String _kb(int bytes) {
+    if (bytes >= 1024 * 1024) {
+      return '${(bytes / (1024 * 1024)).toStringAsFixed(1)} MB';
+    }
+    return '${(bytes / 1024).round()} KB';
+  }
+}
+
+=========== FILE: lib/views/disposal/scan_view.dart ===========
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:mobile_scanner/mobile_scanner.dart';
+
+import '../../controllers/disposal_controller.dart';
+import '../../controllers/scan_controller.dart';
+
+/// Step 1 of the disposal flow (F2.2): scan the code on a bin.
+///
+/// Resolves the bin and hands off. Photo capture, the location fix and the
+/// submission itself are later steps — keeping them apart means a failure on a
+/// borrowed phone points at one thing rather than four.
+///
+/// Camera permission is handled by `mobile_scanner` itself: the plugin requests
+/// it when the controller starts. If the user denies it, [MobileScanner]'s
+/// `errorBuilder` renders instead of the preview.
+class ScanView extends ConsumerStatefulWidget {
+  const ScanView({super.key});
+
+  @override
+  ConsumerState<ScanView> createState() => _ScanViewState();
+}
+
+class _ScanViewState extends ConsumerState<ScanView> {
+  late final MobileScannerController _controller;
+
+  /// Guards against the camera firing the same code repeatedly while the
+  /// resolved result is on screen.
+  bool _handled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = MobileScannerController(
+      detectionSpeed: DetectionSpeed.noDuplicates,
+      formats: const [BarcodeFormat.qrCode],
+    );
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onDetect(BarcodeCapture capture) {
+    if (_handled) return;
+
+    final raw = capture.barcodes
+        .map((b) => b.rawValue)
+        .firstWhere((value) => value != null && value.isNotEmpty,
+            orElse: () => null);
+
+    if (raw == null) return;
+
+    _handled = true;
+    ref.read(scanControllerProvider.notifier).resolve(raw);
+  }
+
+  void _scanAgain() {
+    _handled = false;
+    ref.read(scanControllerProvider.notifier).reset();
+  }
+
+  void _continueToPhoto() {
+    final bin = ref.read(scanControllerProvider).bin;
+    if (bin == null) return;
+
+    // Opens a fresh draft here rather than on the photo screen: backing out and
+    // scanning a different bin must not leave a photo attached to the old one.
+    ref.read(disposalDraftProvider.notifier).startForBin(bin);
+    context.push('/dispose/photo');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scan = ref.watch(scanControllerProvider);
+    final theme = Theme.of(context);
+
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Scan bin code'),
+        actions: [
+          IconButton(
+            tooltip: 'Toggle torch',
+            icon: const Icon(Icons.flashlight_on_outlined),
+            onPressed: () => _controller.toggleTorch(),
+          ),
+        ],
+      ),
+      body: Column(
+        children: [
+          Expanded(
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                MobileScanner(
+                  controller: _controller,
+                  onDetect: _onDetect,
+                  errorBuilder: (context, error) => _CameraError(error: error),
+                ),
+                // Simple aiming frame. Purely visual — the scanner reads the
+                // whole frame, not just this box.
+                Center(
+                  child: Container(
+                    width: 240,
+                    height: 240,
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.white70, width: 2),
+                      borderRadius: BorderRadius.circular(16),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          _ResultPanel(
+            scan: scan,
+            theme: theme,
+            onScanAgain: _scanAgain,
+            onContinue: _continueToPhoto,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ResultPanel extends StatelessWidget {
+  final ScanState scan;
+  final ThemeData theme;
+  final VoidCallback onScanAgain;
+  final VoidCallback onContinue;
+
+  const _ResultPanel({
+    required this.scan,
+    required this.theme,
+    required this.onScanAgain,
+    required this.onContinue,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final isProblem = scan.outcome == ScanOutcome.unknownCode ||
+        scan.outcome == ScanOutcome.binClosed ||
+        scan.outcome == ScanOutcome.error;
+
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                if (scan.isBusy)
+                  const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                else
+                  Icon(
+                    scan.canProceed
+                        ? Icons.check_circle_outline
+                        : isProblem
+                            ? Icons.error_outline
+                            : Icons.qr_code_scanner,
+                    color: scan.canProceed
+                        ? Colors.green
+                        : isProblem
+                            ? theme.colorScheme.error
+                            : theme.colorScheme.onSurfaceVariant,
+                  ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Text(
+                    scan.displayMessage,
+                    style: theme.textTheme.titleMedium,
+                  ),
+                ),
+              ],
+            ),
+            if (scan.canProceed) ...[
+              const SizedBox(height: 4),
+              Padding(
+                padding: const EdgeInsets.only(left: 30),
+                child: Text(
+                  'Radius ${scan.bin!.radiusMeters.round()} m',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ),
+            ],
+            const SizedBox(height: 16),
+            if (scan.canProceed)
+              FilledButton.icon(
+                onPressed: onContinue,
+                icon: const Icon(Icons.photo_camera_outlined),
+                label: const Text('Continue'),
+              )
+            else if (isProblem)
+              OutlinedButton(
+                onPressed: onScanAgain,
+                child: const Text('Scan again'),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _CameraError extends StatelessWidget {
+  final MobileScannerException error;
+
+  const _CameraError({required this.error});
+
+  @override
+  Widget build(BuildContext context) {
+    final isPermission =
+        error.errorCode == MobileScannerErrorCode.permissionDenied;
+
+    return ColoredBox(
+      color: Colors.black,
+      child: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.no_photography_outlined,
+                  color: Colors.white70, size: 48),
+              const SizedBox(height: 16),
+              Text(
+                isPermission
+                    ? 'Camera permission is needed to scan bin codes. '
+                        'Enable it in Settings and return here.'
+                    : 'The camera could not be started.',
+                textAlign: TextAlign.center,
+                style: const TextStyle(color: Colors.white70),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+=========== FILE: lib/views/history/submission_history_view.dart ===========
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../controllers/submission_history_controller.dart';
+import '../../core/label_format.dart';
+import '../../models/disposal_model.dart';
+import '../shared/app_shell.dart';
+import '../shared/status_chip.dart';
+
+/// Every submission the signed-in user has made, newest first (F7.2).
+///
+/// Read-only by construction. The screen exists to answer three questions a
+/// user has after submitting: was it accepted, why not, and what was it worth.
+class SubmissionHistoryView extends ConsumerWidget {
+  const SubmissionHistoryView({super.key});
+
+  /// Above this width the list stops stretching and centres. One number, no
+  /// LayoutBuilder needed — the list is single-column at every size, so only
+  /// the measure changes.
+  static const double _maxContentWidth = 720;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(submissionHistoryProvider);
+
+    return AppShell(
+      title: 'My submissions',
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: _maxContentWidth),
+          child: async.when(
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (error, _) => _ErrorState(
+              error: error,
+              onRetry: () => ref.invalidate(submissionHistoryProvider),
+            ),
+            data: (items) {
+              if (items.isEmpty) return const _EmptyState();
+              return RefreshIndicator(
+                onRefresh: () async => ref.invalidate(submissionHistoryProvider),
+                child: ListView.separated(
+                  padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+                  itemCount: items.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 10),
+                  itemBuilder: (context, index) =>
+                      _SubmissionCard(disposal: items[index]),
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SubmissionCard extends StatelessWidget {
+  const _SubmissionCard({required this.disposal});
+
+  final DisposalModel disposal;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final status = disposal.status;
+    final points = disposal.pointsAwarded;
+    final reason = disposal.rejectionReason;
+    final flags = disposal.flags;
+
+    return Card(
+      clipBehavior: Clip.antiAlias,
+      margin: EdgeInsets.zero,
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _Thumbnail(url: disposal.photoUrl),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        humanise(disposal.itemType),
+                        style: theme.textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w600),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        [
+                          itemCount(disposal.declaredItemCount),
+                          formatAge(disposal.createdAt),
+                        ].where((s) => s.isNotEmpty).join(' · '),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      StatusChip(status: disposal.status),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                _PointsBadge(points: points, status: status),
+              ],
+            ),
+            if (status.isRejected && reason != null && reason.isNotEmpty)
+              _Note(
+                icon: Icons.info_outline,
+                tone: theme.colorScheme.error,
+                title: 'Why it was rejected',
+                body: reason,
+              ),
+            if (status.isPending && flags.isNotEmpty)
+              _Note(
+                icon: Icons.flag_outlined,
+                tone: theme.colorScheme.onSurfaceVariant,
+                title: 'Sent for review because',
+                body: flags.map(humanise).join(' · '),
+              ),
+            if (status.isPending && flags.isEmpty)
+              _Note(
+                icon: Icons.schedule_outlined,
+                tone: theme.colorScheme.onSurfaceVariant,
+                title: 'In the queue',
+                body:
+                    'A reviewer will check this submission. Your balance stays '
+                    'the same until they do.',
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _Thumbnail extends StatelessWidget {
+  const _Thumbnail({required this.url});
+
+  final String url;
+
+  @override
+  Widget build(BuildContext context) {
+    final placeholder = Container(
+      width: 64,
+      height: 64,
+      color: Theme.of(context).colorScheme.surfaceContainerHighest,
+      alignment: Alignment.center,
+      child: Icon(
+        Icons.image_outlined,
+        size: 20,
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+      ),
+    );
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(10),
+      child: url.isEmpty
+          ? placeholder
+          : CachedNetworkImage(
+              imageUrl: url,
+              width: 64,
+              height: 64,
+              fit: BoxFit.cover,
+              placeholder: (_, _) => placeholder,
+              errorWidget: (_, _, _) => placeholder,
+            ),
+    );
+  }
+}
+
+class _PointsBadge extends StatelessWidget {
+  const _PointsBadge({required this.points, required this.status});
+
+  final int? points;
+  final DisposalStatus status;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final awarded = points != null && points! > 0;
+
+    if (!awarded) {
+      return Text(
+        status.isRejected ? 'No points' : '—',
+        style: theme.textTheme.labelMedium
+            ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: [
+        Text(
+          '+$points',
+          style: theme.textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.w700,
+            color: theme.colorScheme.primary,
+          ),
+        ),
+        Text(
+          'points',
+          style: theme.textTheme.labelSmall
+              ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+        ),
+      ],
+    );
+  }
+}
+
+class _Note extends StatelessWidget {
+  const _Note({
+    required this.icon,
+    required this.tone,
+    required this.title,
+    required this.body,
+  });
+
+  final IconData icon;
+  final Color tone;
+  final String title;
+  final String body;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(icon, size: 16, color: tone),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  title,
+                  style: theme.textTheme.labelMedium
+                      ?.copyWith(color: tone, fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 2),
+                Text(body, style: theme.textTheme.bodySmall),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  const _EmptyState();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.recycling_outlined,
+              size: 48,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(height: 16),
+            Text('No submissions yet', style: theme.textTheme.titleMedium),
+            const SizedBox(height: 6),
+            Text(
+              'Scan the code on a registered bin to record your first '
+              'disposal. Approved submissions appear here with what they '
+              'earned.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ErrorState extends StatelessWidget {
+  const _ErrorState({required this.error, required this.onRetry});
+
+  final Object error;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.cloud_off_outlined,
+              size: 40,
+              color: theme.colorScheme.error,
+            ),
+            const SizedBox(height: 14),
+            Text('Submissions did not load', style: theme.textTheme.titleMedium),
+            const SizedBox(height: 6),
+            Text(
+              '$error',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 16),
+            FilledButton.tonal(onPressed: onRetry, child: const Text('Try again')),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+=========== FILE: lib/views/home/home_view.dart ===========
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import '../../controllers/auth_controller.dart';
+import '../../controllers/wallet_controller.dart';
+import '../../controllers/submission_history_controller.dart';
+import '../shared/app_shell.dart';
+
+class HomeView extends ConsumerWidget {
+  const HomeView({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final userAsync = ref.watch(currentUserProvider);
+    final walletAsync = ref.watch(walletProvider);
+    final pendingCount = ref.watch(pendingSubmissionCountProvider);
+    final theme = Theme.of(context);
+
+    return AppShell(
+      title: 'Chokro',
+      child: userAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => Center(child: Text('Error: $e')),
+        data: (user) {
+          if (user == null) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 720),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Hello, ${user.name}',
+                            style: theme.textTheme.headlineSmall
+                                ?.copyWith(fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        Chip(
+                          label: Text(user.role.toUpperCase()),
+                          visualDensity: VisualDensity.compact,
+                        ),
+                      ],
+                    ),
+                    if (!user.isActive)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 12),
+                        child: Card(
+                          color: theme.colorScheme.errorContainer,
+                          child: const Padding(
+                            padding: EdgeInsets.all(16),
+                            child: Text(
+                              'This account is suspended. '
+                              'Most actions are unavailable.',
+                            ),
+                          ),
+                        ),
+                      ),
+                    const SizedBox(height: 24),
+                    Card(
+                      child: Padding(
+                        padding: const EdgeInsets.all(24),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text('Points balance',
+                                style: theme.textTheme.labelLarge),
+                            const SizedBox(height: 8),
+                            walletAsync.when(
+                              loading: () => const SizedBox(
+                                height: 40,
+                                child: Center(
+                                  child: SizedBox(
+                                    height: 20,
+                                    width: 20,
+                                    child: CircularProgressIndicator(
+                                        strokeWidth: 2),
+                                  ),
+                                ),
+                              ),
+                              error: (e, _) => Text('Unavailable: $e'),
+                              data: (wallet) => Text(
+                                '${wallet?.balance ?? 0}',
+                                style: theme.textTheme.displaySmall?.copyWith(
+                                  fontWeight: FontWeight.bold,
+                                  color: theme.colorScheme.primary,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+
+                    // ── Dispose waste (F2.2 entry point) ──────────────────
+                    //
+                    // Disabled for a suspended account. The Firestore rules
+                    // refuse the submission anyway (`isActive()` on disposal
+                    // create), so this is courtesy rather than enforcement —
+                    // it stops a user walking to a bin and photographing a bag
+                    // before finding out.
+                    Card(
+                      clipBehavior: Clip.antiAlias,
+                      child: InkWell(
+                        onTap: user.isActive
+                            ? () => context.push('/dispose/scan')
+                            : null,
+                        child: Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: Row(
+                            children: [
+                              CircleAvatar(
+                                radius: 24,
+                                backgroundColor:
+                                    theme.colorScheme.primaryContainer,
+                                child: Icon(
+                                  Icons.qr_code_scanner,
+                                  color: theme.colorScheme.onPrimaryContainer,
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Dispose waste',
+                                      style: theme.textTheme.titleMedium
+                                          ?.copyWith(
+                                              fontWeight: FontWeight.bold),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      user.isActive
+                                          ? 'Scan the code on a bin to start.'
+                                          : 'Unavailable while suspended.',
+                                      style: theme.textTheme.bodySmall,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (user.isActive)
+                                const Icon(Icons.chevron_right),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // ── My submissions (F7.2 entry point) ─────────────
+                    //
+                    // Shown to every account, including a suspended one: a
+                    // user who cannot submit can still need to read why an
+                    // earlier submission was rejected.
+                    //
+                    // The badge watches `submissionHistoryProvider`, so this
+                    // screen holds a listener on the user's own disposals.
+                    // That is one query, the same one the history screen uses.
+                    // Drop `pendingCount` and the badge to remove it.
+                    const SizedBox(height: 16),
+                    Card(
+                      clipBehavior: Clip.antiAlias,
+                      child: InkWell(
+                        onTap: () => context.push('/history'),
+                        child: Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: Row(
+                            children: [
+                              CircleAvatar(
+                                radius: 24,
+                                backgroundColor:
+                                    theme.colorScheme.tertiaryContainer,
+                                child: Icon(
+                                  Icons.receipt_long_outlined,
+                                  color: theme.colorScheme.onTertiaryContainer,
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'My submissions',
+                                      style: theme.textTheme.titleMedium
+                                          ?.copyWith(
+                                              fontWeight: FontWeight.bold),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      pendingCount == 0
+                                          ? 'Status, reason and points for '
+                                              'everything you have sent.'
+                                          : pendingCount == 1
+                                              ? '1 submission is waiting for '
+                                                  'review.'
+                                              : '$pendingCount submissions are '
+                                                  'waiting for review.',
+                                      style: theme.textTheme.bodySmall,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (pendingCount > 0)
+                                Badge(
+                                  label: Text('$pendingCount'),
+                                  child: const SizedBox(width: 8, height: 20),
+                                ),
+                              const Icon(Icons.chevron_right),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // ── Log an eco-action (F6.1 entry point) ──────────
+                    //
+                    // Disabled while suspended for the same reason as disposal:
+                    // the rules refuse the write anyway, and finding that out
+                    // after photographing something is a poor experience.
+                    const SizedBox(height: 16),
+                    Card(
+                      clipBehavior: Clip.antiAlias,
+                      child: InkWell(
+                        onTap: user.isActive
+                            ? () => context.push('/claims/new')
+                            : null,
+                        child: Padding(
+                          padding: const EdgeInsets.all(20),
+                          child: Row(
+                            children: [
+                              CircleAvatar(
+                                radius: 24,
+                                backgroundColor:
+                                    theme.colorScheme.tertiaryContainer,
+                                child: Icon(
+                                  Icons.eco_outlined,
+                                  color: theme.colorScheme.onTertiaryContainer,
+                                ),
+                              ),
+                              const SizedBox(width: 16),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    Text(
+                                      'Log an eco-action',
+                                      style: theme.textTheme.titleMedium
+                                          ?.copyWith(
+                                              fontWeight: FontWeight.bold),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      user.isActive
+                                          ? 'Composting, tree planting and '
+                                              'similar. Checked by a reviewer.'
+                                          : 'Unavailable while suspended.',
+                                      style: theme.textTheme.bodySmall,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              if (user.isActive) const Icon(Icons.chevron_right),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ),
+
+                    // ── Admin: review queue ─────────────────────────────
+                    if (user.isAdmin) ...[
+                      const SizedBox(height: 16),
+                      const SizedBox(height: 16),
+                      Card(
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          onTap: () => context.push('/admin/claims'),
+                          child: Padding(
+                            padding: const EdgeInsets.all(20),
+                            child: Row(
+                              children: [
+                                CircleAvatar(
+                                  radius: 24,
+                                  backgroundColor:
+                                      theme.colorScheme.tertiaryContainer,
+                                  child: Icon(
+                                    Icons.eco_outlined,
+                                    color:
+                                        theme.colorScheme.onTertiaryContainer,
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Claim review',
+                                        style: theme.textTheme.titleMedium
+                                            ?.copyWith(
+                                                fontWeight: FontWeight.bold),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        'Self-reported eco-actions awaiting a '
+                                        'decision.',
+                                        style: theme.textTheme.bodySmall,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const Icon(Icons.chevron_right),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Card(
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          onTap: () => context.push('/admin/bins'),
+                          child: Padding(
+                            padding: const EdgeInsets.all(20),
+                            child: Row(
+                              children: [
+                                CircleAvatar(
+                                  radius: 24,
+                                  backgroundColor:
+                                      theme.colorScheme.primaryContainer,
+                                  child: Icon(
+                                    Icons.qr_code_2,
+                                    color: theme.colorScheme.onPrimaryContainer,
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Bins',
+                                        style: theme.textTheme.titleMedium
+                                            ?.copyWith(
+                                                fontWeight: FontWeight.bold),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        'Register a bin and print its code.',
+                                        style: theme.textTheme.bodySmall,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const Icon(Icons.chevron_right),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Card(
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          onTap: () => context.push('/admin/users'),
+                          child: Padding(
+                            padding: const EdgeInsets.all(20),
+                            child: Row(
+                              children: [
+                                CircleAvatar(
+                                  radius: 24,
+                                  backgroundColor:
+                                      theme.colorScheme.secondaryContainer,
+                                  child: Icon(
+                                    Icons.people_outline,
+                                    color:
+                                        theme.colorScheme.onSecondaryContainer,
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Accounts',
+                                        style: theme.textTheme.titleMedium
+                                            ?.copyWith(
+                                                fontWeight: FontWeight.bold),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        'Suspend or reinstate an account.',
+                                        style: theme.textTheme.bodySmall,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const Icon(Icons.chevron_right),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      Card(
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          onTap: () => context.push('/admin/points'),
+                          child: Padding(
+                            padding: const EdgeInsets.all(20),
+                            child: Row(
+                              children: [
+                                CircleAvatar(
+                                  radius: 24,
+                                  backgroundColor:
+                                      theme.colorScheme.tertiaryContainer,
+                                  child: Icon(
+                                    Icons.tune,
+                                    color:
+                                        theme.colorScheme.onTertiaryContainer,
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Points policy',
+                                        style: theme.textTheme.titleMedium
+                                            ?.copyWith(
+                                                fontWeight: FontWeight.bold),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        'Tune awards, redemption and the '
+                                        'anti-farming limits.',
+                                        style: theme.textTheme.bodySmall,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const Icon(Icons.chevron_right),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                      Card(
+                        clipBehavior: Clip.antiAlias,
+                        child: InkWell(
+                          onTap: () => context.push('/admin/disposals'),
+                          child: Padding(
+                            padding: const EdgeInsets.all(20),
+                            child: Row(
+                              children: [
+                                CircleAvatar(
+                                  radius: 24,
+                                  backgroundColor:
+                                      theme.colorScheme.secondaryContainer,
+                                  child: Icon(
+                                    Icons.fact_check_outlined,
+                                    color:
+                                        theme.colorScheme.onSecondaryContainer,
+                                  ),
+                                ),
+                                const SizedBox(width: 16),
+                                Expanded(
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        'Review queue',
+                                        style: theme.textTheme.titleMedium
+                                            ?.copyWith(
+                                                fontWeight: FontWeight.bold),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        'Approve or reject pending disposals.',
+                                        style: theme.textTheme.bodySmall,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const Icon(Icons.chevron_right),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+=========== FILE: lib/views/seller_application/seller_application_view.dart ===========
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../controllers/seller_application_controller.dart';
+import '../../core/constants.dart';
+import '../shared/app_shell.dart';
+
+class SellerApplicationView extends ConsumerStatefulWidget {
+  const SellerApplicationView({super.key});
+
+  @override
+  ConsumerState<SellerApplicationView> createState() =>
+      _SellerApplicationViewState();
+}
+
+class _SellerApplicationViewState
+    extends ConsumerState<SellerApplicationView> {
+  final _businessNameController = TextEditingController();
+  final _descriptionController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+
+  @override
+  void dispose() {
+    _businessNameController.dispose();
+    _descriptionController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+    await ref.read(sellerApplicationControllerProvider.notifier).submit(
+          businessName: _businessNameController.text.trim(),
+          description: _descriptionController.text.trim(),
+        );
+    if (!mounted) return;
+    final error = ref.read(sellerApplicationControllerProvider).error;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(error?.toString() ?? 'Application submitted for review'),
+        backgroundColor: error != null ? Colors.red : null,
+      ),
+    );
+    if (error == null) {
+      _businessNameController.clear();
+      _descriptionController.clear();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final isLoading = ref.watch(sellerApplicationControllerProvider).isLoading;
+    final applicationsAsync = ref.watch(userApplicationsProvider);
+    final theme = Theme.of(context);
+
+    return AppShell(
+      title: 'Become a seller',
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 560),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                applicationsAsync.when(
+                  loading: () => const SizedBox.shrink(),
+                  error: (e, _) => Text('Could not load applications: $e'),
+                  data: (apps) {
+                    if (apps.isEmpty) return const SizedBox.shrink();
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Text('Your applications',
+                            style: theme.textTheme.titleMedium),
+                        const SizedBox(height: 8),
+                        ...apps.map((a) => Card(
+                              child: ListTile(
+                                title: Text(a.businessName),
+                                subtitle: Text(
+                                  a.status == AppConstants.statusRejected &&
+                                          a.reason != null
+                                      ? 'Rejected — ${a.reason}'
+                                      : a.status,
+                                ),
+                                trailing: Icon(
+                                  a.isApproved
+                                      ? Icons.check_circle
+                                      : a.isPending
+                                          ? Icons.hourglass_empty
+                                          : Icons.cancel,
+                                  color: a.isApproved
+                                      ? Colors.green
+                                      : a.isPending
+                                          ? theme.colorScheme.outline
+                                          : theme.colorScheme.error,
+                                ),
+                              ),
+                            )),
+                        const SizedBox(height: 24),
+                      ],
+                    );
+                  },
+                ),
+                Form(
+                  key: _formKey,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Text('New application',
+                          style: theme.textTheme.titleMedium),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _businessNameController,
+                        decoration: const InputDecoration(
+                          labelText: 'Business name',
+                          prefixIcon: Icon(Icons.storefront_outlined),
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (v) => v == null || v.trim().isEmpty
+                            ? 'Enter a business name'
+                            : null,
+                      ),
+                      const SizedBox(height: 16),
+                      TextFormField(
+                        controller: _descriptionController,
+                        maxLines: 4,
+                        decoration: const InputDecoration(
+                          labelText: 'What do you make or sell?',
+                          alignLabelWithHint: true,
+                          border: OutlineInputBorder(),
+                        ),
+                        validator: (v) => v == null || v.trim().length < 20
+                            ? 'Give at least 20 characters'
+                            : null,
+                      ),
+                      const SizedBox(height: 24),
+                      FilledButton(
+                        onPressed: isLoading ? null : _submit,
+                        child: isLoading
+                            ? const SizedBox(
+                                height: 20,
+                                width: 20,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Text('Submit application'),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+=========== FILE: lib/views/shared/app_shell.dart ===========
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import '../../controllers/auth_controller.dart';
+import '../../core/constants.dart';
+
+class ShellDestination {
+  final String path;
+  final IconData icon;
+  final String label;
+  const ShellDestination(this.path, this.icon, this.label);
+}
+
+class AppShell extends ConsumerWidget {
+  final String title;
+  final Widget child;
+
+  const AppShell({super.key, required this.title, required this.child});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final user = ref.watch(currentUserProvider).value;
+
+    final destinations = <ShellDestination>[
+      const ShellDestination('/home', Icons.home_outlined, 'Home'),
+      const ShellDestination('/wallet', Icons.account_balance_wallet_outlined, 'Wallet'),
+      if (user != null && !user.isSeller)
+        const ShellDestination('/apply-seller', Icons.storefront_outlined, 'Sell'),
+      if (user != null && user.isAdmin)
+        const ShellDestination('/admin/applications', Icons.fact_check_outlined, 'Review'),
+    ];
+
+    final location = GoRouterState.of(context).matchedLocation;
+    var index = destinations.indexWhere((d) => d.path == location);
+    if (index < 0) index = 0;
+
+    void onSelect(int i) => context.go(destinations[i].path);
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isWide = constraints.maxWidth >= AppConstants.webBreakpoint;
+
+        return Scaffold(
+          appBar: AppBar(
+            title: Text(title),
+            actions: [
+              IconButton(
+                tooltip: 'Sign out',
+                icon: const Icon(Icons.logout),
+                onPressed: () =>
+                    ref.read(authControllerProvider.notifier).signOut(),
+              ),
+            ],
+          ),
+          body: isWide
+              ? Row(
+                  children: [
+                    NavigationRail(
+                      selectedIndex: index,
+                      onDestinationSelected: onSelect,
+                      labelType: NavigationRailLabelType.all,
+                      destinations: destinations
+                          .map((d) => NavigationRailDestination(
+                                icon: Icon(d.icon),
+                                label: Text(d.label),
+                              ))
+                          .toList(),
+                    ),
+                    const VerticalDivider(width: 1),
+                    Expanded(child: child),
+                  ],
+                )
+              : child,
+          bottomNavigationBar: isWide
+              ? null
+              : NavigationBar(
+                  selectedIndex: index,
+                  onDestinationSelected: onSelect,
+                  destinations: destinations
+                      .map((d) => NavigationDestination(
+                            icon: Icon(d.icon),
+                            label: d.label,
+                          ))
+                      .toList(),
+                ),
+        );
+      },
+    );
+  }
+}
+
+=========== FILE: lib/views/shared/status_chip.dart ===========
+import 'package:flutter/material.dart';
+
+import '../../models/disposal_model.dart';
+
+/// The four-state disposal status, rendered for the person who submitted it.
+///
+/// `autoApproved` and `manualApproved` stay visibly distinct. Collapsing them
+/// would lose the answer to "was this checked by a person?", which is exactly
+/// what a user needs to know before appealing and what an examiner asks about
+/// any auto-credited award.
+///
+/// The switch below is exhaustive over the enum, so there is no fallback here
+/// and there should not be one: an unrecognised wire value is already resolved
+/// to [DisposalStatus.pending] by `DisposalStatus.fromName` at the parse
+/// boundary. One fallback, in one place.
+class StatusChip extends StatelessWidget {
+  const StatusChip({super.key, required this.status, this.dense = false});
+
+  final DisposalStatus status;
+  final bool dense;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+
+    final (Color foreground, Color background, IconData icon, String label) =
+        switch (status) {
+      DisposalStatus.pending => (
+          scheme.onSurfaceVariant,
+          scheme.surfaceContainerHighest,
+          Icons.hourglass_empty_outlined,
+          'Waiting for review',
+        ),
+      DisposalStatus.autoApproved => (
+          scheme.onTertiaryContainer,
+          scheme.tertiaryContainer,
+          Icons.bolt_outlined,
+          'Approved automatically',
+        ),
+      DisposalStatus.manualApproved => (
+          scheme.onSecondaryContainer,
+          scheme.secondaryContainer,
+          Icons.verified_outlined,
+          'Verified by a reviewer',
+        ),
+      DisposalStatus.rejected => (
+          scheme.onErrorContainer,
+          scheme.errorContainer,
+          Icons.cancel_outlined,
+          'Rejected',
+        ),
+    };
+
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: dense ? 8 : 10,
+        vertical: dense ? 3 : 5,
+      ),
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: dense ? 13 : 15, color: foreground),
+          const SizedBox(width: 5),
+          Text(
+            label,
+            style: (dense
+                    ? Theme.of(context).textTheme.labelSmall
+                    : Theme.of(context).textTheme.labelMedium)
+                ?.copyWith(color: foreground, fontWeight: FontWeight.w600),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+=========== FILE: lib/views/wallet/wallet_ledger_view.dart ===========
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../controllers/ledger_controller.dart';
+import '../../core/label_format.dart';
+import '../../models/transaction_model.dart';
+import '../shared/app_shell.dart';
+
+/// The wallet, told as a ledger (F3.2, NFR-4).
+///
+/// The balance in the header is the newest entry's `balanceAfter`, not a
+/// separate read of `wallets/{uid}`. Every balance change on this screen sits
+/// next to the entry that explains it, which is NFR-4 made visible rather than
+/// merely asserted.
+class WalletLedgerView extends ConsumerWidget {
+  const WalletLedgerView({super.key});
+
+  static const double _maxContentWidth = 720;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final async = ref.watch(ledgerProvider);
+    final balance = ref.watch(ledgerBalanceProvider);
+    final earned = ref.watch(recentEarnedProvider);
+
+    return AppShell(
+      title: 'Wallet',
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: _maxContentWidth),
+          child: async.when(
+            loading: () => const Center(child: CircularProgressIndicator()),
+            error: (error, _) => _LedgerError(
+              error: error,
+              onRetry: () => ref.invalidate(ledgerProvider),
+            ),
+            data: (entries) => RefreshIndicator(
+              onRefresh: () async => ref.invalidate(ledgerProvider),
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                children: [
+                  _BalanceHeader(balance: balance, recentEarned: earned),
+                  const SizedBox(height: 20),
+                  Text(
+                    'Activity',
+                    style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.4,
+                        ),
+                  ),
+                  const SizedBox(height: 8),
+                  if (entries.isEmpty)
+                    const _LedgerEmpty()
+                  else
+                    ...entries.map((e) => _LedgerRow(entry: e)),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _BalanceHeader extends StatelessWidget {
+  const _BalanceHeader({required this.balance, required this.recentEarned});
+
+  final int? balance;
+  final int recentEarned;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 22),
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primaryContainer,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Balance',
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: theme.colorScheme.onPrimaryContainer,
+              letterSpacing: 0.6,
+            ),
+          ),
+          const SizedBox(height: 4),
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Text(
+                balance?.toString() ?? '0',
+                style: theme.textTheme.displaySmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: theme.colorScheme.onPrimaryContainer,
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                'points',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  color: theme.colorScheme.onPrimaryContainer,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          Text(
+            recentEarned > 0
+                ? '+$recentEarned earned across the entries below'
+                : 'Every change to this number is listed below.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onPrimaryContainer.withValues(alpha: 0.8),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LedgerRow extends StatelessWidget {
+  const _LedgerRow({required this.entry});
+
+  final TransactionModel entry;
+
+  IconData get _icon {
+    switch (entry.source) {
+      case TransactionSource.disposal:
+        return Icons.recycling_outlined;
+      case TransactionSource.purchase:
+        return Icons.storefront_outlined;
+      case TransactionSource.claim:
+        return Icons.eco_outlined;
+      case TransactionSource.redemption:
+        return Icons.shopping_bag_outlined;
+      case TransactionSource.unknown:
+        return Icons.receipt_long_outlined;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final credit = entry.isCredit;
+    final amountColour =
+        credit ? theme.colorScheme.primary : theme.colorScheme.onSurface;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            width: 38,
+            height: 38,
+            decoration: BoxDecoration(
+              color: theme.colorScheme.surfaceContainerHighest,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              _icon,
+              size: 19,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  entry.source.label,
+                  style: theme.textTheme.bodyLarge
+                      ?.copyWith(fontWeight: FontWeight.w600),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  [
+                    entry.source.description,
+                    formatDateTime(entry.createdAt),
+                  ].where((s) => s.isNotEmpty).join(' · '),
+                  style: theme.textTheme.bodySmall
+                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(
+                entry.signedDelta,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: amountColour,
+                ),
+              ),
+              if (entry.balanceAfter != null)
+                Text(
+                  'balance ${entry.balanceAfter}',
+                  style: theme.textTheme.labelSmall
+                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LedgerEmpty extends StatelessWidget {
+  const _LedgerEmpty();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 40),
+      child: Column(
+        children: [
+          Icon(
+            Icons.receipt_long_outlined,
+            size: 40,
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(height: 14),
+          Text('Nothing here yet', style: theme.textTheme.titleMedium),
+          const SizedBox(height: 6),
+          Text(
+            'Points appear the moment a submission is approved, and every '
+            'entry says where it came from.',
+            textAlign: TextAlign.center,
+            style: theme.textTheme.bodySmall
+                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _LedgerError extends StatelessWidget {
+  const _LedgerError({required this.error, required this.onRetry});
+
+  final Object error;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.cloud_off_outlined,
+              size: 40,
+              color: theme.colorScheme.error,
+            ),
+            const SizedBox(height: 14),
+            Text('The ledger did not load', style: theme.textTheme.titleMedium),
+            const SizedBox(height: 6),
+            Text(
+              '$error',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall
+                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            ),
+            const SizedBox(height: 16),
+            FilledButton.tonal(onPressed: onRetry, child: const Text('Try again')),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
