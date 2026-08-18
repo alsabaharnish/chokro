@@ -3,14 +3,24 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/bin_model.dart';
 import '../services/bin_admin_service.dart';
 import '../services/bin_service.dart';
+import '../services/location_service.dart';
 
 /// Uniquely named to avoid colliding with any `binServiceProvider` already
 /// declared for the scan flow. `BinService` is stateless, so a second instance
 /// costs nothing.
 final adminBinServiceProvider = Provider<BinService>((ref) => BinService());
 
-final binAdminServiceProvider =
-    Provider<BinAdminService>((ref) => BinAdminService());
+final binAdminServiceProvider = Provider<BinAdminService>(
+  (ref) => BinAdminService(),
+);
+
+/// Own instance, for the same reason as [adminBinServiceProvider]: the disposal
+/// flow declares its own `locationServiceProvider`, `LocationService` is
+/// stateless, and a second instance costs nothing — while bin administration
+/// stays independent of the disposal flow's providers.
+final binLocationServiceProvider = Provider<LocationService>(
+  (ref) => LocationService(),
+);
 
 /// Every bin including closed ones (F2.1).
 ///
@@ -35,7 +45,9 @@ class AdminBinActions {
     required double lng,
     required double radiusMeters,
   }) {
-    return _ref.read(binAdminServiceProvider).createBin(
+    return _ref
+        .read(binAdminServiceProvider)
+        .createBin(
           label: label,
           lat: lat,
           lng: lng,
@@ -48,7 +60,29 @@ class AdminBinActions {
         .read(binAdminServiceProvider)
         .setActive(binId: binId, active: active);
   }
+
+  /// A GPS fix for the bin being registered (F2.1: "GPS captured on site").
+  ///
+  /// The brief calls bin registration mobile-first for this reason: an
+  /// administrator standing at the bin can capture its position, where typing
+  /// coordinates means reading them off a map later and guessing.
+  ///
+  /// This fix matters more than the one taken during a disposal. A disposal's
+  /// coordinates are checked once, against this bin; *these* coordinates become
+  /// the centre of the geofence every future submission at this bin is measured
+  /// against, so an error here is inherited by all of them and nothing later
+  /// will reveal it. Hence the tighter accuracy warning in the view.
+  Future<LocationResult> captureLocation() {
+    return _ref.read(binLocationServiceProvider).getCurrentLocation();
+  }
+
+  Future<void> openLocationSettings() =>
+      _ref.read(binLocationServiceProvider).openLocationSettings();
+
+  Future<void> openAppSettings() =>
+      _ref.read(binLocationServiceProvider).openSettings();
 }
 
-final adminBinActionsProvider =
-    Provider<AdminBinActions>((ref) => AdminBinActions(ref));
+final adminBinActionsProvider = Provider<AdminBinActions>(
+  (ref) => AdminBinActions(ref),
+);

@@ -104,9 +104,21 @@ class AppTheme {
       // 48 dp minimum height on every button: the Material accessibility floor
       // for a touch target, and several of these are tapped one-handed while
       // standing over a bin.
+      //
+      // The width is Material's own default minimum of 64, and must stay a
+      // finite number. `Size.fromHeight(48)` reads like "height only" but is
+      // defined as `Size(double.infinity, 48)`, which sets an *infinite minimum
+      // width*. Inside a Column that merely fills the available width, so the
+      // forms looked correct — but a Row hands its non-flex children unbounded
+      // width, so every button placed directly in a Row threw "BoxConstraints
+      // forces an infinite width" and took the screen down with it. That is most
+      // of the admin queues, where approve and reject sit side by side.
+      //
+      // Buttons that should span their container say so where they are used,
+      // with `CrossAxisAlignment.stretch`.
       filledButtonTheme: FilledButtonThemeData(
         style: FilledButton.styleFrom(
-          minimumSize: const Size.fromHeight(48),
+          minimumSize: const Size(64, 48),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
@@ -115,7 +127,7 @@ class AppTheme {
       ),
       outlinedButtonTheme: OutlinedButtonThemeData(
         style: OutlinedButton.styleFrom(
-          minimumSize: const Size.fromHeight(48),
+          minimumSize: const Size(64, 48),
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(12),
           ),
@@ -124,7 +136,7 @@ class AppTheme {
       ),
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
-          minimumSize: const Size.fromHeight(44),
+          minimumSize: const Size(64, 44),
           textStyle: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
         ),
       ),

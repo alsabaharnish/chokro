@@ -39,7 +39,8 @@ double haversineDistance({
   final sinHalfLat = math.sin(deltaPhi / 2);
   final sinHalfLng = math.sin(deltaLambda / 2);
 
-  final a = sinHalfLat * sinHalfLat +
+  final a =
+      sinHalfLat * sinHalfLat +
       math.cos(phi1) * math.cos(phi2) * sinHalfLng * sinHalfLng;
 
   // asin form rather than atan2: numerically better behaved for small distances,
@@ -68,6 +69,36 @@ bool isWithinRadius({
     lng2: capturedLng,
   );
   return distance <= radiusMeters;
+}
+
+/// Whether a GPS fix is too imprecise to be the centre of a geofence this size
+/// (F2.1).
+///
+/// Asked when an administrator registers a bin from a live fix, and judged
+/// against the radius rather than a fixed threshold, because that ratio is what
+/// decides whether honest submissions will pass.
+///
+/// A bin's recorded coordinates are not checked once — they become the reference
+/// point every future submission at that bin is measured against, so an error
+/// here is inherited by all of them. If the centre lands 30 m from the real bin
+/// inside a 40 m radius, a resident standing at the bin can measure 70 m and be
+/// refused, and nothing on the submission would ever reveal that the bin, not
+/// the resident, was in the wrong place. A fix good to ±30 m is meanwhile
+/// perfectly adequate for a 200 m compound.
+///
+/// Half the radius is the threshold: at that point the error alone can consume
+/// the whole margin a resident has to stand in.
+///
+/// Returns false when either value is unknown or the radius is nonsensical —
+/// this reports a fix that *is* too rough, and declines to guess otherwise.
+bool isFixTooRoughForRadius({
+  required double? accuracyMeters,
+  required double? radiusMeters,
+}) {
+  if (accuracyMeters == null || radiusMeters == null) return false;
+  if (accuracyMeters.isNaN || radiusMeters.isNaN) return false;
+  if (radiusMeters <= 0) return false;
+  return accuracyMeters > radiusMeters / 2;
 }
 
 /// Whether [latitude] is a possible latitude.
