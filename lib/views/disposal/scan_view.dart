@@ -163,6 +163,15 @@ class _ResultPanel extends StatelessWidget {
         scan.outcome == ScanOutcome.binClosed ||
         scan.outcome == ScanOutcome.error;
 
+    // Kept separate from `isProblem`, and not because of the colour. A lockout
+    // is a wait rather than a fault: nothing is wrong with the code, the bin or
+    // the account, and the user's next move is to walk to another bin or come
+    // back later. Folding it in with "this code is not a Chokro bin" would tell
+    // them the wrong thing. It also has to be handled *somewhere* — an outcome
+    // that is neither `canProceed` nor `isProblem` rendered no icon and no
+    // button, leaving the scanner with no way forward at all.
+    final isLockedOut = scan.outcome == ScanOutcome.lockedOut;
+
     return SafeArea(
       top: false,
       child: Padding(
@@ -183,17 +192,21 @@ class _ResultPanel extends StatelessWidget {
                   Icon(
                     scan.canProceed
                         ? Icons.check_circle_outline
-                        : isProblem
-                            ? Icons.error_outline
-                            : Icons.qr_code_scanner,
+                        : isLockedOut
+                            ? Icons.schedule
+                            : isProblem
+                                ? Icons.error_outline
+                                : Icons.qr_code_scanner,
                     // `colorScheme.success`, not `Colors.green`: the literal
                     // was the same mid-green in dark mode, where it glared
                     // against the dark surface.
                     color: scan.canProceed
                         ? theme.colorScheme.success
-                        : isProblem
-                            ? theme.colorScheme.error
-                            : theme.colorScheme.onSurfaceVariant,
+                        : isLockedOut
+                            ? theme.colorScheme.warning
+                            : isProblem
+                                ? theme.colorScheme.error
+                                : theme.colorScheme.onSurfaceVariant,
                   ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -214,6 +227,16 @@ class _ResultPanel extends StatelessWidget {
                 ),
               ),
             ],
+            if (isLockedOut && scan.bin != null) ...[
+              const SizedBox(height: 4),
+              Padding(
+                padding: const EdgeInsets.only(left: 30),
+                child: Text(
+                  scan.bin!.label,
+                  style: theme.textTheme.bodySmall,
+                ),
+              ),
+            ],
             const SizedBox(height: 16),
             if (scan.canProceed)
               FilledButton.icon(
@@ -221,10 +244,10 @@ class _ResultPanel extends StatelessWidget {
                 icon: const Icon(Icons.photo_camera_outlined),
                 label: const Text('Continue'),
               )
-            else if (isProblem)
+            else if (isProblem || isLockedOut)
               OutlinedButton(
                 onPressed: onScanAgain,
-                child: const Text('Scan again'),
+                child: Text(isLockedOut ? 'Scan another bin' : 'Scan again'),
               ),
           ],
         ),

@@ -67,6 +67,29 @@ String formatDate(DateTime? value) {
   return '${local.day} ${_months[local.month - 1]} ${local.year}';
 }
 
+/// How long until [until]: `4h 12m`, `12m`, `under a minute`.
+///
+/// The counterpart to [formatAge], which looks backwards. Used for the disposal
+/// lockout window (F2.6), where the number is the whole point of the message —
+/// "you already used this bin" leaves someone guessing whether to wait or walk,
+/// and "try again in 4h 12m" does not.
+///
+/// Rounds down and never returns a negative: an elapsed window reads as
+/// `under a minute` on its way to not being shown at all.
+String formatCountdown(DateTime? until, {DateTime? now}) {
+  if (until == null) return '';
+
+  final remaining = until.difference(now ?? DateTime.now());
+  if (remaining.isNegative || remaining.inMinutes < 1) return 'under a minute';
+
+  final hours = remaining.inHours;
+  final minutes = remaining.inMinutes % 60;
+
+  if (hours == 0) return '${minutes}m';
+  if (minutes == 0) return '${hours}h';
+  return '${hours}h ${minutes}m';
+}
+
 /// Short relative age for list rows: `just now`, `14m ago`, `3h ago`, `5d ago`.
 /// Falls back to the absolute date beyond a week.
 ///

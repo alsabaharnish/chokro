@@ -40,6 +40,28 @@ class DisposalService {
       .snapshots()
       .map((snap) => snap.docs.map(_fromDoc).toList());
 
+  /// A user's most recent submissions, for the reviewer's context (F2.7).
+  ///
+  /// Bounded on purpose. The review queue renders one card per pending
+  /// submission, and each card asks for its submitter's record — so an unbounded
+  /// `watchUserDisposals` per card would pull every disposal a prolific user has
+  /// ever made, once per card, on a screen an administrator keeps open and
+  /// scrolls. A recent window costs one small query.
+  ///
+  /// Uses the existing `userId` + `createdAt DESC` composite index, so this needs
+  /// no addition to `firestore.indexes.json`. Filtering by status here instead
+  /// would have: "approved" is two values (`autoApproved` and `manualApproved`),
+  /// and an `in` filter alongside the ordering wants an index of its own.
+  Future<List<DisposalModel>> recentForUser(String uid, {int limit = 20}) async {
+    final snapshot = await _disposals
+        .where('userId', isEqualTo: uid)
+        .orderBy('createdAt', descending: true)
+        .limit(limit)
+        .get();
+
+    return snapshot.docs.map(_fromDoc).toList();
+  }
+
   /// Everything awaiting a decision, for the admin review queue (F2.7).
   Stream<List<DisposalModel>> watchPendingDisposals() => _disposals
       .where('status', isEqualTo: 'pending')

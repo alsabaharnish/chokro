@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/submitter_record.dart';
 import '../models/bin_model.dart';
 import '../models/disposal_model.dart';
 import '../models/user_model.dart';
@@ -26,6 +27,25 @@ final submitterProvider = FutureProvider.family<UserModel?, String>((
   uid,
 ) async {
   return UserService().getUser(uid);
+});
+
+/// The submitter's prior record, for the reviewer's context (F2.7).
+///
+/// Keyed by uid and cached by Riverpod, so a user with several pending
+/// submissions costs one query rather than one per card — the same reason
+/// [submitterProvider] is a family.
+///
+/// Deliberately a `FutureProvider` rather than a stream. A live subscription per
+/// card on a screen an administrator keeps open all shift would hold one
+/// Firestore listener per submitter for a figure that only needs to be right at
+/// the moment of the decision.
+final submitterRecordProvider = FutureProvider.family<SubmitterRecord, String>((
+  ref,
+  uid,
+) async {
+  if (uid.isEmpty) return SubmitterRecord.empty;
+  final recent = await ref.watch(disposalServiceProvider).recentForUser(uid);
+  return SubmitterRecord.from(recent);
 });
 
 /// The bin a submission was made at, for its label and radius.

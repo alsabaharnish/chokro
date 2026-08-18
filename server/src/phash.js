@@ -220,23 +220,92 @@ function extractPixels(buffer) {
 
   const raw = zlib.inflateSync(Buffer.concat(idat));
   const stride = width * channels;
-  const pixels = [];
+
+  // Undo the per-scanline filters, all five of them.
+  //
+  // This used to throw on anything but filter 0, and that was a real defect
+  // rather than a missing nicety. Cloudinary's encoder picks a filter per
+  // scanline based on content: the 8x8 grayscale of a plain upload happens to
+  // come back all-zero, but the same transform over a source that has been
+  // through another transform first comes back with filter 1 (Sub) on row 0.
+  //
+  // The failure was silent and content-dependent. `hashImage` threw,
+  // `verifyDisposal` caught it and logged, and the submission continued with
+  // `isDuplicate: false` — so duplicate detection quietly did not exist for
+  // those photographs, and it would have passed every test written against a
+  // plain fixture. Filter support is about twenty lines; guessing which photos
+  // were being skipped is not possible after the fact.
+  //
+  // Per the PNG specification each byte is reconstructed from its left
+  // neighbour (a), the byte above (b) and the byte above-left (c), all taken
+  // from already-reconstructed data.
+  const recon = Buffer.alloc(height * stride);
 
   for (let y = 0; y < height; y += 1) {
-    // Each scanline is prefixed with a filter byte.
     const filter = raw[y * (stride + 1)];
-    if (filter !== 0) {
-      throw new Error(`Unsupported PNG filter ${filter} on row ${y}.`);
+    const src = y * (stride + 1) + 1;
+    const dst = y * stride;
+    const up = dst - stride;
+
+    for (let i = 0; i < stride; i += 1) {
+      const x = raw[src + i];
+      const a = i >= channels ? recon[dst + i - channels] : 0;
+      const b = y > 0 ? recon[up + i] : 0;
+      const c = y > 0 && i >= channels ? recon[up + i - channels] : 0;
+
+      let value;
+      switch (filter) {
+        case 0: // None
+          value = x;
+          break;
+        case 1: // Sub
+          value = x + a;
+          break;
+        case 2: // Up
+          value = x + b;
+          break;
+        case 3: // Average
+          value = x + Math.floor((a + b) / 2);
+          break;
+        case 4: // Paeth
+          value = x + paeth(a, b, c);
+          break;
+        default:
+          throw new Error(`Unknown PNG filter ${filter} on row ${y}.`);
+      }
+
+      // & 0xff, because reconstruction is defined modulo 256.
+      recon[dst + i] = value & 0xff;
     }
-    const start = y * (stride + 1) + 1;
+  }
+
+  const pixels = [];
+  for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       // Grayscale, so the first channel is the value. For RGB the channels are
       // already equal after e_grayscale.
-      pixels.push(raw[start + x * channels]);
+      pixels.push(recon[y * stride + x * channels]);
     }
   }
 
   return pixels;
+}
+
+/**
+ * The PNG Paeth predictor: whichever of a, b or c is closest to a + b - c.
+ *
+ * Spec'd exactly this way, ties resolved toward a then b, and getting the tie
+ * order wrong produces an image that decodes to plausible-looking garbage rather
+ * than an error.
+ */
+function paeth(a, b, c) {
+  const p = a + b - c;
+  const pa = Math.abs(p - a);
+  const pb = Math.abs(p - b);
+  const pc = Math.abs(p - c);
+  if (pa <= pb && pa <= pc) return a;
+  if (pb <= pc) return b;
+  return c;
 }
 
 module.exports = {

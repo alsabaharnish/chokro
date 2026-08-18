@@ -5,6 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../controllers/admin_review_controller.dart';
 import '../../core/geo.dart';
 import '../../core/label_format.dart';
+import '../../core/submitter_record.dart';
+import '../../core/theme.dart';
 import '../../models/disposal_model.dart';
 import '../shared/app_shell.dart';
 import '../shared/rejection_reason_dialog.dart';
@@ -142,6 +144,19 @@ class _DisposalCard extends ConsumerWidget {
                   style: theme.textTheme.titleMedium
                       ?.copyWith(fontWeight: FontWeight.bold),
                 ),
+
+                // The submitter's prior record (F2.7).
+                //
+                // The queue showed the photograph, the distance and the flags,
+                // and left the reviewer to judge every borderline case in
+                // isolation. An ambiguous photo from an account with thirty
+                // clean approvals is almost certainly a bad angle; the same
+                // photo from one with four rejections in its last ten is not.
+                // Nothing on this screen could tell those apart.
+                _SubmitterRecordLine(
+                  record: ref.watch(submitterRecordProvider(disposal.userId)),
+                ),
+
                 const SizedBox(height: 12),
 
                 // ── Evidence ──────────────────────────────────────────────
@@ -330,6 +345,53 @@ class _QueueError extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+/// One line describing how this submitter has fared before (F2.7).
+class _SubmitterRecordLine extends StatelessWidget {
+  const _SubmitterRecordLine({required this.record});
+
+  final AsyncValue<SubmitterRecord> record;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    // A record that has not arrived, or failed to, says nothing rather than
+    // guessing. "First submission" would be a claim, and on a screen that
+    // decides payouts a wrong claim is worse than a blank.
+    final value = record.value;
+    if (value == null) return const SizedBox.shrink();
+
+    final flagged = value.hasRejections;
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Row(
+        children: [
+          Icon(
+            flagged ? Icons.history_toggle_off : Icons.history,
+            size: 14,
+            color: flagged
+                ? theme.colorScheme.warning
+                : theme.colorScheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(
+              value.summary,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: flagged
+                    ? theme.colorScheme.warning
+                    : theme.colorScheme.onSurfaceVariant,
+                fontWeight: flagged ? FontWeight.w600 : null,
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

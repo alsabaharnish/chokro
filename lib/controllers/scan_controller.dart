@@ -1,9 +1,15 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/label_format.dart';
 import '../models/bin_model.dart';
 import '../services/bin_service.dart';
+import '../services/lockout_service.dart';
 
 final binServiceProvider = Provider<BinService>((ref) => BinService());
+
+final lockoutServiceProvider =
+    Provider<LockoutService>((ref) => LockoutService());
 
 /// What happened when a scanned code was looked up.
 ///
@@ -26,6 +32,14 @@ enum ScanOutcome {
   /// Bin exists but is no longer in service.
   binClosed,
 
+  /// Bin is fine, but this user submitted here recently (F2.6).
+  ///
+  /// Checked here rather than left to the write, because the rules can only
+  /// answer with `permission-denied` and cannot say which condition failed. A
+  /// user who found out at submit time had already photographed a bag and waited
+  /// for a GPS fix for nothing.
+  lockedOut,
+
   /// The lookup itself failed — offline, or permission denied.
   error,
 }
@@ -36,10 +50,14 @@ class ScanState {
   final BinModel? bin;
   final String? message;
 
+  /// When the lockout on this bin lifts. Only set for [ScanOutcome.lockedOut].
+  final DateTime? lockedUntil;
+
   const ScanState({
     this.outcome = ScanOutcome.idle,
     this.bin,
     this.message,
+    this.lockedUntil,
   });
 
   bool get isBusy => outcome == ScanOutcome.resolving;
@@ -60,6 +78,9 @@ class ScanState {
         return 'This code is not a Chokro bin.';
       case ScanOutcome.binClosed:
         return 'This bin is no longer in service. Try another one.';
+      case ScanOutcome.lockedOut:
+        return 'You already submitted at this bin. You can use it again in '
+            '${formatCountdown(lockedUntil)}, or use a different bin now.';
       case ScanOutcome.error:
         return message ?? 'Could not check this code. Check your connection.';
     }
@@ -92,6 +113,27 @@ class ScanController extends Notifier<ScanState> {
       if (!bin.active) {
         state = ScanState(outcome: ScanOutcome.binClosed, bin: bin);
         return;
+      }
+
+      // The lockout window the rules will check on the write (F2.6). Feedback
+      // only — the rules re-evaluate it against `request.time`, so nothing is
+      // trusted because the client looked.
+      final binId = bin.id;
+      final uid = FirebaseAuth.instance.currentUser?.uid;
+
+      if (binId != null && uid != null) {
+        final until = await ref
+            .read(lockoutServiceProvider)
+            .activeUntil(uid: uid, binId: binId);
+
+        if (until != null) {
+          state = ScanState(
+            outcome: ScanOutcome.lockedOut,
+            bin: bin,
+            lockedUntil: until,
+          );
+          return;
+        }
       }
 
       state = ScanState(outcome: ScanOutcome.resolved, bin: bin);
