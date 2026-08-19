@@ -258,7 +258,7 @@ codec is needed.
 |---|---|---|
 | Auth | Firebase Auth | |
 | Database | Cloud Firestore | Syllabus material, Week 11 |
-| File storage | Firebase Storage | Disposal and claim photographs |
+| File storage | Cloudinary, via the Node service | Disposal and claim photographs. Firebase Storage needs the Blaze plan, so uploads go through `POST /photos/disposal` and the client never holds a storage credential |
 | Web hosting | Firebase Hosting | Live at `https://chokro-30887.web.app` |
 | Rules testing | Firebase Emulator Suite + Jest | 73 tests across `rules_test/` |
 | Firebase project | `chokro-30887` | |
@@ -272,7 +272,7 @@ codec is needed.
 | Runtime | Node 20+ / Express 4 | `server/` in the same repository |
 | Firebase access | `firebase-admin` | Bypasses security rules by design |
 | Hosting | Render, free instance | Live at `https://chokro.onrender.com` |
-| Screening | Gemini via Google AI Studio | Free tier, Flash models, no billing card |
+| Screening | Groq, `qwen/qwen3.6-27b` | Free tier, multimodal, no billing card |
 
 **Why not Cloud Functions.** Cloud Functions require the Firebase Blaze plan,
 which requires a payment card. An external Node service on a free host achieves
@@ -285,14 +285,21 @@ the next request takes 30–60 seconds. Mitigation is to warm `/health` before a
 demo, optionally with an uptime pinger. This must be in the presentation
 checklist, not discovered live.
 
-**Gemini free tier caveats**, both of which belong in the term paper's
-limitations section:
+**Groq free tier caveats**, all of which belong in the term paper's limitations
+section:
 
-1. Rate limits are modest and Google revises them without notice. The server must
-   treat a `429` as "route to review," never as a failure or an approval.
-2. **On the free tier, submitted data may be used for model training.** Users'
-   disposal photographs are sent to Google under those terms. This is a
-   defensible trade-off for an academic prototype only if it is disclosed.
+1. Rate limits are modest and revised without notice. The server must treat a
+   `429` as "route to review," never as a failure or an approval.
+2. **`qwen/qwen3.6-27b` is served as a preview model for evaluation**, and Groq's
+   multimodal lineup changed more than once during this project. A model
+   withdrawn mid-semester routes every submission to review — which is the safe
+   direction, but it is a dependency on a third party's roadmap.
+3. Photographs are sent to a third-party inference provider, so users' disposal
+   photographs leave the project's own infrastructure. That is a defensible
+   trade-off for an academic prototype only if it is disclosed.
+4. Groq accepts only remote HTTP(S) image URLs, not base64. The flow satisfies
+   this by design — photographs reach Cloudinary before screening — but it is why
+   the upload must precede verification rather than run alongside it.
 
 ---
 
@@ -378,7 +385,7 @@ server/
     geo.js          # port of lib/core/geo.dart
     pointsPolicy.js # port of lib/core/points_policy.dart
     phash.js        # perceptual hashing
-    screen.js       # Gemini call
+    screen.js       # Groq call
     award.js        # the single wallet-credit path
   README.md         # deployment, credential rotation, endpoints
 ```
@@ -590,7 +597,7 @@ purchase points. A seller cannot confirm their own delivery.
 | F2.7 | Admin review queue for pending submissions | Both (web primary) | M2 |
 | F2.8 | Approve or reject with logged reason | Both (web primary) | M2 |
 | F2.9 | **Declared item count and type at submission** | Mobile | M2 |
-| F2.10 | **Automated photo screening (Gemini)** | Server | M2 |
+| F2.10 | **Automated photo screening (Groq)** | Server | M2 |
 | F2.11 | **Perceptual-hash duplicate detection** | Server | M2 |
 | F2.12 | **Two-lane decision: auto-approve or route to review** | Server | M2 |
 
@@ -854,10 +861,10 @@ screening lane, through one review pipeline.
   verified against reference geodesic values
 - `lib/models/bin_model.dart`, `lib/models/disposal_model.dart` — including the
   four-state status machine and the flag vocabulary
-- **105 passing Dart unit tests**, `dart analyze lib/` clean
+- **300 passing Dart unit tests** across 20 files, `flutter analyze` clean
 - `firestore.rules` revised: wallets, transactions, disposals, bins, config,
   lockouts and quotas all server-owned for writes
-- **73 passing rules tests**, including the two that matter — an administrator
+- **130 passing rules tests**, including the two that matter — an administrator
   cannot credit a wallet, and an administrator cannot approve a disposal from the
   client
 - Camera, location, scanner, compression and storage packages added; Android
@@ -870,7 +877,7 @@ screening lane, through one review pipeline.
 
 - Disposal submission UI: scan → photo → GPS → count and type → write pending
 - Admin bin registration with on-site GPS capture, `qr_flutter` generation,
-  print on web and export-to-image on mobile
+  a printable PDF label — the browser print dialog on web, the share sheet on mobile
 - Server: `POST /disposals/:id/verify` — recompute distance, hash, screen,
   decide, credit or flag
 - Server: `POST /disposals/:id/review` — admin approve or reject
@@ -995,10 +1002,12 @@ The CSE489 assessment line is "Project **and Term Paper**," worth 40%.
 | Final presentation | Week 13 | Five-minute demo. Rehearse §7.1 until it runs without hesitation |
 | Repository | Throughout | Regular commits with meaningful messages |
 
-**Limitations section must include:** Gemini free-tier data may be used for model
-training; screening confidence thresholds were tuned on a small sample; duplicate
-detection is within-user only; the geofence proves phone proximity, not disposal;
-Render cold starts; no cross-device testing beyond one Android phone.
+**Limitations section must include:** photographs are sent to Groq, a third-party
+inference provider, and leave the project's own infrastructure; `qwen/qwen3.6-27b`
+is a preview model that could be withdrawn; screening confidence thresholds were
+tuned on a small sample; duplicate detection is within-user only; the geofence
+proves phone proximity, not disposal; Render cold starts; no cross-device testing
+beyond one Android phone.
 
 Confirm the current semester's exact dates — the outline in hand is from Summer
 2024.
@@ -1034,8 +1043,8 @@ Short, and worth stating explicitly because it is a presentation talking point.
    rules — it ends at a pending document with the wallet untouched, and needs no
    server.
 3. Verify permissions, scanning and a real GPS fix on hardware.
-4. Obtain a Gemini API key from Google AI Studio, in a **separate** Google Cloud
-   project so `chokro-30887`'s billing state stays independent.
+4. Obtain a Groq API key from console.groq.com. It is unrelated to Google Cloud,
+   so `chokro-30887`'s billing state stays independent by construction.
 5. Build the server's verification endpoint: distance recomputation, perceptual
    hashing, screening, and the single credit path.
 6. Build the admin review queue.

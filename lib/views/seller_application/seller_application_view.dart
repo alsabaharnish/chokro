@@ -5,6 +5,7 @@ import '../../core/constants.dart';
 import '../../core/theme.dart';
 import '../../core/validators.dart';
 import '../shared/app_shell.dart';
+import '../shared/error_retry.dart';
 
 class SellerApplicationView extends ConsumerStatefulWidget {
   const SellerApplicationView({super.key});
@@ -82,7 +83,14 @@ class _SellerApplicationViewState
               children: [
                 applicationsAsync.when(
                   loading: () => const SizedBox.shrink(),
-                  error: (e, _) => Text('Could not load applications: $e'),
+                  // The last raw `$error` surface in `lib/views/`. This one is
+                  // shown to an applicant, so a Firestore vendor prefix was
+                  // being offered as feedback on their business application.
+                  error: (e, _) => ErrorRetry(
+                    error: e,
+                    title: 'Your applications',
+                    onRetry: () => ref.invalidate(userApplicationsProvider),
+                  ),
                   data: (apps) {
                     if (apps.isEmpty) return const SizedBox.shrink();
                     return Column(

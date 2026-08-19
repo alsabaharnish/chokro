@@ -54,3 +54,6 @@ rules_test/node_modules/
 *.serviceaccount.json
 server/.env
 server/node_modules/
+
+# Audit scratch dumps. Never source; never worth committing.
+_to_delete/
