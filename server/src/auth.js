@@ -105,4 +105,23 @@ function requireAdmin(req, res, next) {
   return next();
 }
 
-module.exports = { requireAuth, requireAdmin };
+/**
+ * Requires a seller. Use after [requireAuth].
+ *
+ * An administrator passes, matching `UserModel.isSeller` in Dart and the
+ * `role in ['seller', 'admin']` check in `firestore.rules`. All three have to
+ * agree or one account will be able to list a product and not upload its
+ * photograph — the failure would surface as a 403 from the upload endpoint with
+ * a perfectly valid listing already written.
+ */
+function requireSeller(req, res, next) {
+  if (!req.user || !['seller', 'admin'].includes(req.user.role)) {
+    return res.status(403).json({
+      error: 'forbidden',
+      message: 'This action requires a seller account.',
+    });
+  }
+  return next();
+}
+
+module.exports = { requireAuth, requireAdmin, requireSeller };

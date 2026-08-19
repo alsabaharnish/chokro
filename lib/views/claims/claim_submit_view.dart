@@ -8,6 +8,8 @@ import '../../core/label_format.dart';
 import '../../core/theme.dart';
 import '../../models/claim_model.dart';
 import '../shared/app_shell.dart';
+import '../../models/appeal_model.dart';
+import '../appeals/appeal_button.dart';
 import '../shared/error_retry.dart';
 
 /// Submitting a self-reported eco-action (F6.1, F6.2, F6.4).
@@ -287,7 +289,7 @@ class ClaimHistoryList extends ConsumerWidget {
         }
         return Column(
           children: [
-            for (final claim in items)
+            for (final claim in items) ...[
               ListTile(
                 contentPadding: EdgeInsets.zero,
                 leading: Icon(
@@ -323,6 +325,16 @@ class ClaimHistoryList extends ConsumerWidget {
                       )
                     : null,
               ),
+              // The same appeal route as a rejected disposal (F5.4). A claim is
+              // the weaker verification route, so a rejection here rests on one
+              // administrator's reading of one photograph — which is exactly the
+              // decision most worth being able to answer.
+              if (claim.status.isRejected && claim.id != null)
+                AppealButton(
+                  subjectType: AppealSubject.claim,
+                  subjectId: claim.id!,
+                ),
+            ],
           ],
         );
       },

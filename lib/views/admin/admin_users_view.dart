@@ -116,30 +116,68 @@ class _AdminUsersViewState extends ConsumerState<AdminUsersView> {
         : DateTime.now().add(choice);
 
     await _run(
-      () => ref.read(adminUserActionsProvider).suspend(user.uid, until: until),
+      () => ref
+          .read(adminUserActionsProvider)
+          .suspend(user.uid, until: until, isSeller: user.isSeller),
       success: until == null
           ? '${user.name} suspended indefinitely.'
           : '${user.name} suspended until ${formatDateTime(until)}.',
+      hiding: true,
     );
   }
 
   Future<void> _reinstate(UserModel user) async {
     await _run(
-      () => ref.read(adminUserActionsProvider).reinstate(user.uid),
+      () => ref
+          .read(adminUserActionsProvider)
+          .reinstate(user.uid, isSeller: user.isSeller),
       success: '${user.name} reinstated.',
+      hiding: false,
     );
   }
 
+  /// Runs an account action and reports on **both** halves of it.
+  ///
+  /// Suspending a seller writes the account and then sweeps their catalogue
+  /// (§7.4). The two cannot be atomic — one is a Firestore write from here, the
+  /// other an HTTP call — so a partial result is possible and is stated rather
+  /// than smoothed over. "Suspended, but their shop is still open" is precisely
+  /// the sentence an administrator needs, and it comes with a way to retry.
   Future<void> _run(
-    Future<void> Function() action, {
+    Future<SuspensionOutcome> Function() action, {
     required String success,
+    required bool hiding,
   }) async {
     try {
-      await action();
+      final outcome = await action();
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(success)));
+
+      final message = StringBuffer(success);
+      if (!outcome.sweptCleanly) {
+        message.write(
+          hiding
+              ? ' Their listings are STILL VISIBLE — ${outcome.listingsProblem}'
+              : ' Their hidden listings were not restored — '
+                    '${outcome.listingsProblem}',
+        );
+      } else if (outcome.listingsChanged > 0) {
+        final n = outcome.listingsChanged;
+        message.write(
+          hiding
+              ? ' ${n == 1 ? '1 listing' : '$n listings'} hidden from the shop.'
+              : ' ${n == 1 ? '1 listing' : '$n listings'} back on the shop.',
+        );
+      }
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(message.toString()),
+          duration: outcome.sweptCleanly
+              ? const Duration(seconds: 4)
+              // A partial failure needs long enough to read and act on.
+              : const Duration(seconds: 8),
+        ),
+      );
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(

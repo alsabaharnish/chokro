@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../controllers/auth_controller.dart';
+import '../models/appeal_model.dart';
 import '../models/user_model.dart';
 import '../views/auth/login_view.dart';
 import '../views/auth/register_view.dart';
@@ -24,6 +25,18 @@ import '../views/disposal/photo_view.dart';
 import '../views/disposal/location_view.dart';
 import '../views/disposal/declare_view.dart';
 import '../views/admin/admin_disposals_view.dart';
+import '../views/admin/admin_appeals_view.dart';
+import '../views/admin/admin_dashboard_view.dart';
+import '../views/appeals/appeal_form_view.dart';
+import '../views/appeals/appeals_view.dart';
+import '../views/market/catalog_view.dart';
+import '../views/market/cart_view.dart';
+import '../views/market/checkout_view.dart';
+import '../views/market/product_detail_view.dart';
+import '../views/orders/buyer_orders_view.dart';
+import '../views/seller/product_edit_view.dart';
+import '../views/seller/seller_orders_view.dart';
+import '../views/seller/seller_products_view.dart';
 import '../views/shared/account_incomplete_view.dart';
 import '../views/shared/startup_error_view.dart';
 import '../views/shared/route_error_view.dart';
@@ -270,6 +283,26 @@ final routerProvider = Provider<GoRouter>((ref) {
     };
   }
 
+  /// Guards the seller console (F4.1, F4.6).
+  ///
+  /// An administrator passes, matching `UserModel.isSeller`, the
+  /// `role in ['seller', 'admin']` check in `firestore.rules` and
+  /// `requireSeller` on the server. All four have to agree: a route that let a
+  /// buyer through would show them a console whose every write the rules then
+  /// refuse without saying why.
+  String? requireSeller(BuildContext context, GoRouterState state) {
+    final (gate: gate, user: user) = resolve();
+    return switch (gate) {
+      _Gate.unresolved => splashPath,
+      _Gate.anonymous => '/login',
+      _Gate.profileMissing => accountIncompletePath,
+      _Gate.failed => startupErrorPath,
+      // Sent to the application form rather than bounced to `/home`: a user who
+      // reached this route wants to sell, and the next step exists.
+      _Gate.signedIn => user!.isSeller ? null : '/apply-seller',
+    };
+  }
+
   String? requireSignedIn(BuildContext context, GoRouterState state) {
     final (gate: gate, user: _) = resolve();
     return switch (gate) {
@@ -416,6 +449,83 @@ final routerProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const DisposalDeclareView(),
         redirect: requireSignedIn,
       ),
+      // ----- marketplace (F4.x) -----
+      GoRoute(
+        path: '/market',
+        builder: (context, state) => const CatalogView(),
+        redirect: requireSignedIn,
+      ),
+      GoRoute(
+        path: '/market/:productId',
+        builder: (context, state) =>
+            ProductDetailView(productId: state.pathParameters['productId']!),
+        redirect: requireSignedIn,
+      ),
+      GoRoute(
+        path: '/cart',
+        builder: (context, state) => const CartView(),
+        redirect: requireSignedIn,
+      ),
+      GoRoute(
+        path: '/checkout',
+        builder: (context, state) => const CheckoutView(),
+        redirect: requireSignedIn,
+      ),
+      GoRoute(
+        path: '/orders',
+        builder: (context, state) => const BuyerOrdersView(),
+        redirect: requireSignedIn,
+      ),
+
+      // ----- seller console (F4.1, F4.6) -----
+      GoRoute(
+        path: '/seller/products',
+        builder: (context, state) => const SellerProductsView(),
+        redirect: requireSeller,
+      ),
+      GoRoute(
+        // Declared before the `:productId` route below, because go_router
+        // matches in declaration order and `new` would otherwise be read as a
+        // document id.
+        path: '/seller/products/new',
+        builder: (context, state) => const ProductEditView(),
+        redirect: requireSeller,
+      ),
+      GoRoute(
+        path: '/seller/products/:productId',
+        builder: (context, state) =>
+            ProductEditView(productId: state.pathParameters['productId']),
+        redirect: requireSeller,
+      ),
+      GoRoute(
+        path: '/seller/orders',
+        builder: (context, state) => const SellerOrdersView(),
+        redirect: requireSeller,
+      ),
+
+      // ----- appeals (F5.4) -----
+      GoRoute(
+        path: '/appeals',
+        builder: (context, state) => const AppealsView(),
+        redirect: requireSignedIn,
+      ),
+      GoRoute(
+        // Query parameters rather than path segments, because the pair is a
+        // subject *reference* rather than a hierarchy — and because an appeal
+        // against a claim and one against a disposal are the same screen.
+        path: '/appeals/new',
+        builder: (context, state) {
+          final type =
+              AppealSubject.fromName(state.uri.queryParameters['type']) ??
+              AppealSubject.disposal;
+          return AppealFormView(
+            subjectType: type,
+            subjectId: state.uri.queryParameters['id'] ?? '',
+          );
+        },
+        redirect: requireSignedIn,
+      ),
+
       GoRoute(
         path: '/admin/applications',
         builder: (context, state) => const AdminApplicationsView(),
@@ -444,6 +554,16 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/admin/disposals',
         builder: (context, state) => const AdminDisposalsView(),
+        redirect: requireAdmin,
+      ),
+      GoRoute(
+        path: '/admin/appeals',
+        builder: (context, state) => const AdminAppealsView(),
+        redirect: requireAdmin,
+      ),
+      GoRoute(
+        path: '/admin/dashboard',
+        builder: (context, state) => const AdminDashboardView(),
         redirect: requireAdmin,
       ),
     ],

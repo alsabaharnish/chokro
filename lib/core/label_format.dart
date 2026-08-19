@@ -115,3 +115,30 @@ String itemCount(int? count) {
   if (count == null) return '';
   return count == 1 ? '1 item' : '$count items';
 }
+
+/// `1250` -> `৳1,250`.
+///
+/// Whole taka, with a thousands separator and no decimal part. Prices, discounts
+/// and payable amounts are integers throughout (§7.3) — the points economy is
+/// integer arithmetic end to end, and a displayed `৳1250.00` would imply a
+/// precision the schema does not carry.
+///
+/// Grouping is done by hand rather than through `intl`'s `NumberFormat`, which
+/// would need a locale and would place separators by that locale's convention.
+/// The interface language is English (NFR-8) and the currency is fixed, so one
+/// rule applied consistently is more predictable than one resolved at runtime.
+String formatTaka(int amount) {
+  final negative = amount < 0;
+  final digits = amount.abs().toString();
+
+  final buffer = StringBuffer();
+  for (var i = 0; i < digits.length; i++) {
+    if (i > 0 && (digits.length - i) % 3 == 0) buffer.write(',');
+    buffer.write(digits[i]);
+  }
+
+  return '${negative ? '-' : ''}৳$buffer';
+}
+
+/// `1` -> `1 order`, `3` -> `3 orders`.
+String orderCount(int count) => count == 1 ? '1 order' : '$count orders';

@@ -1,6 +1,6 @@
 {
   "name": "chokro-server",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "private": true,
   "description": "Chokro trusted service \u2014 screening, verification and all wallet writes",
   "main": "src/index.js",

@@ -4,7 +4,7 @@
 **Student:** Arnish (solo project)
 **Platform:** Flutter (Android + Web, single codebase) + Node service
 **Repository:** `https://github.com/alsabaharnish/chokro`
-**Document version:** 2.0 — Milestone 1 complete, Milestone 2 in progress
+**Document version:** 2.1 — Milestones 1 and 2 complete, Milestone 3 code complete
 
 > Formerly titled *EcoPoint360*. The product is now **Chokro**. Older drafts of
 > this document circulate under the previous name; this file supersedes them.
@@ -462,15 +462,15 @@ wide table; dashboard density suits side-by-side comparison.
 | `disposals` | see below — the largest change from v1.5 |
 | `wallets` | `userId`, `balance`, `updatedAt` — one document per user |
 | `transactions` | `userId`, `delta`, `source` (disposal/purchase/claim/redemption), `refId`, `balanceAfter`, `createdAt` |
-| `products` | `sellerId`, `title`, `titleLower`, `searchTokens[]`, `description`, `category`, `tags[]`, `price`, `stock`, `imageUrls[]`, `active` |
+| `products` | `sellerId`, `shopName`, `title`, `titleLower`, `searchTokens[]`, `description`, `category`, `tags[]`, `price`, `stock`, `imageUrls[]`, `active`, `hiddenBySuspension` (server), `createdAt`, `updatedAt` |
 | `carts` | `userId`, `items[]` (productId, qty only — never a cached price) |
-| `orders` | `buyerId`, `sellerId`, `checkoutId`, `items[]` (productId + **snapshot** of title and unit price), `subtotal`, `pointsApplied`, `payable`, `settlementMethod`, `paymentStatus`, `status`, `pointsAwarded`, timestamps |
+| `orders` | `buyerId`, `buyerName`, `sellerId`, `sellerName`, `shopName`, `checkoutId`, `items[]` (productId + **snapshot** of title and unit price), `subtotal`, `pointsApplied`, `discount`, `payable`, `settlementMethod`, `paymentStatus`, `status`, `pointsAwarded`, timestamps |
 | `claims` | `userId`, `actionType`, `photoUrl`, `photoHash`, `status`, `rejectionReason`, `reviewedBy`, `reviewedAt`, `pointsAwarded`, `createdAt` |
 | `claimQuotas` | Document ID `{userId}_{isoWeek}`, field `count` |
 | `lockouts` | Document ID `{userId}_{binId}`, field `expiresAt` |
 | `config/points` | The runtime points policy — see §7.3 |
-| `stats` | Single document holding running counters for the admin dashboard |
-| `appeals` | `userId`, `disposalId`, `message`, `status`, `reviewedBy`, `reviewedAt` — M3 |
+| `stats` | Single document (`stats/platform`) holding running counters for the admin dashboard: `disposalsApproved/Rejected`, `claimsApproved/Rejected`, `pointsIssued`, `pointsRedeemed`, `ordersCreated`, `ordersConfirmed`, `salesPayable` |
+| `appeals` | `userId`, `subjectType` (disposal/claim), `subjectId`, `message`, `status` (pending/upheld/declined), `response`, `reviewedBy`, `reviewedAt`, `createdAt` |
 
 ### 6.1 The `disposals` document
 
@@ -533,6 +533,12 @@ may carry several at once.
 - Points are debited at checkout (`source=redemption`) and credited only on buyer
   confirmation (`source=purchase`).
 - No payment card data is stored in any schema. Settlement is cash-on-delivery.
+- **The cart's element shape is enforced at checkout, not in the rules.** Rules
+  cannot iterate a list, and the cart carries no value — the server resolves
+  every `productId` against a live listing and ignores anything else it finds.
+- **A product's image URLs are validated by index, not by iteration.** The
+  three-image ceiling exists so each slot can be named explicitly in the rules;
+  an unbounded list would mean unvalidated entries.
 - The `bins.qrPayload` is an opaque bin identifier only. It carries no
   coordinates and no user data, so a photographed code discloses nothing.
 - Every `createdAt`, `expiresAt` and review timestamp uses
@@ -553,6 +559,11 @@ lesson. Current shape:
 | `lockouts`, `claimQuotas` | any signed-in | none |
 | `config` | any signed-in | none |
 | `sellerApplications` | own, or any if admin | create own; admin updates status |
+| `products` | any signed-in | **owning active seller** creates and updates their own within an exact key set; never deleted |
+| `carts` | own only, no admin | own only, exact key set, ≤20 items, server clock |
+| `orders` | buyer, seller, or admin | **none** — every transition is a server decision |
+| `appeals` | own, or any if admin | create own against your own *rejected* submission; admin resolves once with a written answer |
+| `stats` | admin only | none |
 | everything else | denied | denied |
 
 Two constructs carry most of the weight:
@@ -632,23 +643,23 @@ calculated it.
 
 | ID | Feature | Platform | Status |
 |---|---|---|---|
-| F4.1 | Seller product create/edit/delete/list | Both | M3 |
-| F4.2 | Catalogue browse with keyword search and category filter | Both | M3 |
-| F4.3 | Shopping cart | Both | M3 |
-| F4.4 | Checkout and order creation | Both | M3 |
-| F4.5 | Point redemption at checkout | Both | M3 |
-| F4.6 | Order status tracking, with seller order list and advancement | Both | M3 |
-| F4.7 | Buyer receipt confirmation, releasing purchase points | Both | M3 |
-| F4.8 | Settlement method and payment status recorded | Both | M3 |
+| F4.1 | Seller product create/edit/delete/list | Both | ✅ M3 |
+| F4.2 | Catalogue browse with keyword search and category filter | Both | ✅ M3 |
+| F4.3 | Shopping cart | Both | ✅ M3 |
+| F4.4 | Checkout and order creation | Both | ✅ M3 |
+| F4.5 | Point redemption at checkout | Both | ✅ M3 |
+| F4.6 | Order status tracking, with seller order list and advancement | Both | ✅ M3 |
+| F4.7 | Buyer receipt confirmation, releasing purchase points | Both | ✅ M3 |
+| F4.8 | Settlement method and payment status recorded | Both | ✅ M3 |
 
 ### FR-5 Administration
 
 | ID | Feature | Platform | Status |
 |---|---|---|---|
-| F5.1 | Admin dashboard with aggregate statistics | Both (web primary) | M3 |
-| F5.2 | User suspension and reinstatement | Both (web primary) | M3 |
+| F5.1 | Admin dashboard with aggregate statistics | Both (web primary) | ✅ M3 |
+| F5.2 | User suspension and reinstatement | Both (web primary) | ✅ M3 |
 | F5.3 | **Temporary suspension with an expiry** | Both (web primary) | M2 |
-| F5.4 | **User appeal against a rejection** | Both | M3 |
+| F5.4 | **User appeal against a rejection** | Both | ✅ M3 |
 
 ### FR-6 Self-reported eco-actions
 
@@ -986,6 +997,42 @@ leaves everything else intact. Decide by the milestone's midpoint.
 - Diagrams: use-case, architecture, data model, earn/spend cycle
 - Term paper drafted
 - Presentation rehearsed against the seeded dataset, on the real device
+
+#### Completed so far
+
+Every code deliverable above is built. See `INTEGRATION_NOTES_M3.md`.
+
+- `lib/core/product_taxonomy.dart` — the closed category vocabulary, tag
+  normalisation and the `searchTokens[]` builder; `lib/core/checkout_math.dart` —
+  seller grouping and largest-remainder discount allocation, mirrored by
+  `server/src/checkout.js` with the same worked examples asserted on both sides
+- Models: `product_model`, `cart_model`, `order_model`, `appeal_model`,
+  `stats_model`
+- **425 passing Dart unit tests** (up from 300), `flutter analyze lib` clean
+- `firestore.rules` extended with `products`, `carts`, `orders`, `appeals` and
+  `stats`; **209 passing rules tests**, including the one that matters for the
+  spend path — a buyer cannot set an order to `confirmed` and credit themselves
+- `firestore.indexes.json` carries nine new composite indexes covering every
+  catalogue, order and appeal query the client issues
+- Trusted service at `0.4.0`: `POST /checkout`, `POST /orders/:id/status`,
+  `POST /orders/:id/confirm`, `POST /photos/product`,
+  `POST /sellers/:uid/listings`; **212 passing Node unit tests**
+- Screens: catalogue with search and category filter, product detail, cart,
+  checkout with a points slider, buyer orders, seller console and editor, seller
+  fulfilment queue, appeals for both parties, admin dashboard
+- `server/scripts/seed.js` — accounts, bins, listings, disposals, claims, orders
+  and an appeal, with the ledger accumulated rather than asserted
+- Release and WebAssembly web builds both succeed
+
+#### Remaining
+
+- **A release APK on a physical device.** The web build compiles and the whole
+  marketplace avoids `dart:io`, so nothing is known to block it — which is not
+  the same as having installed it.
+- **The web build is not deployed at the shareable URL yet.** `flutter build web`
+  succeeds; the deploy is a separate step.
+- **Diagrams, the term paper and the rehearsal.** §10, and produced from the
+  working system rather than from intention.
 
 **Exit criteria:**
 

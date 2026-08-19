@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../controllers/auth_controller.dart';
+import '../../controllers/cart_controller.dart';
 import '../../core/constants.dart';
 import '../../core/theme.dart';
 import 'brand_mark.dart';
@@ -33,9 +34,22 @@ class AppShell extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final user = ref.watch(currentUserProvider).value;
     final scheme = Theme.of(context).colorScheme;
+    // Watched at the shell rather than on the shop screen, so a buyer who adds
+    // something and navigates away can still see they have a cart open.
+    final cartCount = ref.watch(cartCountProvider);
 
     final destinations = <ShellDestination>[
       const ShellDestination('/home', Icons.home_outlined, Icons.home, 'Home'),
+      // The marketplace is a top-level destination rather than a card on the
+      // home screen, because the spend path is half of what makes the points
+      // economy a cycle (§7.1) — burying it behind a tap would make earning look
+      // like the whole product.
+      const ShellDestination(
+        '/market',
+        Icons.storefront_outlined,
+        Icons.storefront,
+        'Shop',
+      ),
       const ShellDestination(
         '/wallet',
         Icons.account_balance_wallet_outlined,
@@ -147,8 +161,14 @@ class AppShell extends ConsumerWidget {
                       destinations: destinations
                           .map(
                             (d) => NavigationRailDestination(
-                              icon: Icon(d.icon),
-                              selectedIcon: Icon(d.selectedIcon),
+                              icon: _DestinationIcon(
+                                icon: d.icon,
+                                badge: d.path == '/market' ? cartCount : 0,
+                              ),
+                              selectedIcon: _DestinationIcon(
+                                icon: d.selectedIcon,
+                                badge: d.path == '/market' ? cartCount : 0,
+                              ),
                               label: Text(d.label),
                             ),
                           )
@@ -167,8 +187,14 @@ class AppShell extends ConsumerWidget {
                   destinations: destinations
                       .map(
                         (d) => NavigationDestination(
-                          icon: Icon(d.icon),
-                          selectedIcon: Icon(d.selectedIcon),
+                          icon: _DestinationIcon(
+                            icon: d.icon,
+                            badge: d.path == '/market' ? cartCount : 0,
+                          ),
+                          selectedIcon: _DestinationIcon(
+                            icon: d.selectedIcon,
+                            badge: d.path == '/market' ? cartCount : 0,
+                          ),
                           label: d.label,
                         ),
                       )
@@ -206,6 +232,24 @@ class AppShell extends ConsumerWidget {
 
     if (confirmed != true || !context.mounted) return;
     await ref.read(authControllerProvider.notifier).signOut();
+  }
+}
+
+/// A navigation icon that can carry an unread-style count.
+///
+/// Only the shop destination uses it today. Written as a widget rather than
+/// inlined twice because the rail and the bar both need it, and the pair drifting
+/// apart is exactly how the home screen's eight hand-written cards went wrong.
+class _DestinationIcon extends StatelessWidget {
+  const _DestinationIcon({required this.icon, required this.badge});
+
+  final IconData icon;
+  final int badge;
+
+  @override
+  Widget build(BuildContext context) {
+    if (badge <= 0) return Icon(icon);
+    return Badge.count(count: badge, child: Icon(icon));
   }
 }
 

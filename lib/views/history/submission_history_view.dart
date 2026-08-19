@@ -7,6 +7,8 @@ import '../../core/label_format.dart';
 import '../../models/disposal_model.dart';
 import '../shared/app_shell.dart';
 import '../shared/content_state.dart';
+import '../../models/appeal_model.dart';
+import '../appeals/appeal_button.dart';
 import '../shared/status_chip.dart';
 import '../../core/network_errors.dart';
 
@@ -128,6 +130,13 @@ class _SubmissionCard extends StatelessWidget {
                 tone: theme.colorScheme.error,
                 title: 'Why it was rejected',
                 body: reason,
+              ),
+            // Offered on every rejection, reason or not. A rejection with no
+            // recorded reason is exactly the one most worth disputing.
+            if (status.isRejected && disposal.id != null)
+              AppealButton(
+                subjectType: AppealSubject.disposal,
+                subjectId: disposal.id!,
               ),
             if (status.isPending && flags.isNotEmpty)
               _Note(

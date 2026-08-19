@@ -13,6 +13,11 @@ wallet writes; Firestore clients can never award points directly.
 - Human review queues for flagged disposals and self-reported eco-actions
 - Immutable points ledger, configurable policy, suspension, and push decisions
 - Bin registration with printable high-error-correction QR labels
+- Marketplace: seller listings, catalogue search and category filter, cart,
+  and checkout that splits into one order per seller
+- Points spent at checkout and credited back when the buyer confirms receipt,
+  which is what makes earning and spending a cycle rather than a pipeline
+- Appeals against a rejection, and an admin dashboard over server-held counters
 
 ## Architecture
 
@@ -65,6 +70,20 @@ npx -y firebase-tools@latest deploy --only firestore:rules --dry-run
 
 The last command compiles the rules but does not deploy them.
 
+## Demonstration data
+
+Never demo from an empty database. The seed writes accounts, bins, listings,
+disposals in every state, claims, orders and an appeal:
+
+```bash
+SEED_PASSWORD='choose-one' node server/scripts/seed.js --yes
+```
+
+`SEED_PASSWORD` has no default and the script refuses without `--yes`, because it
+writes with the Admin SDK and bypasses every security rule. Wallet balances are
+accumulated from the ledger entries it writes rather than asserted alongside
+them, so the seeded data satisfies NFR-4 the same way the running app does.
+
 ## Security invariants
 
 1. No Flutter client—including an administrator—can update a wallet balance,
@@ -75,3 +94,8 @@ The last command compiles the rules but does not deploy them.
    the authenticated user's purpose-specific folder.
 4. Wallet credits and their ledger entries are committed together by the trusted
    service, with idempotent decision checks preventing duplicate payouts.
+5. Checkout is one transaction: stock decremented, points debited with a matching
+   ledger entry, one order written per seller, and the cart consumed — or none of
+   it happens.
+6. Only a buyer can confirm an order, and only confirmation credits purchase
+   points. No client writes an order at all, an administrator included.

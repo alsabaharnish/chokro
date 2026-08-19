@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../controllers/auth_controller.dart';
 import '../../controllers/wallet_controller.dart';
+import '../../controllers/orders_controller.dart';
 import '../../controllers/submission_history_controller.dart';
 import '../../core/label_format.dart';
 import '../../core/theme.dart';
@@ -25,6 +26,10 @@ class HomeView extends ConsumerWidget {
     final userAsync = ref.watch(currentUserProvider);
     final walletAsync = ref.watch(walletProvider);
     final pendingCount = ref.watch(pendingSubmissionCountProvider);
+    final awaitingConfirmation = ref
+        .watch(ordersAwaitingConfirmationProvider)
+        .length;
+    final openSellerOrders = ref.watch(sellerOpenOrdersProvider).length;
 
     return AppShell(
       title: 'Chokro',
@@ -149,6 +154,35 @@ class HomeView extends ConsumerWidget {
                                   'the decision reason.',
                               onTap: () => context.push('/claims'),
                             ),
+                            ActionCard(
+                              icon: Icons.local_mall_outlined,
+                              title: 'My orders',
+                              subtitle: switch (awaitingConfirmation) {
+                                0 =>
+                                  'What you have bought, and where it has got '
+                                      'to.',
+                                1 =>
+                                  '1 delivery is waiting for you to confirm — '
+                                      'that is what credits your points.',
+                                _ =>
+                                  '$awaitingConfirmation deliveries are waiting '
+                                      'for you to confirm.',
+                              },
+                              badgeCount: awaitingConfirmation,
+                              onTap: () => context.push('/orders'),
+                            ),
+                            // Reachable from here as well as from the history
+                            // screen, because a user who has appealed something
+                            // comes back looking for the answer rather than for
+                            // the submission it was about.
+                            ActionCard(
+                              icon: Icons.gavel_outlined,
+                              title: 'My appeals',
+                              subtitle:
+                                  'Decisions you have disputed, and what an '
+                                  'administrator answered.',
+                              onTap: () => context.push('/appeals'),
+                            ),
                           ],
                         ),
 
@@ -160,6 +194,15 @@ class HomeView extends ConsumerWidget {
                           ),
                           _ActionGrid(
                             children: [
+                              ActionCard(
+                                icon: Icons.insights_outlined,
+                                title: 'Dashboard',
+                                subtitle:
+                                    'Points issued, redeemed and outstanding, '
+                                    'and how the platform is being used.',
+                                tone: ActionTone.admin,
+                                onTap: () => context.push('/admin/dashboard'),
+                              ),
                               ActionCard(
                                 icon: Icons.fact_check_outlined,
                                 title: 'Disposal reviews',
@@ -174,6 +217,14 @@ class HomeView extends ConsumerWidget {
                                 subtitle: 'Decide self-reported eco-actions.',
                                 tone: ActionTone.admin,
                                 onTap: () => context.push('/admin/claims'),
+                              ),
+                              ActionCard(
+                                icon: Icons.gavel_outlined,
+                                title: 'Appeals',
+                                subtitle:
+                                    'Answer users who dispute a rejection.',
+                                tone: ActionTone.admin,
+                                onTap: () => context.push('/admin/appeals'),
                               ),
                               ActionCard(
                                 icon: Icons.storefront_outlined,
@@ -213,11 +264,34 @@ class HomeView extends ConsumerWidget {
                         // The seller route was only ever reachable from the
                         // bottom navigation bar, which meant a user who never
                         // looked there did not know it existed.
-                        if (!user.isSeller) ...[
-                          const SizedBox(height: AppTheme.gapLg),
-                          const SectionHeading('Selling'),
-                          _ActionGrid(
-                            children: [
+                        const SizedBox(height: AppTheme.gapLg),
+                        const SectionHeading('Selling'),
+                        _ActionGrid(
+                          children: [
+                            if (user.isSeller) ...[
+                              ActionCard(
+                                icon: Icons.inventory_2_outlined,
+                                title: 'My listings',
+                                subtitle:
+                                    'Add, edit and take products off the shop.',
+                                onTap: () => context.push('/seller/products'),
+                              ),
+                              ActionCard(
+                                icon: Icons.local_shipping_outlined,
+                                title: 'Orders to fulfil',
+                                subtitle: switch (openSellerOrders) {
+                                  0 =>
+                                    'Ship and deliver what buyers have '
+                                        'ordered.',
+                                  1 => '1 order needs something from you.',
+                                  _ =>
+                                    '$openSellerOrders orders need something '
+                                        'from you.',
+                                },
+                                badgeCount: openSellerOrders,
+                                onTap: () => context.push('/seller/orders'),
+                              ),
+                            ] else
                               ActionCard(
                                 icon: Icons.storefront_outlined,
                                 title: 'Become a seller',
@@ -230,9 +304,8 @@ class HomeView extends ConsumerWidget {
                                     ? null
                                     : () => context.push('/apply-seller'),
                               ),
-                            ],
-                          ),
-                        ],
+                          ],
+                        ),
                       ],
                     ),
                   ),

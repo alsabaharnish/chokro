@@ -148,6 +148,64 @@ function takaForPoints(policy, points) {
   return Math.trunc(points / pointsPerTaka(policy));
 }
 
+/**
+ * Points deducted to deliver a whole-taka discount.
+ *
+ * Always an exact multiple of `pointsPerTaka`, so the ledger never records a
+ * partial block (§7.3). Without this, 100 points = 10 taka eventually produces
+ * an entry worth 2.7 taka and the ledger stops reconciling.
+ */
+function pointsToSpendForTaka(policy, taka) {
+  if (taka <= 0) return 0;
+  return taka * pointsPerTaka(policy);
+}
+
+/**
+ * The most points a buyer may apply to an order of this subtotal.
+ *
+ * Bounded by three things at once: the wallet balance, the
+ * `maxRedemptionPercentOfSubtotal` ceiling, and whole-taka granularity. Points
+ * supplement payment, they do not replace it.
+ */
+function maxRedeemablePoints(policy, { subtotal, balance }) {
+  if (subtotal <= 0 || balance <= 0) return 0;
+
+  const takaCeiling = Math.trunc(
+    (subtotal * policy.maxRedemptionPercentOfSubtotal) / 100,
+  );
+  if (takaCeiling <= 0) return 0;
+
+  const pointsCeiling = pointsToSpendForTaka(policy, takaCeiling);
+  const usable = Math.min(balance, pointsCeiling);
+  const perTaka = pointsPerTaka(policy);
+
+  return Math.trunc(usable / perTaka) * perTaka;
+}
+
+/**
+ * Applies a points request to an order and returns the resulting split.
+ *
+ * Clamps rather than throws, matching `PointsPolicy.applyRedemption` in Dart.
+ * The checkout screen should prevent an over-request; this is the side that has
+ * to be safe when it does not, because the request comes from a client.
+ *
+ * @returns {{subtotal: number, pointsApplied: number, discount: number, payable: number}}
+ */
+function applyRedemption(policy, { subtotal, balance, pointsRequested }) {
+  const cap = maxRedeemablePoints(policy, { subtotal, balance });
+  const perTaka = pointsPerTaka(policy);
+
+  let pointsApplied = Number.isFinite(pointsRequested)
+    ? Math.trunc(pointsRequested)
+    : 0;
+  if (pointsApplied < 0) pointsApplied = 0;
+  if (pointsApplied > cap) pointsApplied = cap;
+  pointsApplied = Math.trunc(pointsApplied / perTaka) * perTaka;
+
+  const discount = takaForPoints(policy, pointsApplied);
+  return { subtotal, pointsApplied, discount, payable: subtotal - discount };
+}
+
 /** Points credited when an order is confirmed received. */
 function purchaseAward(policy, payable) {
   if (payable <= 0) return 0;
@@ -184,6 +242,9 @@ module.exports = {
   validate,
   pointsPerTaka,
   takaForPoints,
+  pointsToSpendForTaka,
+  maxRedeemablePoints,
+  applyRedemption,
   purchaseAward,
   lockoutExpiry,
   isoWeekKey,

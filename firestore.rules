@@ -9,6 +9,11 @@ rules_version = '2';
 //              status=pending, flags=[], createdAt
 //   claims: identity, trusted photo reference, action, status=pending, createdAt
 //   sellerApplications: identity, business text, status=pending, createdAt
+//   products: the seller's own listing — text, category, tags, price, stock,
+//             own-folder image URLs, active, server clock
+//   carts: identity, items[] of productId and qty ONLY — never a price
+//   appeals: identity, the rejected disposal or claim, the user's case,
+//            status=pending, createdAt
 // Every client create uses an exact key allowlist, bounded strings/numbers, a
 // closed enum and the server clock. Validators below are also applied after the
 // narrow client/admin updates, so an allowed field cannot be changed to an
@@ -33,6 +38,19 @@ rules_version = '2';
 //
 // Corollary: read access is generous here, write access is nearly absent. That
 // asymmetry is the design, not an oversight.
+//
+// M3 ADDS ONE COLLECTION A CLIENT REALLY WRITES
+// ---------------------------------------------
+// `products` is a seller's own listing, and the write means it. The test applied
+// throughout this file is whether the governing constraint is expressible where
+// it is enforced — for a price, "the owning seller, in good standing, within
+// these bounds" is something rules can state, so it stays here. For a wallet
+// balance, the governing constraint is "only after a photograph was screened",
+// which they cannot, so it goes to the server.
+//
+// A price is still never trusted from a request: the server reads it from the
+// stored document inside the checkout transaction. `orders` — where the points
+// actually move — is denied to every client, administrators included.
 
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -470,6 +488,319 @@ service cloud.firestore {
         && validSellerApplication(request.resource.data);
 
       allow delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // Helpers (M3 — marketplace)
+    // -------------------------------------------------------------------------
+
+    // A seller in good standing, resolved from ONE user document read.
+    //
+    // Written as a `*With(u)` pair for the same budget reason as isActive():
+    // rules do not cache get() across calls and each one spends part of a hard
+    // ten-read allowance per request. Calling isActive() and a separate isSeller()
+    // would read `users/{uid}` twice for every product write.
+    //
+    // An administrator counts as a seller here, matching UserModel.isSeller — it
+    // is what lets one account demonstrate both sides of the marketplace.
+    function isActiveSellerWith(u) {
+      return isActiveWith(u) && u.role in ['seller', 'admin'];
+    }
+
+    function isActiveSeller() {
+      return isSignedIn() && isActiveSellerWith(userData());
+    }
+
+    // One product image, checked exactly as a disposal photograph is.
+    //
+    // Same provenance argument as validPhotoReference: the URL must name the
+    // authenticated seller's own upload folder on the configured host, so a
+    // listing cannot point every buyer's device at an arbitrary third-party URL
+    // — nor at another seller's images.
+    function validProductImage(url, uid) {
+      return url is string
+        && url.size() >= 20 && url.size() <= 1000
+        && url.matches(
+             '^https://res[.]cloudinary[.]com/[^/]+/image/upload/' +
+             '(v[0-9]+/)?chokro/products/' + uid +
+             '/[A-Za-z0-9_-]{1,200}[.][A-Za-z0-9]{2,5}$'
+           );
+    }
+
+    // Rules cannot iterate a list, so each slot is checked by index.
+    //
+    // This is why ProductLimits.maxImages is three and not "a few": the bound
+    // exists so that every entry can be named explicitly. An unbounded list would
+    // mean unvalidated entries, and an unvalidated entry is exactly the hole the
+    // provenance check above is here to close.
+    function validProductImages(p, uid) {
+      return p.imageUrls is list
+        && p.imageUrls.size() <= 3
+        && (p.imageUrls.size() < 1 || validProductImage(p.imageUrls[0], uid))
+        && (p.imageUrls.size() < 2 || validProductImage(p.imageUrls[1], uid))
+        && (p.imageUrls.size() < 3 || validProductImage(p.imageUrls[2], uid));
+    }
+
+    // A listing, in the exact shape lib/models/product_model.dart writes.
+    //
+    // `hiddenBySuspension` is in the hasOnly list but not in hasAll: the server
+    // adds it when a suspension sweeps a seller's listings out of the catalogue,
+    // and a later seller edit carries it back in request.resource.data. Excluding
+    // it from hasOnly would make every edit after a suspension fail; the update
+    // rule below is what stops a seller *changing* it, by pinning the affected
+    // key set instead.
+    function validProduct(p, uid) {
+      return p.keys().hasOnly([
+          'sellerId', 'shopName', 'title', 'titleLower', 'searchTokens',
+          'description', 'category', 'tags', 'price', 'stock', 'imageUrls',
+          'active', 'createdAt', 'updatedAt', 'hiddenBySuspension'
+        ])
+        && p.keys().hasAll([
+          'sellerId', 'shopName', 'title', 'titleLower', 'searchTokens',
+          'description', 'category', 'tags', 'price', 'stock', 'imageUrls',
+          'active', 'createdAt', 'updatedAt'
+        ])
+        && p.sellerId == uid
+        && validString(p.shopName, 2, 80)
+        && validString(p.title, 2, 120)
+        // The index must describe the title buyers actually see. Without this a
+        // seller could sell one thing and be found under the name of another.
+        && p.titleLower == p.title.trim().lower()
+        && p.searchTokens is list
+        && p.searchTokens.size() >= 1 && p.searchTokens.size() <= 30
+        && validString(p.description, 10, 2000)
+        && p.category in [
+          'homeAndLiving', 'personalCare', 'foodAndDrink', 'fashion',
+          'stationery', 'gardening', 'electronics', 'other'
+        ]
+        && p.tags is list && p.tags.size() <= 8
+        // Whole taka. The points economy is integer arithmetic end to end (§7.3),
+        // so a fractional price would produce a discount that does not reconcile
+        // against the ledger.
+        && p.price is int && p.price >= 1 && p.price <= 1000000
+        && p.stock is int && p.stock >= 0 && p.stock <= 100000
+        && validProductImages(p, uid)
+        && p.active is bool
+        && p.createdAt is timestamp
+        && p.updatedAt is timestamp
+        && (!('hiddenBySuspension' in p) || p.hiddenBySuspension is bool);
+    }
+
+    function validAppeal(a) {
+      return a.keys().hasOnly([
+          'userId', 'subjectType', 'subjectId', 'message', 'status',
+          'createdAt', 'response', 'reviewedBy', 'reviewedAt'
+        ])
+        && a.keys().hasAll([
+          'userId', 'subjectType', 'subjectId', 'message', 'status', 'createdAt'
+        ])
+        && validString(a.userId, 1, 128)
+        && a.subjectType in ['disposal', 'claim']
+        && validString(a.subjectId, 1, 128)
+        && validString(a.message, 20, 1000)
+        && a.status in ['pending', 'upheld', 'declined']
+        && a.createdAt is timestamp
+        && (!('response' in a) || validString(a.response, 10, 1000))
+        && (!('reviewedBy' in a) || validString(a.reviewedBy, 1, 128))
+        && (!('reviewedAt' in a) || a.reviewedAt is timestamp);
+    }
+
+    // Whether this user owns a disposal that was actually rejected.
+    //
+    // An appeal is a reply to a rejection (F5.4), so the rejection has to exist
+    // and has to be theirs. Without this, `appeals` would be an unmoderated text
+    // collection any signed-in account could write into against any id at all.
+    function ownsRejectedDisposal(uid, id) {
+      return exists(/databases/$(database)/documents/disposals/$(id))
+        && get(/databases/$(database)/documents/disposals/$(id)).data.userId == uid
+        && get(/databases/$(database)/documents/disposals/$(id)).data.status == 'rejected';
+    }
+
+    function ownsRejectedClaim(uid, id) {
+      return exists(/databases/$(database)/documents/claims/$(id))
+        && get(/databases/$(database)/documents/claims/$(id)).data.userId == uid
+        && get(/databases/$(database)/documents/claims/$(id)).data.status == 'rejected';
+    }
+
+    // -------------------------------------------------------------------------
+    // products — the seller writes their own listing, and only their own (F4.1)
+    // -------------------------------------------------------------------------
+    //
+    // This is one of the few collections where a client write is the real thing
+    // rather than a request. That is deliberate, and it follows the same test
+    // applied everywhere in this file: is the constraint expressible where it is
+    // enforced? A price is the seller's own number, and "the owning seller, in
+    // good standing, holding the seller role, within these bounds" is a rule
+    // rules can state. Compare a wallet balance, whose governing condition is
+    // "only after a photograph was screened" — which they cannot.
+    //
+    // Nothing here is read by the award path. `price` is the one number that
+    // reaches the ledger, and the server reads it from the stored document at
+    // checkout, never from the buyer's request.
+
+    match /products/{productId} {
+      // Any signed-in user may browse. The catalogue query filters on `active`;
+      // a delisted product is not secret, and letting a past buyer still resolve
+      // one keeps an old receipt's link from dying.
+      allow read: if isSignedIn();
+
+      allow create: if isActiveSeller()
+        && validProduct(request.resource.data, request.auth.uid)
+        // Server-owned from the first write. A listing cannot be born already
+        // claiming it was hidden by a suspension.
+        && !('hiddenBySuspension' in request.resource.data)
+        && request.resource.data.createdAt == request.time
+        && request.resource.data.updatedAt == request.time;
+
+      allow update: if isActiveSeller()
+        && resource.data.sellerId == request.auth.uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+             'shopName', 'title', 'titleLower', 'searchTokens', 'description',
+             'category', 'tags', 'price', 'stock', 'imageUrls', 'active',
+             'updatedAt'
+           ])
+        && validProduct(request.resource.data, request.auth.uid)
+        && request.resource.data.createdAt == resource.data.createdAt
+        && request.resource.data.updatedAt == request.time;
+
+      // Never hard-deleted (§6.2). F4.1's "delete" is `active: false`, because an
+      // order line keeps a productId alongside its price snapshot and a dangling
+      // reference breaks a buyer's receipt.
+      allow delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // carts — the buyer's own scratchpad (F4.3)
+    // -------------------------------------------------------------------------
+    //
+    // A cart holds product ids and quantities and NEVER a price (§6.2). That one
+    // invariant is what makes this document safe to leave loosely typed: the
+    // rules pin the owner, the top-level key set and the item count, and the
+    // shape of each element is enforced where it is read — the server resolves
+    // every productId against a live listing at checkout and ignores anything
+    // else it finds. A malformed cart cannot buy anything; it fails checkout.
+    //
+    // Had a price been cached here, none of that would hold: a stale figure would
+    // be a quotation the buyer could hold the seller to, and rules cannot compare
+    // it against the product document.
+
+    match /carts/{uid} {
+      // Owner only, and no administrator exception. Nothing in an admin workflow
+      // needs to read what somebody has not bought yet.
+      allow read: if isSelf(uid);
+
+      allow create, update: if isSelf(uid)
+        && isActive()
+        && request.resource.data.keys().hasOnly(['userId', 'items', 'updatedAt'])
+        && request.resource.data.keys().hasAll(['userId', 'items', 'updatedAt'])
+        && request.resource.data.userId == uid
+        && request.resource.data.items is list
+        && request.resource.data.items.size() <= 20
+        && request.resource.data.updatedAt == request.time;
+
+      allow delete: if isSelf(uid);
+    }
+
+    // -------------------------------------------------------------------------
+    // orders — created and advanced by the server, read by the two parties
+    // -------------------------------------------------------------------------
+    //
+    // §6.3 assigns the transitions by party: the seller ships and delivers, the
+    // buyer confirms. Rules could express that much. They cannot express the part
+    // that matters — `confirmed` is the transition that credits a wallet (F4.7),
+    // so a rule letting a buyer set it would be a rule letting a client trigger a
+    // payout.
+    //
+    // Splitting the machine, with two transitions here and one on the server,
+    // would put one invariant in two places with different reasoning behind each.
+    // Every transition therefore goes to the server, which checks the party, the
+    // state order and the idempotence in one function — and this collection is
+    // denied to every client, administrators included, exactly like `disposals`.
+    //
+    // Read access covers both counterparties: a cash-on-delivery transaction that
+    // only one side can see is not a transaction either can act on.
+
+    match /orders/{orderId} {
+      allow read: if isSignedIn()
+        && (resource.data.buyerId == request.auth.uid
+          || resource.data.sellerId == request.auth.uid
+          || isAdmin());
+
+      allow create, update, delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // appeals — a user answers a rejection, an administrator answers back (F5.4)
+    // -------------------------------------------------------------------------
+    //
+    // Shaped exactly like `sellerApplications`, and for the same reason: resolving
+    // an appeal moves no points, so the whole decision is expressible in rules and
+    // belongs here rather than on the server.
+    //
+    // That an appeal cannot pay out is a design decision, not a gap. A rejection
+    // releases the bin lockout so a legitimate submission can be made again — the
+    // remedy for a wrong rejection is a fresh submission through the full
+    // verification pipeline, not a hand-credited award that skips it.
+
+    match /appeals/{appealId} {
+      allow read: if isSignedIn()
+        && (resource.data.userId == request.auth.uid || isAdmin());
+
+      allow create: if isSignedIn()
+        && isActive()
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.status == 'pending'
+        && request.resource.data.createdAt == request.time
+        // A decision is the administrator's to write, and only on an appeal that
+        // already exists.
+        && !('response' in request.resource.data)
+        && !('reviewedBy' in request.resource.data)
+        && !('reviewedAt' in request.resource.data)
+        && validAppeal(request.resource.data)
+        // You may only appeal your own rejection, and only a real one. Without
+        // this, `appeals` is an unmoderated text collection writable against any
+        // id by any account.
+        && (
+          (request.resource.data.subjectType == 'disposal'
+            && ownsRejectedDisposal(request.auth.uid,
+                 request.resource.data.subjectId))
+          || (request.resource.data.subjectType == 'claim'
+            && ownsRejectedClaim(request.auth.uid,
+                 request.resource.data.subjectId))
+        );
+
+      allow update: if isAdmin()
+        // One decision only. An administrator cannot revisit an answered appeal,
+        // for the same reason two administrators cannot both approve a disposal.
+        && resource.data.status == 'pending'
+        && request.resource.data.diff(resource.data).affectedKeys()
+             .hasOnly(['status', 'response', 'reviewedBy', 'reviewedAt'])
+        && request.resource.data.status in ['upheld', 'declined']
+        && request.resource.data.reviewedBy == request.auth.uid
+        && request.resource.data.reviewedAt == request.time
+        // Mandatory on either outcome. An appeal answered with a status and no
+        // words is not an answer — the same rule a rejection reason follows.
+        && validString(request.resource.data.response, 10, 1000)
+        && validAppeal(request.resource.data);
+
+      allow delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // stats — the dashboard's counters (F5.1)
+    // -------------------------------------------------------------------------
+    //
+    // Incremented with FieldValue.increment() inside the same server transactions
+    // that cause them (§6.3), rather than recounted by reading whole collections.
+    //
+    // Admin read only. These are platform aggregates — how many points exist, how
+    // much has been sold — and there is no reason a buyer needs them. Writes are
+    // denied to everyone, because a counter a client could touch would stop being
+    // evidence of anything.
+
+    match /stats/{docId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
     }
 
     // -------------------------------------------------------------------------

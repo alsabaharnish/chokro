@@ -43,6 +43,21 @@ class PhotoUploadService {
   Future<UploadedPhoto> uploadClaimPhoto(Uint8List bytes) =>
       _upload(bytes, endpoint: '/photos/claim');
 
+  /// Uploads a marketplace listing photograph (F4.1).
+  ///
+  /// A third folder rather than a shared one, for the same reason claims stopped
+  /// sharing the disposal folder: `firestore.rules` validates a stored image URL
+  /// against `chokro/products/{uid}/`, so a listing cannot point at a disposal
+  /// photograph, at another seller's images, or at an arbitrary host.
+  ///
+  /// The endpoint requires the seller role as well as authentication, so a buyer
+  /// calling this receives a 401/403 and the session-expired message. That
+  /// wording is slightly off for a role failure, and it is the right trade: the
+  /// screen offering this is only reachable by a seller, so a role failure here
+  /// means something is wrong that a more specific sentence would not fix.
+  Future<UploadedPhoto> uploadProductPhoto(Uint8List bytes) =>
+      _upload(bytes, endpoint: '/photos/product');
+
   Future<UploadedPhoto> _upload(
     Uint8List bytes, {
     required String endpoint,

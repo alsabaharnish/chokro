@@ -14,6 +14,11 @@
  *   POST /bins                admin     — register a bin (F2.1)
  *   POST /bins/:id/active     admin     — take a bin in or out of service
  *   POST /claims/:id/review   admin     — approve or reject a claim (F6.3)
+ *   POST /photos/product      seller    — upload a listing photograph (F4.1)
+ *   POST /checkout            auth      — place the cart as orders (F4.4, F4.5)
+ *   POST /orders/:id/status   seller    — ship or deliver (F4.6, F4.8)
+ *   POST /orders/:id/confirm  auth      — buyer confirms receipt (F4.7)
+ *   POST /sellers/:uid/listings  admin  — hide or restore a catalogue (§7.4)
  *
  * Every wallet credit goes through `award.js`, which is the single path.
  */
@@ -24,13 +29,16 @@ const express = require('express');
 const cors = require('cors');
 
 const { initFirebase } = require('./firebase');
-const { requireAuth, requireAdmin } = require('./auth');
+const { requireAuth, requireAdmin, requireSeller } = require('./auth');
 const { uploadImage, MAX_BYTES } = require('./cloudinary');
 const { approveDisposal, rejectDisposal } = require('./award');
 const policyModule = require('./pointsPolicy');
 const binsModule = require('./bins');
 const { verifyDisposal } = require('./verify');
 const claimsModule = require('./claims');
+const checkoutModule = require('./checkout');
+const ordersModule = require('./orders');
+const listingsModule = require('./listings');
 
 const app = express();
 
@@ -101,7 +109,7 @@ app.get('/health', (req, res) => {
   res.json({
     ok: true,
     service: 'chokro-server',
-    version: '0.3.0',
+    version: '0.4.0',
     time: new Date().toISOString(),
   });
 });
@@ -170,6 +178,27 @@ function photoUploadHandler(kind) {
 
 app.post('/photos/disposal', requireAuth, photoUploadHandler('disposals'));
 app.post('/photos/claim', requireAuth, photoUploadHandler('claims'));
+
+/**
+ * A listing photograph (F4.1).
+ *
+ * Gated on the seller role as well as authentication, which the other two are
+ * not — evidence uploads are open to every user because every user submits
+ * evidence. Nobody who cannot list a product has any reason to fill the product
+ * folder, and that folder is exactly what `firestore.rules` checks a stored
+ * image URL against.
+ *
+ * Reachable from the web build as well as mobile: `image_picker` returns bytes
+ * on both and nothing in this path touches `dart:io`. The seller console is
+ * web-primary (§5.5), so an upload that only worked on a phone would be the
+ * wrong way round.
+ */
+app.post(
+  '/photos/product',
+  requireAuth,
+  requireSeller,
+  photoUploadHandler('products'),
+);
 
 /** Lets the client show a sensible limit without hard-coding it twice. */
 app.get('/photos/limits', (req, res) => {
@@ -316,6 +345,131 @@ app.post('/claims/:id/review', requireAuth, requireAdmin, async (req, res) => {
     // decided, weekly quota reached, no wallet.
     console.error(`Claim review of ${req.params.id} failed:`, err.message);
     return res.status(409).json({ error: 'review_failed', message: err.message });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Marketplace (F4.4-F4.8)
+// ---------------------------------------------------------------------------
+
+/**
+ * Places the caller's cart (F4.4, F4.5).
+ *
+ * The body carries a points figure and a settlement method and nothing else.
+ * Prices, stock, seller ids and the wallet balance are all read inside the
+ * transaction from stored documents — the client's own quote is what the buyer
+ * saw, not what they are charged.
+ *
+ * Not idempotent, and deliberately so. A checkout consumes the cart, so a retry
+ * finds an empty one and fails with "Your cart is empty" rather than placing a
+ * second set of orders. That is the safe direction to fail in: a duplicate
+ * checkout would decrement stock twice and debit points twice.
+ */
+app.post('/checkout', requireAuth, async (req, res) => {
+  const { pointsRequested, settlementMethod } = req.body || {};
+
+  const points = Number.isFinite(pointsRequested)
+    ? Math.trunc(pointsRequested)
+    : 0;
+
+  try {
+    const result = await checkoutModule.checkout({
+      buyerUid: req.user.uid,
+      pointsRequested: points,
+      settlementMethod: settlementMethod || 'cashOnDelivery',
+    });
+    return res.status(201).json({ ok: true, ...result });
+  } catch (err) {
+    // These messages are written for the buyer to read: an empty cart, a
+    // delisted product, "only 2 left", a seller who is not trading. Surfaced
+    // verbatim, because a generic failure at checkout leaves nothing to act on.
+    console.error(`Checkout for ${req.user.uid} failed:`, err.message);
+    return res
+      .status(409)
+      .json({ error: 'checkout_failed', message: err.message });
+  }
+});
+
+/**
+ * The seller ships or delivers (F4.6, F4.8).
+ *
+ * Body: { status: 'shipped' | 'delivered' }
+ *
+ * The target status is named rather than implied, so a stale screen cannot
+ * replay a transition: the server refuses anything that is not the exact next
+ * step for this order.
+ */
+app.post('/orders/:id/status', requireAuth, requireSeller, async (req, res) => {
+  const { status } = req.body || {};
+
+  if (!ordersModule.STATUSES.includes(status)) {
+    return res.status(400).json({
+      error: 'bad_status',
+      message: "status must be 'shipped' or 'delivered'.",
+    });
+  }
+
+  try {
+    const result = await ordersModule.advanceOrder({
+      orderId: req.params.id,
+      actorUid: req.user.uid,
+      status,
+    });
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error(`Order ${req.params.id} update failed:`, err.message);
+    return res.status(409).json({ error: 'order_failed', message: err.message });
+  }
+});
+
+/**
+ * The buyer confirms receipt, which is the only transition that pays (F4.7).
+ *
+ * No seller gate and no admin gate: the buyer is the party here, and
+ * `confirmOrder` checks the caller is the one named on the order. Idempotent
+ * through the status check — a confirmed order refuses a second confirmation,
+ * so a retry after a lost response cannot credit twice.
+ */
+app.post('/orders/:id/confirm', requireAuth, async (req, res) => {
+  try {
+    const result = await ordersModule.confirmOrder({
+      orderId: req.params.id,
+      buyerUid: req.user.uid,
+    });
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error(`Order ${req.params.id} confirmation failed:`, err.message);
+    return res.status(409).json({ error: 'order_failed', message: err.message });
+  }
+});
+
+/**
+ * Hides or restores a seller's catalogue alongside a suspension (§7.4).
+ *
+ * Called by the administrator's screen straight after it writes the suspension
+ * to Firestore. Two operations rather than one, because the suspension itself is
+ * a client write that rules can police and this one is not — so the screen has
+ * to report a partial failure honestly rather than pretend the pair was atomic.
+ */
+app.post('/sellers/:uid/listings', requireAuth, requireAdmin, async (req, res) => {
+  const { visible } = req.body || {};
+
+  if (typeof visible !== 'boolean') {
+    return res.status(400).json({
+      error: 'bad_request',
+      message: 'visible must be true or false.',
+    });
+  }
+
+  try {
+    const result = await listingsModule.setSellerListingsVisible({
+      sellerUid: req.params.uid,
+      visible,
+    });
+    return res.json({ ok: true, ...result });
+  } catch (err) {
+    console.error(`Listing sweep for ${req.params.uid} failed:`, err.message);
+    return res.status(409).json({ error: 'sweep_failed', message: err.message });
   }
 });
 

@@ -20,8 +20,15 @@ const { v2: cloudinary } = require('cloudinary');
 
 let configured = false;
 
-/** Upload folders the public API is allowed to create. */
-const PHOTO_KINDS = Object.freeze(['disposals', 'claims']);
+/**
+ * Upload folders the public API is allowed to create.
+ *
+ * `products` is the M3 addition, and it is a folder rather than a shared bucket
+ * for the same reason the other two are separate: `firestore.rules` validates a
+ * stored URL against `chokro/<kind>/<uid>/`, so a listing cannot point at a
+ * disposal photograph, at another seller's images, or at an arbitrary host.
+ */
+const PHOTO_KINDS = Object.freeze(['disposals', 'claims', 'products']);
 
 function configure() {
   if (configured) return;

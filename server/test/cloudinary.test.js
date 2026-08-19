@@ -18,8 +18,14 @@ describe('trusted Cloudinary references', () => {
     expect(isTrustedImageReference(clean)).toBe(true);
   });
 
-  test('accepts both supported evidence folders', () => {
-    expect(PHOTO_KINDS).toEqual(['disposals', 'claims']);
+  test('accepts every supported folder, and no others', () => {
+    // Asserted as an exact list rather than a membership check: the folder name
+    // is what `firestore.rules` builds its provenance pattern from, so a folder
+    // added here without a matching rule would accept an image the rules then
+    // refuse — a listing or a submission that uploads successfully and cannot be
+    // saved.
+    expect(PHOTO_KINDS).toEqual(['disposals', 'claims', 'products']);
+
     expect(
       isTrustedImageReference({
         ...clean,
@@ -30,6 +36,30 @@ describe('trusted Cloudinary references', () => {
           'chokro/claims/user_123/claim1.png',
       }),
     ).toBe(true);
+
+    expect(
+      isTrustedImageReference({
+        ...clean,
+        kind: 'products',
+        publicId: 'chokro/products/user_123/listing1',
+        url:
+          'https://res.cloudinary.com/chokro-cloud/image/upload/' +
+          'chokro/products/user_123/listing1.jpg',
+      }),
+    ).toBe(true);
+  });
+
+  test('a listing image cannot borrow a disposal photograph folder', () => {
+    // The folders are separate so a seller cannot dress evidence up as a
+    // product, or point a listing at somebody's disposal photograph.
+    expect(
+      isTrustedImageReference({
+        ...clean,
+        kind: 'products',
+        publicId: 'chokro/disposals/user_123/asset-Ab_12',
+        url: clean.url,
+      }),
+    ).toBe(false);
   });
 
   test('rejects another user folder even on the same cloud', () => {
