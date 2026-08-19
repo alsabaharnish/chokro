@@ -260,7 +260,7 @@ codec is needed.
 | Database | Cloud Firestore | Syllabus material, Week 11 |
 | File storage | Cloudinary, via the Node service | Disposal and claim photographs. Firebase Storage needs the Blaze plan, so uploads go through `POST /photos/disposal` and the client never holds a storage credential |
 | Web hosting | Firebase Hosting | Live at `https://chokro-30887.web.app` |
-| Rules testing | Firebase Emulator Suite + Jest | 73 tests across `rules_test/` |
+| Rules testing | Firebase Emulator Suite + Jest | 130 tests across 5 files in `rules_test/`, run serially |
 | Firebase project | `chokro-30887` | |
 
 ### 4.3 Trusted service
@@ -418,6 +418,20 @@ on Flutter web go through browser APIs, with HTTPS requirements and weaker
 permissions than a native build. The disposal flow is therefore **mobile-only by
 design** — defensible as a product decision: disposal is a "standing at a bin
 with a phone" action.
+
+This is a **runtime** boundary, not a build one, and the distinction matters
+because it is easy to misread. The whole application compiles for web: `flutter
+build web` succeeds in release and in WebAssembly. What is mobile-only is the
+*execution* of five files that take a `dart:io` `File` for photo capture
+(`photo_upload_service`, `disposal_controller`, `claim_controller`, `photo_view`,
+`declare_view`, plus `claim_submit_view`); on web those code paths would throw
+`UnsupportedError` if reached, and nothing routes to them there. A further five
+services import `dart:io` only to name `SocketException` in a catch clause, which
+is inert on web — the browser raises `http.ClientException`, which each of them
+already handles on the next clause.
+
+None of the web-primary screens is affected: the admin review queue, the claim
+queue and the QR/PDF label contain no `dart:io` and no `File`.
 
 **Everything else ships to both targets.** Since controllers and services are
 shared, a second view tree is roughly a day of work per screen.
@@ -875,20 +889,30 @@ screening lane, through one review pipeline.
 
 #### Remaining
 
-- Disposal submission UI: scan → photo → GPS → count and type → write pending
-- Admin bin registration with on-site GPS capture, `qr_flutter` generation,
-  a printable PDF label — the browser print dialog on web, the share sheet on mobile
-- Server: `POST /disposals/:id/verify` — recompute distance, hash, screen,
-  decide, credit or flag
-- Server: `POST /disposals/:id/review` — admin approve or reject
-- Server: `POST /config/points` — validated policy write
-- `award.js` — the single wallet-credit path, transactional, always with a
-  matching ledger entry
-- Admin review queue with photo, distance, flags and the user's history
-- Wallet and transaction history screens
-- FCM push on decision
-- Claims, built on the disposal machinery once it works
-- Temporary suspension with expiry
+Every item previously listed here is built: the disposal submission flow, bin
+registration with on-site GPS capture and a printable PDF label, all three server
+endpoints, `award.js` as the single wallet-credit path, the review queue with
+photo, distance, flags and the submitter's record, the wallet and history screens,
+FCM push on decision, claims, and temporary suspension with expiry. All nineteen
+M2 features and all of M1 have working code.
+
+What actually remains:
+
+- **One exit criterion is not literally met.** The weekly claim quota is enforced
+  by the server at approval, not by the rules at creation — see the note under the
+  exit criteria below. The guarantee holds either way, because no client can
+  approve a claim; it is enforced in a different place from where the criterion
+  says.
+- **Verification that needs a physical device.** No push notification has been
+  delivered, no disposal has gone through the full pipeline against a real bin,
+  and no temporary suspension has been observed lapsing. An emulator fakes GPS and
+  the camera and yields no FCM token, so none of these can be closed from a
+  desktop (§8).
+- **The web-primary screens have not been clicked through on the deployed site.**
+  The web target compiles — release and WebAssembly builds both succeed — and the
+  review queue, claim queue and PDF label touch no `dart:io` and no `File`, so
+  there is no known reason they should fail. That is not the same as having seen
+  them work.
 
 **Exit criteria:**
 
@@ -903,6 +927,25 @@ screening lane, through one review pipeline.
 - A claim submitted, approved and credited at the lower award
 - A user at their weekly quota is refused a fourth claim by rules, not only by
   the UI
+
+**On that last criterion.** As built, the quota is enforced by the trusted server
+inside the approval transaction, which reads `claimQuotas/{uid}_{isoWeek}` and
+refuses past the limit. The rules do not check it at creation, so a fourth claim
+can be *submitted* and is then refused when an administrator tries to approve it.
+
+The criterion is left as originally written rather than softened to match the
+implementation. The substantive guarantee — that no client can award itself points
+past the quota — does hold, because no client can approve a claim at all. What is
+missing is enforcement at the earlier boundary.
+
+The reason it was not done at the rules layer is worth recording: the quota
+document is keyed by ISO week, and Firestore rules cannot compute an ISO week
+number (`request.time` exposes `year()` and `dayOfYear()` but no ISO-week
+arithmetic). A rules-computed approximation would produce a different key from the
+server's and the two would silently disagree, which is worse than not checking. It
+is achievable by having the server write the window's end date onto the quota
+document so the rules need only a timestamp comparison — the same shape as
+`lockoutActive()` — at the cost of rekeying the collection.
 
 **Risks:** This is the heaviest and highest-risk milestone — nineteen features
 plus a backend service. Camera and location permissions behave differently across
