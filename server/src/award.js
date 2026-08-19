@@ -18,6 +18,7 @@
 
 const { db, admin, serverTimestamp } = require('./firebase');
 const policyModule = require('./pointsPolicy');
+const { hasCompletedVerification } = require('./decide');
 // Push on a decision (F7.1). No cycle: award.js -> push.js -> firebase.js, and
 // push.js requires nothing else.
 const pushModule = require('./push');
@@ -117,6 +118,21 @@ async function approveDisposal({ disposalId, adminUid = null, flags = null }) {
       // queue item must not credit twice.
       throw new Error(
         `That submission has already been decided (${disposal.status}).`,
+      );
+    }
+
+    // A client-created pending document appears in the admin stream before the
+    // submitting device's verification request can finish. Without this guard,
+    // a fast reviewer could approve during that window using the client-reported
+    // distance and empty flags, bypassing every server check.
+    //
+    // The key is server-owned (rules reject it on create). The field-presence
+    // fallback keeps submissions verified by the previous server release
+    // reviewable: that release wrote these three evidence keys but not the
+    // explicit marker.
+    if (!hasCompletedVerification(disposal)) {
+      throw new Error(
+        'Verification is still running. Wait for its evidence before approving.',
       );
     }
 

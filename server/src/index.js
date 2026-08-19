@@ -5,6 +5,7 @@
  *   GET  /whoami              auth      — token verification and Firestore reach
  *   GET  /admin/ping          admin     — role gating
  *   POST /photos/disposal     auth      — upload a disposal photograph
+ *   POST /photos/claim        auth      — upload claim evidence
  *   GET  /photos/limits       no auth   — the upload size ceiling
  *   POST /disposals/:id/review   admin  — approve or reject (F2.8)
  *   POST /disposals/:id/verify   auth   — the two-lane decision (F2.5, F2.10-12)
@@ -132,38 +133,43 @@ app.get('/admin/ping', requireAuth, requireAdmin, (req, res) => {
  * Note the uid comes from the verified token, never from the request body. A
  * caller cannot upload into someone else's folder by asking nicely.
  */
-app.post('/photos/disposal', requireAuth, async (req, res) => {
-  try {
-    const { imageBase64 } = req.body || {};
+function photoUploadHandler(kind) {
+  return async (req, res) => {
+    try {
+      const { imageBase64 } = req.body || {};
 
-    const result = await uploadImage({
-      base64: imageBase64,
-      uid: req.user.uid,
-      kind: 'disposals',
-    });
+      const result = await uploadImage({
+        base64: imageBase64,
+        uid: req.user.uid,
+        kind,
+      });
 
-    res.json({
-      photoUrl: result.url,
-      publicId: result.publicId,
-      bytes: result.bytes,
-    });
-  } catch (err) {
-    // decodeImage throws user-safe messages; anything else is ours to hide.
-    const isValidation =
-      typeof err.message === 'string' &&
-      (err.message.includes('image') || err.message.includes('too large'));
+      res.json({
+        photoUrl: result.url,
+        publicId: result.publicId,
+        bytes: result.bytes,
+      });
+    } catch (err) {
+      // decodeImage throws user-safe messages; anything else is ours to hide.
+      const isValidation =
+        typeof err.message === 'string' &&
+        (err.message.includes('image') || err.message.includes('too large'));
 
-    if (isValidation) {
-      return res.status(400).json({ error: 'bad_image', message: err.message });
+      if (isValidation) {
+        return res.status(400).json({ error: 'bad_image', message: err.message });
+      }
+
+      console.error('Photo upload failed:', err.message);
+      return res.status(502).json({
+        error: 'upload_failed',
+        message: 'The photo could not be stored. Try again.',
+      });
     }
+  };
+}
 
-    console.error('Photo upload failed:', err.message);
-    return res.status(502).json({
-      error: 'upload_failed',
-      message: 'The photo could not be stored. Try again.',
-    });
-  }
-});
+app.post('/photos/disposal', requireAuth, photoUploadHandler('disposals'));
+app.post('/photos/claim', requireAuth, photoUploadHandler('claims'));
 
 /** Lets the client show a sensible limit without hard-coding it twice. */
 app.get('/photos/limits', (req, res) => {

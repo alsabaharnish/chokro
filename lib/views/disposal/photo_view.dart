@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../controllers/disposal_controller.dart';
+import '../shared/flow_progress.dart';
 
 /// Step 2 of the disposal flow (F2.3): photograph the disposal.
 ///
@@ -25,7 +26,10 @@ class DisposalPhotoView extends ConsumerWidget {
     // Reached without a resolved bin — deep link, or a hot restart wiping state.
     if (bin == null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Photograph disposal')),
+        appBar: AppBar(
+          title: const Text('Photograph disposal'),
+          bottom: const FlowProgress(current: 2, total: 4, label: 'Photo'),
+        ),
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
@@ -51,7 +55,10 @@ class DisposalPhotoView extends ConsumerWidget {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Photograph disposal')),
+      appBar: AppBar(
+        title: const Text('Photograph disposal'),
+        bottom: const FlowProgress(current: 2, total: 4, label: 'Photo'),
+      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Center(
@@ -134,8 +141,10 @@ class DisposalPhotoView extends ConsumerWidget {
                       padding: const EdgeInsets.all(12),
                       child: Row(
                         children: [
-                          Icon(Icons.error_outline,
-                              color: theme.colorScheme.onErrorContainer),
+                          Icon(
+                            Icons.error_outline,
+                            color: theme.colorScheme.onErrorContainer,
+                          ),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Text(

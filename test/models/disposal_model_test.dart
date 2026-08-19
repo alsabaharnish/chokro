@@ -3,16 +3,16 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   DisposalModel pendingSubmission() => const DisposalModel(
-        id: 'disposal_001',
-        userId: 'user_uid',
-        binId: 'bin_001',
-        photoUrl: 'https://storage.example/photo.jpg',
-        capturedLat: 23.7809,
-        capturedLng: 90.4074,
-        distanceMeters: 11.2,
-        declaredItemCount: 2,
-        itemType: DisposalItemType.plasticBottle,
-      );
+    id: 'disposal_001',
+    userId: 'user_uid',
+    binId: 'bin_001',
+    photoUrl: 'https://storage.example/photo.jpg',
+    capturedLat: 23.7809,
+    capturedLng: 90.4074,
+    distanceMeters: 11.2,
+    declaredItemCount: 2,
+    itemType: DisposalItemType.plasticBottle,
+  );
 
   group('status machine', () {
     test('both approved states count as approved', () {
@@ -37,14 +37,20 @@ void main() {
       expect(DisposalStatus.rejected.wasHumanDecided, isTrue);
     });
 
-    test('an unknown stored status falls back to pending, never to approved', () {
-      // Fail toward no payout. A corrupted or future status value must not be
-      // readable as "this user has been paid".
-      expect(DisposalStatus.fromName('someFutureState'), DisposalStatus.pending);
-      expect(DisposalStatus.fromName(null), DisposalStatus.pending);
-      expect(DisposalStatus.fromName(''), DisposalStatus.pending);
-      expect(DisposalStatus.fromName('autoApproved').isApproved, isTrue);
-    });
+    test(
+      'an unknown stored status falls back to pending, never to approved',
+      () {
+        // Fail toward no payout. A corrupted or future status value must not be
+        // readable as "this user has been paid".
+        expect(
+          DisposalStatus.fromName('someFutureState'),
+          DisposalStatus.pending,
+        );
+        expect(DisposalStatus.fromName(null), DisposalStatus.pending);
+        expect(DisposalStatus.fromName(''), DisposalStatus.pending);
+        expect(DisposalStatus.fromName('autoApproved').isApproved, isTrue);
+      },
+    );
   });
 
   group('credited points', () {
@@ -136,8 +142,10 @@ void main() {
 
     test('an unknown stored type parses as null', () {
       expect(DisposalItemType.fromName('unobtanium'), isNull);
-      expect(DisposalItemType.fromName('plasticBottle'),
-          DisposalItemType.plasticBottle);
+      expect(
+        DisposalItemType.fromName('plasticBottle'),
+        DisposalItemType.plasticBottle,
+      );
     });
   });
 
@@ -152,9 +160,13 @@ void main() {
         screenItemCount: 1,
         screenNotes: 'blurry',
         photoHash: 'abc123',
+        photoPublicId: 'chokro/disposals/user_uid/photo123',
+        verificationCompleted: true,
       );
-      final parsed =
-          DisposalModel.fromJson(submission.toJson(), id: submission.id);
+      final parsed = DisposalModel.fromJson(
+        submission.toJson(),
+        id: submission.id,
+      );
 
       expect(parsed.status, DisposalStatus.manualApproved);
       expect(parsed.pointsAwarded, 50);
@@ -163,6 +175,8 @@ void main() {
       expect(parsed.screenConfidence, 0.42);
       expect(parsed.screenItemCount, 1);
       expect(parsed.photoHash, 'abc123');
+      expect(parsed.photoPublicId, 'chokro/disposals/user_uid/photo123');
+      expect(parsed.verificationCompleted, isTrue);
       expect(parsed.itemType, DisposalItemType.plasticBottle);
     });
 
@@ -173,13 +187,15 @@ void main() {
     });
 
     test('the create map carries nothing that decides a payout', () {
-      final map = pendingSubmission().copyWith(
-        status: DisposalStatus.autoApproved,
-        pointsAwarded: 9999,
-        photoHash: 'forged',
-        screenConfidence: 1.0,
-        reviewedBy: 'admin_uid',
-      ).toCreateJson();
+      final map = pendingSubmission()
+          .copyWith(
+            status: DisposalStatus.autoApproved,
+            pointsAwarded: 9999,
+            photoHash: 'forged',
+            screenConfidence: 1.0,
+            reviewedBy: 'admin_uid',
+          )
+          .toCreateJson();
 
       // Even when the in-memory object has been tampered with, the map the
       // client sends cannot claim an approval or an award.
@@ -192,6 +208,7 @@ void main() {
       expect(map.containsKey('screenNotes'), isFalse);
       expect(map.containsKey('reviewedBy'), isFalse);
       expect(map.containsKey('rejectionReason'), isFalse);
+      expect(map.containsKey('verificationCompleted'), isFalse);
     });
 
     test('the create map keeps what the server needs to verify', () {
@@ -240,14 +257,17 @@ void main() {
     });
 
     test('rejects a failed location fix', () {
-      final broken =
-          pendingSubmission().copyWith(capturedLat: 0, capturedLng: 0);
+      final broken = pendingSubmission().copyWith(
+        capturedLat: 0,
+        capturedLng: 0,
+      );
       expect(broken.validate(), isNotEmpty);
     });
 
     test('a rejection must record a reason', () {
-      final noReason =
-          pendingSubmission().copyWith(status: DisposalStatus.rejected);
+      final noReason = pendingSubmission().copyWith(
+        status: DisposalStatus.rejected,
+      );
       expect(noReason.validate(), isNotEmpty);
 
       final withReason = pendingSubmission().copyWith(
@@ -258,8 +278,9 @@ void main() {
     });
 
     test('an approval must record the points awarded', () {
-      final noPoints =
-          pendingSubmission().copyWith(status: DisposalStatus.autoApproved);
+      final noPoints = pendingSubmission().copyWith(
+        status: DisposalStatus.autoApproved,
+      );
       expect(noPoints.validate(), isNotEmpty);
     });
 
@@ -288,14 +309,18 @@ void main() {
     test('every status has a message', () {
       for (final status in DisposalStatus.values) {
         final submission = pendingSubmission().copyWith(status: status);
-        expect(submission.userFacingStatus.trim(), isNotEmpty,
-            reason: status.name);
+        expect(
+          submission.userFacingStatus.trim(),
+          isNotEmpty,
+          reason: status.name,
+        );
       }
     });
 
     test('a manual approval is announced as manually verified', () {
-      final manual =
-          pendingSubmission().copyWith(status: DisposalStatus.manualApproved);
+      final manual = pendingSubmission().copyWith(
+        status: DisposalStatus.manualApproved,
+      );
       expect(manual.userFacingStatus, 'Manually verified');
     });
   });

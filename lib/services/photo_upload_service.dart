@@ -34,7 +34,17 @@ class PhotoUploadService {
   /// it; it was previously discarded here.
   ///
   /// Throws [PhotoUploadException] with a message fit to show a user.
-  Future<UploadedPhoto> uploadDisposalPhoto(File file) async {
+  Future<UploadedPhoto> uploadDisposalPhoto(File file) =>
+      _upload(file, endpoint: '/photos/disposal');
+
+  /// Uploads evidence for a self-reported eco-action.
+  ///
+  /// Claims previously used the disposal endpoint, mixing two evidence types in
+  /// one server folder and making provenance checks unable to distinguish them.
+  Future<UploadedPhoto> uploadClaimPhoto(File file) =>
+      _upload(file, endpoint: '/photos/claim');
+
+  Future<UploadedPhoto> _upload(File file, {required String endpoint}) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       throw const PhotoUploadException('You are not signed in.');
@@ -47,7 +57,7 @@ class PhotoUploadService {
     try {
       response = await _client
           .post(
-            ApiConfig.path('/photos/disposal'),
+            ApiConfig.path(endpoint),
             headers: {
               'Content-Type': 'application/json',
               'Authorization': 'Bearer $token',

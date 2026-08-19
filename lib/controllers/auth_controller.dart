@@ -27,7 +27,10 @@ final currentUserProvider = StreamProvider<UserModel?>((ref) {
       return ref.watch(userServiceProvider).watchUser(user.uid);
     },
     loading: () => Stream.value(null),
-    error: (_, _) => Stream.value(null),
+    // A failed auth subscription is not the same state as "signed out". Keep
+    // the error so the router can show recovery instead of claiming the user's
+    // Firestore profile is missing.
+    error: (error, stackTrace) => Stream<UserModel?>.error(error, stackTrace),
   );
 });
 
@@ -116,15 +119,11 @@ class AuthController extends AsyncNotifier<void> {
     });
   }
 
-  Future<void> signIn({
-    required String email,
-    required String password,
-  }) async {
+  Future<void> signIn({required String email, required String password}) async {
     await _guard(() async {
-      await ref.read(authServiceProvider).signIn(
-            email: email,
-            password: password,
-          );
+      await ref
+          .read(authServiceProvider)
+          .signIn(email: email, password: password);
     });
   }
 
@@ -175,5 +174,6 @@ class AuthController extends AsyncNotifier<void> {
   }
 }
 
-final authControllerProvider =
-    AsyncNotifierProvider<AuthController, void>(AuthController.new);
+final authControllerProvider = AsyncNotifierProvider<AuthController, void>(
+  AuthController.new,
+);

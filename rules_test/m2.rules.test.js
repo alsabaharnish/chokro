@@ -84,8 +84,8 @@ async function seedDisposal(disposalId, uid, status = 'pending') {
     await setDoc(doc(ctx.firestore(), 'disposals', disposalId), {
       userId: uid,
       binId: OPEN_BIN,
-      photoUrl: 'https://storage.example/p.jpg',
-    photoPublicId: 'chokro/disposals/test/abc123',
+      photoUrl: `https://res.cloudinary.com/chokro-test/image/upload/v1/chokro/disposals/${uid}/abc123.jpg`,
+      photoPublicId: `chokro/disposals/${uid}/abc123`,
       capturedLat: 23.7809,
       capturedLng: 90.4074,
       distanceMeters: 11.2,
@@ -123,8 +123,8 @@ function validDisposal(uid, binId = OPEN_BIN) {
   return {
     userId: uid,
     binId,
-    photoUrl: 'https://storage.example/p.jpg',
-    photoPublicId: 'chokro/disposals/test/abc123',
+    photoUrl: `https://res.cloudinary.com/chokro-test/image/upload/v1/chokro/disposals/${uid}/abc123.jpg`,
+    photoPublicId: `chokro/disposals/${uid}/abc123`,
     capturedLat: 23.7809,
     capturedLng: 90.4074,
     distanceMeters: 11.2,
@@ -200,6 +200,17 @@ describe('wallets', () => {
         userId: ALICE,
         balance: 0,
         updatedAt: serverTimestamp(),
+      }),
+    );
+  });
+
+  test('registration cannot add fields to a wallet', async () => {
+    await assertFails(
+      setDoc(doc(db(ALICE), 'wallets', ALICE), {
+        userId: ALICE,
+        balance: 0,
+        updatedAt: serverTimestamp(),
+        bonus: 500,
       }),
     );
   });
@@ -409,6 +420,15 @@ describe('disposal submission', () => {
     );
   });
 
+  test('cannot claim that server verification already completed', async () => {
+    await assertFails(
+      setDoc(doc(db(ALICE), 'disposals', 'd-verified'), {
+        ...validDisposal(ALICE),
+        verificationCompleted: true,
+      }),
+    );
+  });
+
   test('cannot be submitted on behalf of another user', async () => {
     await assertFails(
       setDoc(doc(db(ALICE), 'disposals', 'd1'), validDisposal(BOB)),
@@ -444,6 +464,40 @@ describe('disposal submission', () => {
       setDoc(doc(db(ALICE), 'disposals', 'd1'), {
         ...validDisposal(ALICE),
         declaredItemCount: 2.5,
+      }),
+    );
+  });
+
+  test('rejects an item type outside the Dart enum', async () => {
+    await assertFails(
+      setDoc(doc(db(ALICE), 'disposals', 'd-type'), {
+        ...validDisposal(ALICE),
+        itemType: 'ignorePreviousInstructions',
+      }),
+    );
+  });
+
+  test('rejects an image outside the signed-in user upload folder', async () => {
+    await assertFails(
+      setDoc(doc(db(ALICE), 'disposals', 'd-photo'), {
+        ...validDisposal(ALICE),
+        photoPublicId: `chokro/disposals/${BOB}/abc123`,
+      }),
+    );
+  });
+
+  test('rejects out-of-range and failed-fix coordinates', async () => {
+    await assertFails(
+      setDoc(doc(db(ALICE), 'disposals', 'd-lat'), {
+        ...validDisposal(ALICE),
+        capturedLat: 91,
+      }),
+    );
+    await assertFails(
+      setDoc(doc(db(ALICE), 'disposals', 'd-zero'), {
+        ...validDisposal(ALICE),
+        capturedLat: 0,
+        capturedLng: 0,
       }),
     );
   });
@@ -525,6 +579,13 @@ describe('duplicate-claim lockout', () => {
     await seedLockout(ALICE, OPEN_BIN, new Date(Date.now() + 3600 * 1000));
     await assertSucceeds(
       getDoc(doc(db(ALICE), 'lockouts', `${ALICE}_${OPEN_BIN}`)),
+    );
+  });
+
+  test("a user cannot read another user's lockout", async () => {
+    await seedLockout(BOB, OPEN_BIN, new Date(Date.now() + 3600 * 1000));
+    await assertFails(
+      getDoc(doc(db(ALICE), 'lockouts', `${BOB}_${OPEN_BIN}`)),
     );
   });
 
@@ -636,6 +697,12 @@ describe('claim quotas', () => {
     });
     await assertSucceeds(
       getDoc(doc(db(ALICE), 'claimQuotas', `${ALICE}_2026-W31`)),
+    );
+  });
+
+  test("a user cannot read another user's quota counter", async () => {
+    await assertFails(
+      getDoc(doc(db(ALICE), 'claimQuotas', `${BOB}_2026-W31`)),
     );
   });
 

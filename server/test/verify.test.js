@@ -18,12 +18,18 @@ const {
 const {
   decide,
   isApprovable,
+  hasCompletedVerification,
   explain,
   FLAGS,
   CONFIDENCE_THRESHOLD,
 } = require('../src/decide');
 
-const { parseVerdict, buildPrompt, isConfigured } = require('../src/screen');
+const {
+  parseVerdict,
+  buildPrompt,
+  isConfigured,
+  screenImage,
+} = require('../src/screen');
 
 // ---------------------------------------------------------------------------
 // Hashing
@@ -140,6 +146,9 @@ describe('decide', () => {
     // `duplicateChecked` defaults to false — "did not run" — so that a caller
     // which forgets it gets a review rather than a silent auto-approve.
     duplicateChecked: true,
+    photoTrusted: true,
+    declarationValid: true,
+    locationValid: true,
     declaredItemCount: 3,
     screening: {
       confidence: 0.9,
@@ -170,6 +179,22 @@ describe('decide', () => {
   test('a duplicate photo routes to review', () => {
     const result = decide({ ...clean, isDuplicate: true });
     expect(result.flags).toContain(FLAGS.DUPLICATE_PHOTO);
+  });
+
+  test('untrusted photo provenance never auto-approves', () => {
+    const result = decide({ ...clean, photoTrusted: false });
+    expect(result.decision).toBe('review');
+    expect(result.flags).toContain(FLAGS.PHOTO_UNTRUSTED);
+  });
+
+  test('an invalid declaration and location are explained separately', () => {
+    const result = decide({
+      ...clean,
+      declarationValid: false,
+      locationValid: false,
+    });
+    expect(result.flags).toContain(FLAGS.INVALID_DECLARATION);
+    expect(result.flags).toContain(FLAGS.INVALID_LOCATION);
   });
 
   test('missing screening routes to review, never approves', () => {
@@ -268,6 +293,28 @@ describe('isApprovable', () => {
   });
 });
 
+describe('verification completion evidence', () => {
+  test('the explicit server marker unlocks review', () => {
+    expect(hasCompletedVerification({ verificationCompleted: true })).toBe(true);
+  });
+
+  test('a fresh client-created pending document stays locked', () => {
+    expect(
+      hasCompletedVerification({ status: 'pending', flags: [] }),
+    ).toBe(false);
+  });
+
+  test('legacy server evidence remains reviewable even when values are null', () => {
+    expect(
+      hasCompletedVerification({
+        photoHash: null,
+        screenConfidence: null,
+        screenItemCount: null,
+      }),
+    ).toBe(true);
+  });
+});
+
 describe('explain', () => {
   test('returns a sentence for a known flag', () => {
     expect(explain(FLAGS.OUTSIDE_RADIUS)).toContain('radius');
@@ -336,8 +383,8 @@ describe('parseVerdict', () => {
 
 describe('buildPrompt', () => {
   test('names the declared type in words', () => {
-    expect(buildPrompt('plasticBottles', 3)).toContain('plastic bottles');
-    expect(buildPrompt('plasticBottles', 3)).toContain('3');
+    expect(buildPrompt('plasticBottle', 3)).toContain('plastic bottles');
+    expect(buildPrompt('plasticBottle', 3)).toContain('3');
   });
 
   test('falls back to the raw key for an unknown type', () => {
@@ -363,5 +410,46 @@ describe('isConfigured', () => {
     expect(isConfigured()).toBe(true);
     if (original === undefined) delete process.env.GROQ_API_KEY;
     else process.env.GROQ_API_KEY = original;
+  });
+});
+
+describe('screenImage request shape', () => {
+  test('asks the vision model for JSON mode with a remote image', async () => {
+    const originalKey = process.env.GROQ_API_KEY;
+    const originalFetch = global.fetch;
+    process.env.GROQ_API_KEY = 'test-key';
+
+    global.fetch = jest.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              content:
+                '{"confidence":0.9,"itemCount":2,"itemTypeMatches":true}',
+            },
+          },
+        ],
+      }),
+    });
+    const logSpy = jest.spyOn(console, 'log').mockImplementation(() => {});
+
+    const result = await screenImage({
+      imageUrl: 'https://res.cloudinary.com/demo/image/upload/photo.jpg',
+      declaredItemType: 'glass',
+      declaredItemCount: 2,
+    });
+
+    const options = global.fetch.mock.calls[0][1];
+    const body = JSON.parse(options.body);
+    expect(body.response_format).toEqual({ type: 'json_object' });
+    expect(body.max_completion_tokens).toBe(300);
+    expect(result.itemTypeMatches).toBe(true);
+
+    logSpy.mockRestore();
+    global.fetch = originalFetch;
+    if (originalKey === undefined) delete process.env.GROQ_API_KEY;
+    else process.env.GROQ_API_KEY = originalKey;
   });
 });

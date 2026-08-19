@@ -77,8 +77,8 @@ function validDisposal(uid, binId = OPEN_BIN) {
   return {
     userId: uid,
     binId,
-    photoUrl: 'https://storage.example/p.jpg',
-    photoPublicId: 'chokro/disposals/test/abc123',
+    photoUrl: `https://res.cloudinary.com/chokro-test/image/upload/v1/chokro/disposals/${uid}/abc123.jpg`,
+    photoPublicId: `chokro/disposals/${uid}/abc123`,
     capturedLat: 23.7809,
     capturedLng: 90.4074,
     distanceMeters: 11.2,
@@ -171,9 +171,9 @@ describe('lazy suspension expiry', () => {
       setDoc(doc(db, 'sellerApplications', 'app1'), {
         userId: ALICE,
         businessName: 'Test',
-        description: 'Test',
+        description: 'A description long enough',
         status: 'pending',
-        createdAt: new Date(),
+        createdAt: serverTimestamp(),
       }),
     );
   });
@@ -185,9 +185,9 @@ describe('lazy suspension expiry', () => {
       setDoc(doc(db, 'sellerApplications', 'app2'), {
         userId: ALICE,
         businessName: 'Test',
-        description: 'Test',
+        description: 'A description long enough',
         status: 'pending',
-        createdAt: new Date(),
+        createdAt: serverTimestamp(),
       }),
     );
   });

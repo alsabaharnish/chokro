@@ -35,14 +35,18 @@ const ENDPOINT = 'https://api.groq.com/openai/v1/chat/completions';
 
 /** The closed item-type vocabulary (§6.1), in words a model will recognise. */
 const ITEM_TYPE_LABELS = Object.freeze({
-  plasticBottles: 'plastic bottles',
-  otherPlastic: 'other plastic waste',
-  paperCardboard: 'paper or cardboard',
+  plasticBottle: 'plastic bottles',
+  plasticOther: 'other plastic waste',
+  paper: 'paper or cardboard',
   glass: 'glass',
-  metalCans: 'metal or cans',
-  electronicWaste: 'electronic waste',
-  organicWaste: 'organic waste',
+  metal: 'metal or cans',
+  eWaste: 'electronic waste',
+  organic: 'organic waste',
 });
+
+function isValidItemType(value) {
+  return Object.hasOwn(ITEM_TYPE_LABELS, value);
+}
 
 function isConfigured() {
   return Boolean(process.env.GROQ_API_KEY);
@@ -149,7 +153,11 @@ async function screenImage({ imageUrl, declaredItemType, declaredItemCount }) {
             },
           ],
           temperature: 0,
-          max_tokens: 300,
+          // The model supports JSON mode for image inputs. The prompt still
+          // states the schema, while this prevents commentary/fences from
+          // turning an otherwise usable verdict into a manual-review fallback.
+          response_format: { type: 'json_object' },
+          max_completion_tokens: 300,
           reasoning_effort: 'none',
         }),
         signal: controller.signal,
@@ -187,6 +195,7 @@ async function screenImage({ imageUrl, declaredItemType, declaredItemCount }) {
 module.exports = {
   MODEL,
   ITEM_TYPE_LABELS,
+  isValidItemType,
   isConfigured,
   buildPrompt,
   parseVerdict,

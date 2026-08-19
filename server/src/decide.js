@@ -31,6 +31,9 @@ const FLAGS = Object.freeze({
   DAILY_CAP_REACHED: 'dailyCapReached',
   SCREENING_UNAVAILABLE: 'screeningUnavailable',
   HASH_UNAVAILABLE: 'hashUnavailable',
+  PHOTO_UNTRUSTED: 'photoUntrusted',
+  INVALID_DECLARATION: 'invalidDeclaration',
+  INVALID_LOCATION: 'invalidLocation',
 });
 
 const FLAG_EXPLANATIONS = Object.freeze({
@@ -51,6 +54,12 @@ const FLAG_EXPLANATIONS = Object.freeze({
   [FLAGS.HASH_UNAVAILABLE]:
     'The photograph could not be fingerprinted, so it was not compared against ' +
     'earlier submissions.',
+  [FLAGS.PHOTO_UNTRUSTED]:
+    'The stored photograph does not match a trusted upload for this user.',
+  [FLAGS.INVALID_DECLARATION]:
+    'The submitted material type or item count is not valid.',
+  [FLAGS.INVALID_LOCATION]:
+    'The submitted coordinates are missing or outside valid latitude/longitude ranges.',
 });
 
 /**
@@ -71,6 +80,9 @@ const CONFIDENCE_THRESHOLD = 0.75;
  * @param {number} input.radiusMeters        from the bin document
  * @param {boolean} input.isDuplicate        from findDuplicate
  * @param {boolean} input.duplicateChecked   false when the hash could not be computed
+ * @param {boolean} input.photoTrusted       true only for this user's trusted upload
+ * @param {boolean} input.declarationValid   closed item vocabulary and plausible count
+ * @param {boolean} input.locationValid      plausible latitude and longitude
  * @param {number} input.declaredItemCount
  * @param {object|null} input.screening      null when screening did not run
  * @param {number} input.screening.confidence      0-1
@@ -88,12 +100,22 @@ function decide({
   // reading. A caller that forgets to pass this gets a review, not a silent
   // auto-approve. Mirrors `screening = null` above it.
   duplicateChecked = false,
+  photoTrusted = false,
+  declarationValid = false,
+  locationValid = false,
   declaredItemCount,
   screening = null,
   approvedToday = 0,
   dailyCap = 3,
 }) {
   const flags = [];
+
+  // These checks validate the provenance and shape of the inputs before
+  // interpreting their values. Defaults are false so a newly added caller that
+  // forgets them routes to review instead of silently widening auto-approval.
+  if (!photoTrusted) flags.push(FLAGS.PHOTO_UNTRUSTED);
+  if (!declarationValid) flags.push(FLAGS.INVALID_DECLARATION);
+  if (!locationValid) flags.push(FLAGS.INVALID_LOCATION);
 
   // 1. Geofence. The authoritative check, recomputed from stored coordinates.
   if (
@@ -177,6 +199,23 @@ function isApprovable(flags = []) {
   return !flags.some((flag) => BLOCKING_FLAGS.includes(flag));
 }
 
+/**
+ * Whether a pending document carries trusted-service verification evidence.
+ *
+ * Field presence—not truthiness—matters because an unavailable hash/screen is
+ * deliberately recorded as null. The fallback is for documents verified by
+ * the release before `verificationCompleted` was added.
+ */
+function hasCompletedVerification(disposal) {
+  if (!disposal || typeof disposal !== 'object') return false;
+  return (
+    disposal.verificationCompleted === true ||
+    (Object.hasOwn(disposal, 'photoHash') &&
+      Object.hasOwn(disposal, 'screenConfidence') &&
+      Object.hasOwn(disposal, 'screenItemCount'))
+  );
+}
+
 /** The sentence shown beside a flag in the review queue. */
 function explain(flag) {
   return FLAG_EXPLANATIONS[flag] || flag;
@@ -189,5 +228,6 @@ module.exports = {
   CONFIDENCE_THRESHOLD,
   decide,
   isApprovable,
+  hasCompletedVerification,
   explain,
 };

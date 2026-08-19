@@ -11,6 +11,7 @@ import '../../core/label_format.dart';
 import '../../core/theme.dart';
 import '../../models/disposal_model.dart';
 import '../../services/verification_service.dart';
+import '../shared/flow_progress.dart';
 
 /// Step 4 of the disposal flow (F2.9): declare what is being disposed of, review
 /// the submission, and write it.
@@ -47,7 +48,10 @@ class DisposalDeclareView extends ConsumerWidget {
 
     if (bin == null || !draft.hasPhoto || !draft.hasLocation) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Confirm disposal')),
+        appBar: AppBar(
+          title: const Text('Confirm disposal'),
+          bottom: const FlowProgress(current: 4, total: 4, label: 'Confirm'),
+        ),
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
@@ -71,7 +75,10 @@ class DisposalDeclareView extends ConsumerWidget {
     }
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Confirm disposal')),
+      appBar: AppBar(
+        title: const Text('Confirm disposal'),
+        bottom: const FlowProgress(current: 4, total: 4, label: 'Confirm'),
+      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Center(
@@ -81,20 +88,22 @@ class DisposalDeclareView extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
                 // ── What are you disposing of ───────────────────────────────
-                Text('What are you disposing of?',
-                    style: theme.textTheme.titleMedium),
+                Text(
+                  'What are you disposing of?',
+                  style: theme.textTheme.titleMedium,
+                ),
                 const SizedBox(height: 12),
 
                 DropdownButtonFormField<DisposalItemType>(
                   initialValue: draft.itemType,
-                  decoration: const InputDecoration(
-                    labelText: 'Material',
-                  ),
+                  decoration: const InputDecoration(labelText: 'Material'),
                   items: DisposalItemType.values
-                      .map((type) => DropdownMenuItem(
-                            value: type,
-                            child: Text(type.label),
-                          ))
+                      .map(
+                        (type) => DropdownMenuItem(
+                          value: type,
+                          child: Text(type.label),
+                        ),
+                      )
                       .toList(),
                   onChanged: (type) {
                     if (type != null) controller.setItemType(type);
@@ -114,26 +123,31 @@ class DisposalDeclareView extends ConsumerWidget {
                 Card(
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 8),
+                      horizontal: 12,
+                      vertical: 8,
+                    ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
                         IconButton.filledTonal(
                           onPressed: draft.declaredItemCount > 1
-                              ? () => controller
-                                  .setItemCount(draft.declaredItemCount - 1)
+                              ? () => controller.setItemCount(
+                                  draft.declaredItemCount - 1,
+                                )
                               : null,
                           icon: const Icon(Icons.remove),
                         ),
                         Text(
                           '${draft.declaredItemCount}',
-                          style: theme.textTheme.headlineMedium
-                              ?.copyWith(fontWeight: FontWeight.bold),
+                          style: theme.textTheme.headlineMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
                         ),
                         IconButton.filledTonal(
                           onPressed: draft.declaredItemCount < 100
-                              ? () => controller
-                                  .setItemCount(draft.declaredItemCount + 1)
+                              ? () => controller.setItemCount(
+                                  draft.declaredItemCount + 1,
+                                )
                               : null,
                           icon: const Icon(Icons.add),
                         ),
@@ -156,9 +170,11 @@ class DisposalDeclareView extends ConsumerWidget {
                       ListTile(
                         leading: const Icon(Icons.delete_outline),
                         title: Text(bin.label),
-                        subtitle: Text(draft.distanceMeters == null
-                            ? 'Location captured'
-                            : '${formatDistance(draft.distanceMeters!)} away'),
+                        subtitle: Text(
+                          draft.distanceMeters == null
+                              ? 'Location captured'
+                              : '${formatDistance(draft.distanceMeters!)} away',
+                        ),
                       ),
                       const Divider(height: 1),
                       ListTile(
@@ -173,8 +189,9 @@ class DisposalDeclareView extends ConsumerWidget {
                         ),
                         title: Text(draft.itemType.label),
                         subtitle: Text(
-                            '${draft.declaredItemCount} item'
-                            '${draft.declaredItemCount == 1 ? '' : 's'}'),
+                          '${draft.declaredItemCount} item'
+                          '${draft.declaredItemCount == 1 ? '' : 's'}',
+                        ),
                       ),
                     ],
                   ),
@@ -188,8 +205,10 @@ class DisposalDeclareView extends ConsumerWidget {
                     padding: const EdgeInsets.all(16),
                     child: Row(
                       children: [
-                        Icon(Icons.schedule,
-                            color: theme.colorScheme.onSurfaceVariant),
+                        Icon(
+                          Icons.schedule,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        ),
                         const SizedBox(width: 12),
                         Expanded(
                           child: Text(
@@ -211,14 +230,17 @@ class DisposalDeclareView extends ConsumerWidget {
                       padding: const EdgeInsets.all(16),
                       child: Row(
                         children: [
-                          Icon(Icons.error_outline,
-                              color: theme.colorScheme.onErrorContainer),
+                          Icon(
+                            Icons.error_outline,
+                            color: theme.colorScheme.onErrorContainer,
+                          ),
                           const SizedBox(width: 12),
                           Expanded(
                             child: Text(
                               draft.error!,
                               style: TextStyle(
-                                  color: theme.colorScheme.onErrorContainer),
+                                color: theme.colorScheme.onErrorContainer,
+                              ),
                             ),
                           ),
                         ],
@@ -293,8 +315,9 @@ class _SubmittedView extends StatelessWidget {
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(AppTheme.gapXl),
             child: ConstrainedBox(
-              constraints:
-                  const BoxConstraints(maxWidth: AppTheme.maxFormWidth),
+              constraints: const BoxConstraints(
+                maxWidth: AppTheme.maxFormWidth,
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -311,10 +334,7 @@ class _SubmittedView extends StatelessWidget {
                   // would not lose the submission, but the answer is seconds
                   // away and it is worth waiting for.
                   if (!isVerifying) ...[
-                    FilledButton(
-                      onPressed: onDone,
-                      child: const Text('Done'),
-                    ),
+                    FilledButton(onPressed: onDone, child: const Text('Done')),
                     const SizedBox(height: AppTheme.gapSm),
                     TextButton.icon(
                       onPressed: onViewHistory,
@@ -332,151 +352,155 @@ class _SubmittedView extends StatelessWidget {
   }
 
   List<Widget> _verifying(ThemeData theme) => [
-        const SizedBox(
-          width: 44,
-          height: 44,
-          child: CircularProgressIndicator(strokeWidth: 3),
-        ),
-        const SizedBox(height: AppTheme.gapLg),
-        Text(
-          'Checking your submission',
-          style: theme.textTheme.titleLarge
-              ?.copyWith(fontWeight: FontWeight.bold),
-          textAlign: TextAlign.center,
-        ),
-        const SizedBox(height: AppTheme.gapSm),
-        Text(
-          'It is saved either way — this only decides whether the points can '
-          'be added right now.',
-          textAlign: TextAlign.center,
-          style: theme.textTheme.bodyMedium?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ];
+    const SizedBox(
+      width: 44,
+      height: 44,
+      child: CircularProgressIndicator(strokeWidth: 3),
+    ),
+    const SizedBox(height: AppTheme.gapLg),
+    Text(
+      'Checking your submission',
+      style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+      textAlign: TextAlign.center,
+    ),
+    const SizedBox(height: AppTheme.gapSm),
+    Text(
+      'It is saved either way — this only decides whether the points can '
+      'be added right now.',
+      textAlign: TextAlign.center,
+      style: theme.textTheme.bodyMedium?.copyWith(
+        color: theme.colorScheme.onSurfaceVariant,
+      ),
+    ),
+  ];
 
   List<Widget> _approved(
     ThemeData theme,
     ColorScheme scheme,
     VerificationOutcome outcome,
-  ) =>
-      [
-        Container(
-          padding: const EdgeInsets.all(AppTheme.gapLg),
-          decoration: BoxDecoration(
-            color: scheme.primaryContainer,
-            shape: BoxShape.circle,
-          ),
-          child: Icon(
-            Icons.check_circle,
-            size: 56,
-            color: scheme.onPrimaryContainer,
-          ),
-        ),
-        const SizedBox(height: AppTheme.gapLg),
-        Text(
-          'Approved',
-          style: theme.textTheme.headlineSmall
-              ?.copyWith(fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: AppTheme.gapSm),
-        // The number is the news. It gets the display size, not body text.
-        Text(
-          '+${outcome.pointsAwarded}',
-          style: theme.textTheme.displaySmall?.copyWith(
-            fontWeight: FontWeight.bold,
-            color: scheme.primary,
-          ),
-        ),
-        Text(
-          outcome.pointsAwarded == 1 ? 'point added' : 'points added',
-          style: theme.textTheme.bodyMedium
-              ?.copyWith(color: scheme.onSurfaceVariant),
-        ),
-        if (outcome.balanceAfter != null) ...[
-          const SizedBox(height: AppTheme.gapSm),
-          Text(
-            'Your balance is now ${outcome.balanceAfter}.',
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodyMedium,
-          ),
-        ],
-      ];
+  ) => [
+    Container(
+      padding: const EdgeInsets.all(AppTheme.gapLg),
+      decoration: BoxDecoration(
+        color: scheme.primaryContainer,
+        shape: BoxShape.circle,
+      ),
+      child: Icon(
+        Icons.check_circle,
+        size: 56,
+        color: scheme.onPrimaryContainer,
+      ),
+    ),
+    const SizedBox(height: AppTheme.gapLg),
+    Text(
+      'Approved',
+      style: theme.textTheme.headlineSmall?.copyWith(
+        fontWeight: FontWeight.bold,
+      ),
+    ),
+    const SizedBox(height: AppTheme.gapSm),
+    // The number is the news. It gets the display size, not body text.
+    Text(
+      '+${outcome.pointsAwarded}',
+      style: theme.textTheme.displaySmall?.copyWith(
+        fontWeight: FontWeight.bold,
+        color: scheme.primary,
+      ),
+    ),
+    Text(
+      outcome.pointsAwarded == 1 ? 'point added' : 'points added',
+      style: theme.textTheme.bodyMedium?.copyWith(
+        color: scheme.onSurfaceVariant,
+      ),
+    ),
+    if (outcome.balanceAfter != null) ...[
+      const SizedBox(height: AppTheme.gapSm),
+      Text(
+        'Your balance is now ${outcome.balanceAfter}.',
+        textAlign: TextAlign.center,
+        style: theme.textTheme.bodyMedium,
+      ),
+    ],
+  ];
 
   List<Widget> _queued(
     ThemeData theme,
     ColorScheme scheme,
     VerificationOutcome? outcome,
-  ) =>
-      [
-        Container(
-          padding: const EdgeInsets.all(AppTheme.gapLg),
-          decoration: BoxDecoration(
-            color: scheme.secondaryContainer,
-            shape: BoxShape.circle,
-          ),
-          child: Icon(
-            Icons.hourglass_top_outlined,
-            size: 56,
-            color: scheme.onSecondaryContainer,
-          ),
-        ),
-        const SizedBox(height: AppTheme.gapLg),
-        Text(
-          'Sent for review',
-          style: theme.textTheme.headlineSmall
-              ?.copyWith(fontWeight: FontWeight.bold),
-          textAlign: TextAlign.center,
-        ),
-        const SizedBox(height: AppTheme.gapSm),
-        Text(
-          // `userMessage` names the actual reason when the server gave one —
-          // "sent for review: the photo does not match the declared count" is
-          // worth far more to the user than a generic wait.
-          outcome?.userMessage ??
-              'Your submission is saved and waiting for a reviewer.',
-          textAlign: TextAlign.center,
-          style: theme.textTheme.bodyMedium,
-        ),
-        if (outcome != null && outcome.reasons.length > 1) ...[
-          const SizedBox(height: AppTheme.gapMd),
-          Card(
-            color: scheme.surfaceContainerHighest,
-            child: Padding(
-              padding: const EdgeInsets.all(AppTheme.gapMd),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  for (final reason in outcome.reasons)
-                    Padding(
-                      padding: const EdgeInsets.only(bottom: AppTheme.gapXs),
-                      child: Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Icon(Icons.flag_outlined,
-                              size: 15, color: scheme.onSurfaceVariant),
-                          const SizedBox(width: AppTheme.gapSm),
-                          Expanded(
-                            child: Text(
-                              humanise(reason),
-                              style: theme.textTheme.bodySmall,
-                            ),
-                          ),
-                        ],
+  ) => [
+    Container(
+      padding: const EdgeInsets.all(AppTheme.gapLg),
+      decoration: BoxDecoration(
+        color: scheme.secondaryContainer,
+        shape: BoxShape.circle,
+      ),
+      child: Icon(
+        Icons.hourglass_top_outlined,
+        size: 56,
+        color: scheme.onSecondaryContainer,
+      ),
+    ),
+    const SizedBox(height: AppTheme.gapLg),
+    Text(
+      'Sent for review',
+      style: theme.textTheme.headlineSmall?.copyWith(
+        fontWeight: FontWeight.bold,
+      ),
+      textAlign: TextAlign.center,
+    ),
+    const SizedBox(height: AppTheme.gapSm),
+    Text(
+      // `userMessage` names the actual reason when the server gave one —
+      // "sent for review: the photo does not match the declared count" is
+      // worth far more to the user than a generic wait.
+      outcome?.userMessage ??
+          'Your submission is saved and waiting for a reviewer.',
+      textAlign: TextAlign.center,
+      style: theme.textTheme.bodyMedium,
+    ),
+    if (outcome != null && outcome.reasons.length > 1) ...[
+      const SizedBox(height: AppTheme.gapMd),
+      Card(
+        color: scheme.surfaceContainerHighest,
+        child: Padding(
+          padding: const EdgeInsets.all(AppTheme.gapMd),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              for (final reason in outcome.reasons)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: AppTheme.gapXs),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Icon(
+                        Icons.flag_outlined,
+                        size: 15,
+                        color: scheme.onSurfaceVariant,
                       ),
-                    ),
-                ],
-              ),
-            ),
+                      const SizedBox(width: AppTheme.gapSm),
+                      Expanded(
+                        child: Text(
+                          humanise(reason),
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+            ],
           ),
-        ],
-        const SizedBox(height: AppTheme.gapSm),
-        Text(
-          'Points are added only if a reviewer approves it, and you will be '
-          'told either way.',
-          textAlign: TextAlign.center,
-          style: theme.textTheme.bodySmall
-              ?.copyWith(color: scheme.onSurfaceVariant),
         ),
-      ];
+      ),
+    ],
+    const SizedBox(height: AppTheme.gapSm),
+    Text(
+      'Points are added only if a reviewer approves it, and you will be '
+      'told either way.',
+      textAlign: TextAlign.center,
+      style: theme.textTheme.bodySmall?.copyWith(
+        color: scheme.onSurfaceVariant,
+      ),
+    ),
+  ];
 }

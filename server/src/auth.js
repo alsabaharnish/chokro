@@ -41,7 +41,20 @@ async function requireAuth(req, res, next) {
     });
   }
 
-  const snapshot = await db().collection('users').doc(decoded.uid).get();
+  let snapshot;
+  try {
+    snapshot = await db().collection('users').doc(decoded.uid).get();
+  } catch (err) {
+    // Express 4 does not automatically turn a rejected async middleware
+    // promise into a response. Letting this throw left callers waiting until
+    // their own timeout and could surface as an unhandled rejection. A profile
+    // service outage is retryable and is neither a bad token nor a suspension.
+    console.error(`Profile lookup for ${decoded.uid} failed:`, err.message);
+    return res.status(503).json({
+      error: 'account_service_unavailable',
+      message: 'The account service is temporarily unavailable. Try again.',
+    });
+  }
   if (!snapshot.exists) {
     // A valid token for a user with no profile document. Should not happen —
     // registration writes both atomically — but treat it as unauthorised rather

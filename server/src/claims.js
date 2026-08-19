@@ -23,6 +23,7 @@ const policyModule = require('./pointsPolicy');
 const { creditWalletInTransaction, SOURCES } = require('./award');
 // Push on a decision (F7.1).
 const pushModule = require('./push');
+const { isTrustedImageReference } = require('./cloudinary');
 
 /** The closed action vocabulary. Mirrors ClaimActionType in Dart. */
 const ACTION_TYPES = Object.freeze([
@@ -61,6 +62,31 @@ async function approveClaim({ claimId, adminUid }) {
     if (claim.status !== 'pending') {
       // Idempotence: two administrators pressing approve must not credit twice.
       throw new Error(`That claim has already been decided (${claim.status}).`);
+    }
+
+    if (typeof claim.userId !== 'string' || claim.userId.length === 0) {
+      throw new Error('That claim no longer names a valid user.');
+    }
+    if (!isValidActionType(claim.actionType)) {
+      throw new Error('That claim uses an action type the app does not support.');
+    }
+
+    // New evidence is stored below `claims/{uid}`. The disposal folder is
+    // accepted only for claims submitted by older app versions, which shared
+    // the disposal upload endpoint. In either case the URL/public id must name
+    // the same original asset in this user's folder before a payout can occur.
+    const photoTrusted = ['claims', 'disposals'].some((kind) =>
+      isTrustedImageReference({
+        url: claim.photoUrl,
+        publicId: claim.photoPublicId,
+        uid: claim.userId,
+        kind,
+      }),
+    );
+    if (!photoTrusted) {
+      throw new Error(
+        'This claim photo could not be verified as an upload by this user.',
+      );
     }
 
     const uid = claim.userId;

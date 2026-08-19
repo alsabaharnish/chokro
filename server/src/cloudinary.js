@@ -20,6 +20,9 @@ const { v2: cloudinary } = require('cloudinary');
 
 let configured = false;
 
+/** Upload folders the public API is allowed to create. */
+const PHOTO_KINDS = Object.freeze(['disposals', 'claims']);
+
 function configure() {
   if (configured) return;
 
@@ -99,6 +102,13 @@ function decodeImage(base64) {
  * Firestore, where the rules actually apply.
  */
 async function uploadImage({ base64, uid, kind = 'disposals' }) {
+  if (typeof uid !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(uid)) {
+    throw new Error('The signed-in account cannot store photographs.');
+  }
+  if (!PHOTO_KINDS.includes(kind)) {
+    throw new Error('That photo category is not supported.');
+  }
+
   configure();
 
   const buffer = decodeImage(base64);
@@ -121,4 +131,85 @@ async function uploadImage({ base64, uid, kind = 'disposals' }) {
   };
 }
 
-module.exports = { uploadImage, decodeImage, MAX_BYTES };
+/**
+ * Whether a Firestore photo reference names an original uploaded by this user.
+ *
+ * Firestore documents are client-created. Without this check a modified client
+ * could replace the URL/public id returned by `/photos/*` with another image in
+ * the Cloudinary account, and the verification pipeline would screen and hash
+ * that unrelated asset. This validation is repeated in rules for fast rejection
+ * and here because payout code must not rely on a client-facing rule alone.
+ *
+ * Only original delivery URLs are accepted — no transformations in the stored
+ * URL — and the public id must live below the authenticated user's folder.
+ */
+function isTrustedImageReference({
+  url,
+  publicId,
+  uid,
+  kind,
+  cloudName = process.env.CLOUDINARY_CLOUD_NAME,
+}) {
+  if (
+    typeof url !== 'string' ||
+    url.length === 0 ||
+    url.length > 1000 ||
+    typeof publicId !== 'string' ||
+    publicId.length === 0 ||
+    publicId.length > 500 ||
+    typeof uid !== 'string' ||
+    !/^[A-Za-z0-9_-]{1,128}$/.test(uid) ||
+    !PHOTO_KINDS.includes(kind) ||
+    typeof cloudName !== 'string' ||
+    cloudName.length === 0
+  ) {
+    return false;
+  }
+
+  const prefix = `chokro/${kind}/${uid}/`;
+  const assetId = publicId.slice(prefix.length);
+  if (!publicId.startsWith(prefix) || !/^[A-Za-z0-9_-]{1,200}$/.test(assetId)) {
+    return false;
+  }
+
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:' || parsed.hostname !== 'res.cloudinary.com') {
+      return false;
+    }
+
+    const segments = parsed.pathname
+      .split('/')
+      .filter(Boolean)
+      .map((segment) => decodeURIComponent(segment));
+
+    if (
+      segments[0] !== cloudName ||
+      segments[1] !== 'image' ||
+      segments[2] !== 'upload'
+    ) {
+      return false;
+    }
+
+    let assetSegments = segments.slice(3);
+    if (/^v\d+$/.test(assetSegments[0] || '')) {
+      assetSegments = assetSegments.slice(1);
+    }
+
+    const delivered = assetSegments.join('/');
+    const extensionIndex = delivered.lastIndexOf('.');
+    if (extensionIndex <= 0) return false;
+
+    return delivered.slice(0, extensionIndex) === publicId;
+  } catch {
+    return false;
+  }
+}
+
+module.exports = {
+  uploadImage,
+  decodeImage,
+  isTrustedImageReference,
+  PHOTO_KINDS,
+  MAX_BYTES,
+};

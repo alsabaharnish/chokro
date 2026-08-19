@@ -34,10 +34,12 @@ class AdminDisposalsView extends ConsumerWidget {
     ref.listen(adminReviewControllerProvider, (previous, next) {
       final messenger = ScaffoldMessenger.of(context);
       if (next.error != null) {
-        messenger.showSnackBar(SnackBar(
-          content: Text(next.error!),
-          backgroundColor: theme.colorScheme.error,
-        ));
+        messenger.showSnackBar(
+          SnackBar(
+            content: Text(next.error!),
+            backgroundColor: theme.colorScheme.error,
+          ),
+        );
       } else if (next.lastMessage != null) {
         messenger.showSnackBar(SnackBar(content: Text(next.lastMessage!)));
       }
@@ -60,8 +62,11 @@ class AdminDisposalsView extends ConsumerWidget {
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.inbox_outlined,
-                        size: 56, color: theme.colorScheme.onSurfaceVariant),
+                    Icon(
+                      Icons.inbox_outlined,
+                      size: 56,
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                     const SizedBox(height: 16),
                     Text('Nothing waiting', style: theme.textTheme.titleMedium),
                     const SizedBox(height: 8),
@@ -146,8 +151,9 @@ class _DisposalCard extends ConsumerWidget {
                     data: (user) => user?.name ?? disposal.userId,
                     orElse: () => disposal.userId,
                   ),
-                  style: theme.textTheme.titleMedium
-                      ?.copyWith(fontWeight: FontWeight.bold),
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
 
                 // The submitter's prior record (F2.7).
@@ -168,7 +174,8 @@ class _DisposalCard extends ConsumerWidget {
                 _Fact(
                   icon: Icons.category_outlined,
                   label: 'Declared',
-                  value: '${disposal.declaredItemCount} × '
+                  value:
+                      '${disposal.declaredItemCount} × '
                       '${disposal.itemType.label}',
                 ),
                 _Fact(
@@ -185,7 +192,8 @@ class _DisposalCard extends ConsumerWidget {
                   // The client's figure. The server recomputed it from the
                   // stored coordinates before this row appeared — a discrepancy
                   // between the two is itself a signal.
-                  value: '${formatDistance(disposal.distanceMeters)} (reported)',
+                  value:
+                      '${formatDistance(disposal.distanceMeters)} (reported)',
                 ),
                 if (disposal.createdAt != null)
                   _Fact(
@@ -207,17 +215,39 @@ class _DisposalCard extends ConsumerWidget {
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Icon(Icons.flag_outlined,
-                              size: 18, color: theme.colorScheme.error),
+                          Icon(
+                            Icons.flag_outlined,
+                            size: 18,
+                            color: theme.colorScheme.error,
+                          ),
                           const SizedBox(width: 8),
                           Expanded(
                             child: Text(
                               flag.explanation,
-                              style: theme.textTheme.bodySmall
-                                  ?.copyWith(color: theme.colorScheme.error),
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.error,
+                              ),
                             ),
                           ),
                         ],
+                      ),
+                    ),
+                  ),
+                ],
+
+                if (!disposal.verificationCompleted) ...[
+                  const SizedBox(height: 12),
+                  Card(
+                    color: theme.colorScheme.surfaceContainerHighest,
+                    child: ListTile(
+                      leading: const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      title: const Text('Verification is still running'),
+                      subtitle: const Text(
+                        'Approval will unlock when the server evidence arrives.',
                       ),
                     ),
                   ),
@@ -243,8 +273,9 @@ class _DisposalCard extends ConsumerWidget {
                       const SizedBox(width: 12),
                       Expanded(
                         child: FilledButton.icon(
-                          onPressed: () =>
-                              controller.approve(disposal.id ?? ''),
+                          onPressed: disposal.verificationCompleted
+                              ? () => controller.approve(disposal.id ?? '')
+                              : null,
                           icon: const Icon(Icons.check),
                           label: const Text('Approve'),
                         ),
@@ -302,9 +333,7 @@ class _Fact extends StatelessWidget {
             width: 78,
             child: Text(label, style: theme.textTheme.bodySmall),
           ),
-          Expanded(
-            child: Text(value, style: theme.textTheme.bodyMedium),
-          ),
+          Expanded(child: Text(value, style: theme.textTheme.bodyMedium)),
         ],
       ),
     );

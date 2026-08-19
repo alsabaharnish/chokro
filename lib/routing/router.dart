@@ -25,6 +25,7 @@ import '../views/disposal/location_view.dart';
 import '../views/disposal/declare_view.dart';
 import '../views/admin/admin_disposals_view.dart';
 import '../views/shared/account_incomplete_view.dart';
+import '../views/shared/startup_error_view.dart';
 import '../views/shared/route_error_view.dart';
 import '../views/shared/splash_view.dart';
 
@@ -139,6 +140,7 @@ class _AuthGateListenable extends ChangeNotifier {
   String _currentSignature() {
     final auth = _ref.read(firebaseAuthStateProvider);
     if (auth.isLoading && !auth.hasValue) return 'auth:unresolved';
+    if (auth.hasError && !auth.hasValue) return 'auth:failed';
     if (auth.value == null) return 'auth:anonymous';
 
     // Same three-way order as `resolve()` below, for the same reason: a retained
@@ -154,6 +156,7 @@ class _AuthGateListenable extends ChangeNotifier {
     }
 
     if (profile.isLoading) return 'profile:unresolved';
+    if (profile.hasError) return 'profile:failed';
     return 'profile:missing';
   }
 }
@@ -173,6 +176,9 @@ final _authGateProvider = Provider<_AuthGateListenable>((ref) {
 /// Shown when Firebase has a session but Firestore has no profile for it.
 const String accountIncompletePath = '/account-incomplete';
 
+/// Auth or profile could not be read because the service/network failed.
+const String startupErrorPath = '/startup-error';
+
 /// What the gate knows about the signed-in account at redirect time.
 enum _Gate {
   /// Auth has not reported yet, or the user document is still loading. Not the
@@ -188,6 +194,9 @@ enum _Gate {
   /// no role to gate on and no name to greet, so the only honest move is to say
   /// so and offer a way out.
   profileMissing,
+
+  /// A read failed. It must not be presented as a missing profile.
+  failed,
 
   signedIn,
 }
@@ -208,6 +217,9 @@ final routerProvider = Provider<GoRouter>((ref) {
     // Auth itself has not reported yet.
     if (auth.isLoading && !auth.hasValue) {
       return (gate: _Gate.unresolved, user: null);
+    }
+    if (auth.hasError && !auth.hasValue) {
+      return (gate: _Gate.failed, user: null);
     }
     if (auth.value == null) return (gate: _Gate.anonymous, user: null);
 
@@ -234,6 +246,9 @@ final routerProvider = Provider<GoRouter>((ref) {
     // No profile yet, but still arriving. Wait.
     if (profile.isLoading) return (gate: _Gate.unresolved, user: null);
 
+    // A failed read is not evidence that the document does not exist.
+    if (profile.hasError) return (gate: _Gate.failed, user: null);
+
     // Settled, signed in, and `users/{uid}` does not exist.
     return (gate: _Gate.profileMissing, user: null);
   }
@@ -250,6 +265,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       _Gate.unresolved => splashPath,
       _Gate.anonymous => '/login',
       _Gate.profileMissing => accountIncompletePath,
+      _Gate.failed => startupErrorPath,
       _Gate.signedIn => user!.isAdmin ? null : '/home',
     };
   }
@@ -260,6 +276,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       _Gate.unresolved => splashPath,
       _Gate.anonymous => '/login',
       _Gate.profileMissing => accountIncompletePath,
+      _Gate.failed => startupErrorPath,
       _Gate.signedIn => null,
     };
   }
@@ -274,6 +291,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       final isAuthRoute = location == '/login' || location == '/register';
       final isSplash = location == splashPath;
       final isIncomplete = location == accountIncompletePath;
+      final isStartupError = location == startupErrorPath;
 
       final (gate: gate, user: _) = resolve();
 
@@ -283,7 +301,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       /// would restore the screen the visitor was sent to rather than the one
       /// they asked for.
       bool isRealDestination() =>
-          !isSplash && !isAuthRoute && !isIncomplete && location != '/home';
+          !isSplash &&
+          !isAuthRoute &&
+          !isIncomplete &&
+          !isStartupError &&
+          location != '/home';
 
       switch (gate) {
         case _Gate.unresolved:
@@ -303,13 +325,16 @@ final routerProvider = Provider<GoRouter>((ref) {
         case _Gate.profileMissing:
           return isIncomplete ? null : accountIncompletePath;
 
+        case _Gate.failed:
+          return isStartupError ? null : startupErrorPath;
+
         case _Gate.signedIn:
           // Nothing to do on the splash but leave it, and an authenticated user
           // has no business on the sign-in screen or the recovery screen.
           //
           // `/home` is the fallback, not the destination. Hardcoding it here is
           // what discarded admin deep links and terminated-state push taps.
-          if (isSplash || isAuthRoute || isIncomplete) {
+          if (isSplash || isAuthRoute || isIncomplete || isStartupError) {
             return pending.consume() ?? '/home';
           }
           return null;
@@ -323,6 +348,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: accountIncompletePath,
         builder: (context, state) => const AccountIncompleteView(),
+      ),
+      GoRoute(
+        path: startupErrorPath,
+        builder: (context, state) => const StartupErrorView(),
       ),
       GoRoute(path: '/login', builder: (context, state) => const LoginView()),
       GoRoute(

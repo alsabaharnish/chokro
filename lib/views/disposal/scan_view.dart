@@ -6,6 +6,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../controllers/disposal_controller.dart';
 import '../../controllers/scan_controller.dart';
 import '../../core/theme.dart';
+import '../shared/flow_progress.dart';
 
 /// Step 1 of the disposal flow (F2.2): scan the code on a bin.
 ///
@@ -50,8 +51,10 @@ class _ScanViewState extends ConsumerState<ScanView> {
 
     final raw = capture.barcodes
         .map((b) => b.rawValue)
-        .firstWhere((value) => value != null && value.isNotEmpty,
-            orElse: () => null);
+        .firstWhere(
+          (value) => value != null && value.isNotEmpty,
+          orElse: () => null,
+        );
 
     if (raw == null) return;
 
@@ -82,6 +85,7 @@ class _ScanViewState extends ConsumerState<ScanView> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Scan bin code'),
+        bottom: const FlowProgress(current: 1, total: 4, label: 'Scan'),
         actions: [
           // The icon used to be a fixed `flashlight_on_outlined` regardless of
           // the actual torch state, so after tapping it there was no way to tell
@@ -159,7 +163,8 @@ class _ResultPanel extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isProblem = scan.outcome == ScanOutcome.unknownCode ||
+    final isProblem =
+        scan.outcome == ScanOutcome.unknownCode ||
         scan.outcome == ScanOutcome.binClosed ||
         scan.outcome == ScanOutcome.error;
 
@@ -193,20 +198,20 @@ class _ResultPanel extends StatelessWidget {
                     scan.canProceed
                         ? Icons.check_circle_outline
                         : isLockedOut
-                            ? Icons.schedule
-                            : isProblem
-                                ? Icons.error_outline
-                                : Icons.qr_code_scanner,
+                        ? Icons.schedule
+                        : isProblem
+                        ? Icons.error_outline
+                        : Icons.qr_code_scanner,
                     // `colorScheme.success`, not `Colors.green`: the literal
                     // was the same mid-green in dark mode, where it glared
                     // against the dark surface.
                     color: scan.canProceed
                         ? theme.colorScheme.success
                         : isLockedOut
-                            ? theme.colorScheme.warning
-                            : isProblem
-                                ? theme.colorScheme.error
-                                : theme.colorScheme.onSurfaceVariant,
+                        ? theme.colorScheme.warning
+                        : isProblem
+                        ? theme.colorScheme.error
+                        : theme.colorScheme.onSurfaceVariant,
                   ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -231,10 +236,7 @@ class _ResultPanel extends StatelessWidget {
               const SizedBox(height: 4),
               Padding(
                 padding: const EdgeInsets.only(left: 30),
-                child: Text(
-                  scan.bin!.label,
-                  style: theme.textTheme.bodySmall,
-                ),
+                child: Text(scan.bin!.label, style: theme.textTheme.bodySmall),
               ),
             ],
             const SizedBox(height: 16),
@@ -274,13 +276,16 @@ class _CameraError extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              const Icon(Icons.no_photography_outlined,
-                  color: Colors.white70, size: 48),
+              const Icon(
+                Icons.no_photography_outlined,
+                color: Colors.white70,
+                size: 48,
+              ),
               const SizedBox(height: 16),
               Text(
                 isPermission
                     ? 'Camera permission is needed to scan bin codes. '
-                        'Enable it in Settings and return here.'
+                          'Enable it in Settings and return here.'
                     : 'The camera could not be started.',
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: Colors.white70),

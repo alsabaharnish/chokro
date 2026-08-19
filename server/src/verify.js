@@ -18,11 +18,12 @@
  */
 
 const { db } = require('./firebase');
-const { haversineDistance } = require('./geo');
+const { haversineDistance, isPlausibleCoordinate } = require('./geo');
 const policyModule = require('./pointsPolicy');
 const { findDuplicate, hashImage } = require('./phash');
 const { decide } = require('./decide');
-const { screenImage } = require('./screen');
+const { screenImage, isValidItemType } = require('./screen');
+const { isTrustedImageReference } = require('./cloudinary');
 const { approveDisposal } = require('./award');
 
 /**
@@ -131,12 +132,34 @@ async function verifyDisposal({ disposalId, callerUid }) {
   // The client sent a `distanceMeters` too. It is display only. A modified app
   // can put any number there, so nothing is trusted because the app calculated
   // it (§7.1, F2.5).
-  const distanceMeters = haversineDistance(
+  const locationValid = isPlausibleCoordinate(
     disposal.capturedLat,
     disposal.capturedLng,
-    bin.lat,
-    bin.lng,
   );
+  const distanceMeters = locationValid
+    ? haversineDistance(
+        disposal.capturedLat,
+        disposal.capturedLng,
+        bin.lat,
+        bin.lng,
+      )
+    : Number.NaN;
+
+  // The upload response passes through a client-created Firestore document, so
+  // bind it back to this user and this purpose before any external screening or
+  // hashing. A malformed legacy document stays reviewable but never auto-pays.
+  const photoTrusted = isTrustedImageReference({
+    url: disposal.photoUrl,
+    publicId: disposal.photoPublicId,
+    uid: disposal.userId,
+    kind: 'disposals',
+  });
+
+  const declarationValid =
+    isValidItemType(disposal.itemType) &&
+    Number.isInteger(disposal.declaredItemCount) &&
+    disposal.declaredItemCount >= 1 &&
+    disposal.declaredItemCount <= 100;
 
   // ---- 2. Perceptual hash and duplicate check ----
   //
@@ -148,7 +171,7 @@ async function verifyDisposal({ disposalId, callerUid }) {
   let duplicate = { isDuplicate: false, distance: null };
   let duplicateChecked = false;
 
-  if (disposal.photoPublicId) {
+  if (photoTrusted) {
     try {
       photoHash = await hashImage(disposal.photoPublicId);
       const history = await previousHashes(disposal.userId, disposalId);
@@ -171,11 +194,13 @@ async function verifyDisposal({ disposalId, callerUid }) {
   // way: not checked, so flagged rather than assumed clean.
 
   // ---- 3. Screening ----
-  const screening = await screenImage({
-    imageUrl: disposal.photoUrl,
-    declaredItemType: disposal.itemType,
-    declaredItemCount: disposal.declaredItemCount,
-  });
+  const screening = photoTrusted && declarationValid
+    ? await screenImage({
+        imageUrl: disposal.photoUrl,
+        declaredItemType: disposal.itemType,
+        declaredItemCount: disposal.declaredItemCount,
+      })
+    : null;
 
   // ---- 4. Daily cap ----
   const approvedToday = await approvedTodayCount(disposal.userId);
@@ -186,6 +211,9 @@ async function verifyDisposal({ disposalId, callerUid }) {
     radiusMeters: bin.radiusMeters,
     isDuplicate: duplicate.isDuplicate,
     duplicateChecked,
+    photoTrusted,
+    declarationValid,
+    locationValid,
     declaredItemCount: disposal.declaredItemCount,
     screening,
     approvedToday,
@@ -213,6 +241,7 @@ async function verifyDisposal({ disposalId, callerUid }) {
     await disposalRef.update({
       photoHash,
       distanceMeters,
+      verificationCompleted: true,
       ...screeningFields,
     });
 
@@ -237,6 +266,7 @@ async function verifyDisposal({ disposalId, callerUid }) {
   await disposalRef.update({
     photoHash,
     distanceMeters,
+    verificationCompleted: true,
     flags: outcome.flags,
     ...screeningFields,
   });

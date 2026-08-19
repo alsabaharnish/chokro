@@ -49,7 +49,8 @@ enum DisposalStatus {
 
   /// Whether points were awarded for this submission.
   bool get isApproved =>
-      this == DisposalStatus.autoApproved || this == DisposalStatus.manualApproved;
+      this == DisposalStatus.autoApproved ||
+      this == DisposalStatus.manualApproved;
 
   bool get isPending => this == DisposalStatus.pending;
   bool get isRejected => this == DisposalStatus.rejected;
@@ -141,7 +142,17 @@ enum DisposalFlag {
   /// having run — the hash step threw, nothing was flagged, `flags.length == 0`,
   /// and it paid out. Fail toward review, exactly like
   /// [screeningUnavailable].
-  hashUnavailable;
+  hashUnavailable,
+
+  /// The URL/public id did not identify an original uploaded into this user's
+  /// disposal folder. Such a record is never auto-approved.
+  photoUntrusted,
+
+  /// Material type or count was outside the server's closed schema.
+  invalidDeclaration,
+
+  /// Coordinates were missing, out of range, or the failed-fix value 0,0.
+  invalidLocation;
 
   static DisposalFlag? fromName(String? name) {
     for (final flag in DisposalFlag.values) {
@@ -168,6 +179,12 @@ enum DisposalFlag {
       case DisposalFlag.hashUnavailable:
         return 'The photo could not be fingerprinted, so it was not compared '
             'against earlier submissions.';
+      case DisposalFlag.photoUntrusted:
+        return 'The photo does not match a trusted upload for this account.';
+      case DisposalFlag.invalidDeclaration:
+        return 'The material type or item count is not valid.';
+      case DisposalFlag.invalidLocation:
+        return 'The submitted coordinates are missing or invalid.';
       case DisposalFlag.screeningUnavailable:
         return 'Automated screening was unavailable; not yet checked.';
     }
@@ -225,6 +242,13 @@ class DisposalModel {
   /// Why this went to review. Empty on an auto-approved submission.
   final List<DisposalFlag> flags;
 
+  /// Whether the trusted service has finished the mechanical checks.
+  ///
+  /// False on the client-created document. Administrators must not approve
+  /// while it is false because the queue can receive that document before the
+  /// follow-up verification request finishes.
+  final bool verificationCompleted;
+
   /// Screening confidence, 0.0–1.0. Null if screening has not run or failed.
   final double? screenConfidence;
 
@@ -266,6 +290,7 @@ class DisposalModel {
     required this.itemType,
     this.status = DisposalStatus.pending,
     this.flags = const <DisposalFlag>[],
+    this.verificationCompleted = false,
     this.screenConfidence,
     this.screenItemCount,
     this.screenNotes,
@@ -297,10 +322,18 @@ class DisposalModel {
       capturedLng: _toDouble(json['capturedLng']),
       distanceMeters: _toDouble(json['distanceMeters']),
       declaredItemCount: _toInt(json['declaredItemCount']),
-      itemType: DisposalItemType.fromName(json['itemType'] as String?) ??
+      itemType:
+          DisposalItemType.fromName(json['itemType'] as String?) ??
           DisposalItemType.plasticOther,
       status: DisposalStatus.fromName(json['status'] as String?),
       flags: flags,
+      // Older verified documents predate the explicit marker but carry all
+      // three server-only evidence keys. Keep them reviewable after upgrade.
+      verificationCompleted:
+          json['verificationCompleted'] == true ||
+          (json.containsKey('photoHash') &&
+              json.containsKey('screenConfidence') &&
+              json.containsKey('screenItemCount')),
       screenConfidence: _toNullableDouble(json['screenConfidence']),
       screenItemCount: _toNullableInt(json['screenItemCount']),
       screenNotes: json['screenNotes'] as String?,
@@ -327,24 +360,26 @@ class DisposalModel {
   ///
   /// This exists for the round-trip test that proves [fromJson] and this agree.
   Map<String, dynamic> toJson() => <String, dynamic>{
-        'userId': userId,
-        'binId': binId,
-        'photoUrl': photoUrl,
-        if (photoHash != null) 'photoHash': photoHash,
-        'capturedLat': capturedLat,
-        'capturedLng': capturedLng,
-        'distanceMeters': distanceMeters,
-        'declaredItemCount': declaredItemCount,
-        'itemType': itemType.name,
-        'status': status.name,
-        'flags': flags.map((flag) => flag.name).toList(),
-        if (screenConfidence != null) 'screenConfidence': screenConfidence,
-        if (screenItemCount != null) 'screenItemCount': screenItemCount,
-        if (screenNotes != null) 'screenNotes': screenNotes,
-        if (pointsAwarded != null) 'pointsAwarded': pointsAwarded,
-        if (rejectionReason != null) 'rejectionReason': rejectionReason,
-        if (reviewedBy != null) 'reviewedBy': reviewedBy,
-      };
+    'userId': userId,
+    'binId': binId,
+    'photoUrl': photoUrl,
+    'photoPublicId': photoPublicId,
+    if (photoHash != null) 'photoHash': photoHash,
+    'capturedLat': capturedLat,
+    'capturedLng': capturedLng,
+    'distanceMeters': distanceMeters,
+    'declaredItemCount': declaredItemCount,
+    'itemType': itemType.name,
+    'status': status.name,
+    'flags': flags.map((flag) => flag.name).toList(),
+    'verificationCompleted': verificationCompleted,
+    if (screenConfidence != null) 'screenConfidence': screenConfidence,
+    if (screenItemCount != null) 'screenItemCount': screenItemCount,
+    if (screenNotes != null) 'screenNotes': screenNotes,
+    if (pointsAwarded != null) 'pointsAwarded': pointsAwarded,
+    if (rejectionReason != null) 'rejectionReason': rejectionReason,
+    if (reviewedBy != null) 'reviewedBy': reviewedBy,
+  };
 
   /// The map the *client* is allowed to write when creating a submission.
   ///
@@ -353,18 +388,18 @@ class DisposalModel {
   /// accidentally send a field the rules would reject, not as the security
   /// measure itself. The rules are the security measure.
   Map<String, dynamic> toCreateJson() => <String, dynamic>{
-        'userId': userId,
-        'binId': binId,
-        'photoUrl': photoUrl,
-        'photoPublicId': photoPublicId,
-        'capturedLat': capturedLat,
-        'capturedLng': capturedLng,
-        'distanceMeters': distanceMeters,
-        'declaredItemCount': declaredItemCount,
-        'itemType': itemType.name,
-        'status': DisposalStatus.pending.name,
-        'flags': const <String>[],
-      };
+    'userId': userId,
+    'binId': binId,
+    'photoUrl': photoUrl,
+    'photoPublicId': photoPublicId,
+    'capturedLat': capturedLat,
+    'capturedLng': capturedLng,
+    'distanceMeters': distanceMeters,
+    'declaredItemCount': declaredItemCount,
+    'itemType': itemType.name,
+    'status': DisposalStatus.pending.name,
+    'flags': const <String>[],
+  };
 
   DisposalModel copyWith({
     String? id,
@@ -380,6 +415,7 @@ class DisposalModel {
     DisposalItemType? itemType,
     DisposalStatus? status,
     List<DisposalFlag>? flags,
+    bool? verificationCompleted,
     double? screenConfidence,
     int? screenItemCount,
     String? screenNotes,
@@ -403,6 +439,8 @@ class DisposalModel {
       itemType: itemType ?? this.itemType,
       status: status ?? this.status,
       flags: flags ?? this.flags,
+      verificationCompleted:
+          verificationCompleted ?? this.verificationCompleted,
       screenConfidence: screenConfidence ?? this.screenConfidence,
       screenItemCount: screenItemCount ?? this.screenItemCount,
       screenNotes: screenNotes ?? this.screenNotes,
@@ -477,7 +515,9 @@ class DisposalModel {
     }
     if (status == DisposalStatus.manualApproved &&
         (reviewedBy == null || reviewedBy!.trim().isEmpty)) {
-      problems.add('A manual approval must record the reviewing administrator.');
+      problems.add(
+        'A manual approval must record the reviewing administrator.',
+      );
     }
     return problems;
   }

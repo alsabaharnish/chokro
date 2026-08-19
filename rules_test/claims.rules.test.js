@@ -52,8 +52,8 @@ async function seedClaim(claimId, uid, status = 'pending') {
     await setDoc(doc(ctx.firestore(), 'claims', claimId), {
       userId: uid,
       actionType: 'treePlanting',
-      photoUrl: 'https://res.cloudinary.test/p.jpg',
-      photoPublicId: 'chokro/claims/u/p',
+      photoUrl: `https://res.cloudinary.com/chokro-test/image/upload/v1/chokro/claims/${uid}/abc123.jpg`,
+      photoPublicId: `chokro/claims/${uid}/abc123`,
       status,
       createdAt: new Date(),
     });
@@ -65,8 +65,8 @@ function validClaim(uid) {
   return {
     userId: uid,
     actionType: 'treePlanting',
-    photoUrl: 'https://res.cloudinary.test/p.jpg',
-    photoPublicId: 'chokro/claims/u/p',
+    photoUrl: `https://res.cloudinary.com/chokro-test/image/upload/v1/chokro/claims/${uid}/abc123.jpg`,
+    photoPublicId: `chokro/claims/${uid}/abc123`,
     status: 'pending',
     createdAt: serverTimestamp(),
   };
@@ -171,6 +171,16 @@ describe('creating a claim', () => {
     );
   });
 
+  it('accepts the refusing-single-use-plastic action used by Dart', async () => {
+    const db = testEnv.authenticatedContext(ALICE).firestore();
+    await assertSucceeds(
+      setDoc(doc(db, 'claims', 'c9b'), {
+        ...validClaim(ALICE),
+        actionType: 'refusingSingleUsePlastic',
+      }),
+    );
+  });
+
   it('a client-authored createdAt is refused', async () => {
     const db = testEnv.authenticatedContext(ALICE).firestore();
     await assertFails(
@@ -186,6 +196,22 @@ describe('creating a claim', () => {
     const { photoUrl, ...withoutPhoto } = validClaim(ALICE);
     expect(photoUrl).toBeTruthy();
     await assertFails(setDoc(doc(db, 'claims', 'c11'), withoutPhoto));
+  });
+
+  it('a claim cannot point at another user or disposal photo folder', async () => {
+    const db = testEnv.authenticatedContext(ALICE).firestore();
+    await assertFails(
+      setDoc(doc(db, 'claims', 'c12'), {
+        ...validClaim(ALICE),
+        photoPublicId: `chokro/claims/${BOB}/abc123`,
+      }),
+    );
+    await assertFails(
+      setDoc(doc(db, 'claims', 'c13'), {
+        ...validClaim(ALICE),
+        photoPublicId: `chokro/disposals/${ALICE}/abc123`,
+      }),
+    );
   });
 });
 
@@ -251,6 +277,13 @@ describe('the quota is server-owned', () => {
     const db = testEnv.authenticatedContext(ALICE).firestore();
     await assertSucceeds(
       getDoc(doc(db, 'claimQuotas', `${ALICE}_2026-W31`)),
+    );
+  });
+
+  it("a user may not read another user's quota", async () => {
+    const db = testEnv.authenticatedContext(ALICE).firestore();
+    await assertFails(
+      getDoc(doc(db, 'claimQuotas', `${BOB}_2026-W31`)),
     );
   });
 

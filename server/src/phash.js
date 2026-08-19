@@ -27,6 +27,7 @@
 
 const HASH_SIZE = 8; // 8x8 grid -> 64 bits
 const PIXEL_COUNT = HASH_SIZE * HASH_SIZE;
+const HASH_FETCH_TIMEOUT_MS = 10000;
 
 /**
  * The Cloudinary URL that yields the grid this module hashes.
@@ -154,7 +155,14 @@ async function hashImage(publicId, cloudName = process.env.CLOUDINARY_CLOUD_NAME
   if (!cloudName) throw new Error('CLOUDINARY_CLOUD_NAME is not set.');
 
   const url = hashSourceUrl(publicId, cloudName);
-  const response = await fetch(url);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), HASH_FETCH_TIMEOUT_MS);
+  let response;
+  try {
+    response = await fetch(url, { signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
 
   if (!response.ok) {
     throw new Error(`Could not fetch the hash source (${response.status}).`);
@@ -311,6 +319,7 @@ function paeth(a, b, c) {
 module.exports = {
   HASH_SIZE,
   PIXEL_COUNT,
+  HASH_FETCH_TIMEOUT_MS,
   DUPLICATE_THRESHOLD,
   hashSourceUrl,
   averageHash,

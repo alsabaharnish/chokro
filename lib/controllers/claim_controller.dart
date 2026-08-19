@@ -38,8 +38,10 @@ final pendingClaimsProvider = StreamProvider<List<ClaimModel>>((ref) {
 });
 
 /// Submitter details for a queue row.
-final claimSubmitterProvider =
-    FutureProvider.family<UserModel?, String>((ref, uid) async {
+final claimSubmitterProvider = FutureProvider.family<UserModel?, String>((
+  ref,
+  uid,
+) async {
   return UserService().getUser(uid);
 });
 
@@ -50,8 +52,8 @@ final claimSubmitterProvider =
 /// of the few real defences against a recycled photograph (§7.4).
 final claimHistoryForReviewProvider =
     StreamProvider.family<List<ClaimModel>, String>((ref, uid) {
-  return ref.watch(claimServiceProvider).watchUserClaims(uid);
-});
+      return ref.watch(claimServiceProvider).watchUserClaims(uid);
+    });
 
 // ---------------------------------------------------------------------------
 // Submission
@@ -131,8 +133,7 @@ class ClaimDraftController extends Notifier<ClaimDraft> {
       }
 
       final original = File(shot.path);
-      final Uint8List? compressed =
-          await FlutterImageCompress.compressWithFile(
+      final Uint8List? compressed = await FlutterImageCompress.compressWithFile(
         shot.path,
         quality: 70,
         minWidth: 1080,
@@ -178,9 +179,7 @@ class ClaimDraftController extends Notifier<ClaimDraft> {
     final path = draft.photoPath;
 
     if (uid == null || type == null || path == null) {
-      state = state.copyWith(
-        error: 'Choose an action and take a photo first.',
-      );
+      state = state.copyWith(error: 'Choose an action and take a photo first.');
       return null;
     }
 
@@ -189,9 +188,11 @@ class ClaimDraftController extends Notifier<ClaimDraft> {
     try {
       final photo = await ref
           .read(photoUploadServiceProvider)
-          .uploadDisposalPhoto(File(path));
+          .uploadClaimPhoto(File(path));
 
-      final id = await ref.read(claimServiceProvider).createPendingClaim(
+      final id = await ref
+          .read(claimServiceProvider)
+          .createPendingClaim(
             ClaimModel(
               userId: uid,
               actionType: type,
@@ -213,8 +214,8 @@ class ClaimDraftController extends Notifier<ClaimDraft> {
       // trying. A rules rejection carries no reason (rules cannot return one),
       // so for that case list what the rules actually check.
       final message = err.code == 'permission-denied'
-          ? 'This claim was refused. You may have used your weekly quota, or '
-              'your account may be suspended.'
+          ? 'This claim was refused. Check that your account is active and '
+                'that the evidence is complete.'
           : 'Could not submit this claim. Check your connection and try again.';
 
       state = state.copyWith(isSubmitting: false, error: message);
@@ -222,7 +223,8 @@ class ClaimDraftController extends Notifier<ClaimDraft> {
     } catch (err) {
       state = state.copyWith(
         isSubmitting: false,
-        error: 'Could not submit this claim. Check your connection and try '
+        error:
+            'Could not submit this claim. Check your connection and try '
             'again.',
       );
       return null;
@@ -230,8 +232,9 @@ class ClaimDraftController extends Notifier<ClaimDraft> {
   }
 }
 
-final claimDraftProvider =
-    NotifierProvider<ClaimDraftController, ClaimDraft>(ClaimDraftController.new);
+final claimDraftProvider = NotifierProvider<ClaimDraftController, ClaimDraft>(
+  ClaimDraftController.new,
+);
 
 // ---------------------------------------------------------------------------
 // Admin review
@@ -268,13 +271,15 @@ class ClaimReviewController extends Notifier<ClaimReviewUiState> {
     try {
       final outcome = await ref.read(claimServiceProvider).approve(claimId);
       state = ClaimReviewUiState(
-        lastMessage: 'Approved — ${outcome.pointsAwarded ?? 0} points credited.',
+        lastMessage:
+            'Approved — ${outcome.pointsAwarded ?? 0} points credited.',
       );
     } on ClaimException catch (err) {
       state = ClaimReviewUiState(error: err.message);
     } catch (_) {
       state = const ClaimReviewUiState(
-        error: 'Could not approve this claim. Check your connection and try '
+        error:
+            'Could not approve this claim. Check your connection and try '
             'again.',
       );
     }
@@ -298,7 +303,8 @@ class ClaimReviewController extends Notifier<ClaimReviewUiState> {
       state = ClaimReviewUiState(error: err.message);
     } catch (_) {
       state = const ClaimReviewUiState(
-        error: 'Could not reject this claim. Check your connection and try '
+        error:
+            'Could not reject this claim. Check your connection and try '
             'again.',
       );
     }
@@ -307,5 +313,5 @@ class ClaimReviewController extends Notifier<ClaimReviewUiState> {
 
 final claimReviewControllerProvider =
     NotifierProvider<ClaimReviewController, ClaimReviewUiState>(
-  ClaimReviewController.new,
-);
+      ClaimReviewController.new,
+    );

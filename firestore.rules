@@ -2,9 +2,17 @@ rules_version = '2';
 
 // Chokro — Firestore security rules.
 //
-// M2 revision. The M1 blocks for `users` and `sellerApplications` are unchanged.
-// The `wallets` block has been tightened, and `transactions`, `disposals`,
-// `bins`, `config`, `lockouts` and `claimQuotas` are new.
+// Client-created document models (all other fields are server-owned):
+//   users: name, email, role, status, createdAt
+//   wallets: userId, balance=0, updatedAt
+//   disposals: identity, trusted photo reference, location, declaration,
+//              status=pending, flags=[], createdAt
+//   claims: identity, trusted photo reference, action, status=pending, createdAt
+//   sellerApplications: identity, business text, status=pending, createdAt
+// Every client create uses an exact key allowlist, bounded strings/numbers, a
+// closed enum and the server clock. Validators below are also applied after the
+// narrow client/admin updates, so an allowed field cannot be changed to an
+// invalid type or unbounded value.
 //
 // THE ONE RULE THAT MATTERS
 // -------------------------
@@ -49,12 +57,121 @@ service cloud.firestore {
       return isSignedIn() && role() == 'admin';
     }
 
-    function isSeller() {
-      return isSignedIn() && (role() == 'seller' || role() == 'admin');
-    }
-
     function userData() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    function validString(value, min, max) {
+      return value is string && value.size() >= min && value.size() <= max;
+    }
+
+    function validUser(u) {
+      return u.keys().hasOnly([
+          'name', 'email', 'role', 'status', 'createdAt',
+          'suspendedAt', 'reinstatedAt', 'suspendedUntil'
+        ])
+        && u.keys().hasAll(['name', 'email', 'role', 'status', 'createdAt'])
+        && validString(u.name, 2, 80)
+        && validString(u.email, 3, 254)
+        && u.role in ['buyer', 'seller', 'admin']
+        && u.status in ['active', 'suspended']
+        && u.createdAt is timestamp
+        && (!('suspendedAt' in u) || u.suspendedAt is timestamp)
+        && (!('reinstatedAt' in u) || u.reinstatedAt is timestamp)
+        && (!('suspendedUntil' in u) || u.suspendedUntil is timestamp);
+    }
+
+    function validPhotoReference(d, uid, kind) {
+      return validString(d.photoUrl, 20, 1000)
+        && validString(d.photoPublicId, 20, 500)
+        && d.photoUrl.matches(
+             '^https://res[.]cloudinary[.]com/[^/]+/image/upload/' +
+             '(v[0-9]+/)?chokro/' + kind + '/' + uid +
+             '/[A-Za-z0-9_-]{1,200}[.][A-Za-z0-9]{2,5}$'
+           )
+        && d.photoPublicId.matches(
+             '^chokro/' + kind + '/' + uid + '/[A-Za-z0-9_-]{1,200}$'
+           );
+    }
+
+    function validWalletCreate(w, uid) {
+      return w.keys().hasOnly(['userId', 'balance', 'updatedAt'])
+        && w.keys().hasAll(['userId', 'balance', 'updatedAt'])
+        && w.userId == uid
+        && w.balance is int
+        && w.balance == 0
+        && w.updatedAt == request.time;
+    }
+
+    function validDisposalCreate(d, uid) {
+      return d.keys().hasOnly([
+          'userId', 'binId', 'photoUrl', 'photoPublicId',
+          'capturedLat', 'capturedLng', 'distanceMeters',
+          'declaredItemCount', 'itemType', 'status', 'flags', 'createdAt'
+        ])
+        && d.keys().hasAll([
+          'userId', 'binId', 'photoUrl', 'photoPublicId',
+          'capturedLat', 'capturedLng', 'distanceMeters',
+          'declaredItemCount', 'itemType', 'status', 'flags', 'createdAt'
+        ])
+        && d.userId == uid
+        && validString(d.binId, 1, 128)
+        && validPhotoReference(d, uid, 'disposals')
+        && d.capturedLat is number
+        && d.capturedLat >= -90 && d.capturedLat <= 90
+        && d.capturedLng is number
+        && d.capturedLng >= -180 && d.capturedLng <= 180
+        && !(d.capturedLat == 0 && d.capturedLng == 0)
+        && d.distanceMeters is number
+        && d.distanceMeters >= 0 && d.distanceMeters <= 20000000
+        && d.declaredItemCount is int
+        && d.declaredItemCount >= 1 && d.declaredItemCount <= 100
+        && d.itemType in [
+          'plasticBottle', 'plasticOther', 'paper', 'glass',
+          'metal', 'eWaste', 'organic'
+        ]
+        && d.status == 'pending'
+        && d.flags is list && d.flags.size() == 0
+        && d.createdAt == request.time;
+    }
+
+    function validClaimCreate(c, uid) {
+      return c.keys().hasOnly([
+          'userId', 'actionType', 'photoUrl', 'photoPublicId',
+          'status', 'createdAt'
+        ])
+        && c.keys().hasAll([
+          'userId', 'actionType', 'photoUrl', 'photoPublicId',
+          'status', 'createdAt'
+        ])
+        && c.userId == uid
+        && c.actionType in [
+          'treePlanting', 'composting', 'refusingSingleUsePlastic',
+          'reusableBagOrBottle', 'communityCleanup'
+        ]
+        && validPhotoReference(c, uid, 'claims')
+        && c.status == 'pending'
+        && c.createdAt == request.time;
+    }
+
+    function validSellerApplication(a) {
+      return a.keys().hasOnly([
+          'userId', 'businessName', 'description', 'status', 'createdAt',
+          'reviewedBy', 'reviewedAt', 'reason'
+        ])
+        && a.keys().hasAll([
+          'userId', 'businessName', 'description', 'status', 'createdAt'
+        ])
+        && validString(a.userId, 1, 128)
+        && validString(a.businessName, 2, 120)
+        && validString(a.description, 20, 1000)
+        && a.status in ['pending', 'approved', 'rejected']
+        && a.createdAt is timestamp
+        && (!('reviewedBy' in a) || validString(a.reviewedBy, 1, 128))
+        && (!('reviewedAt' in a) || a.reviewedAt is timestamp)
+        && (!('reason' in a) || validString(a.reason, 1, 500))
+        && (a.status != 'rejected'
+          || ('reason' in a && validString(a.reason, 10, 500)));
     }
 
     // Whether this account may act (F5.3).
@@ -120,15 +237,18 @@ service cloud.firestore {
       allow read: if isSelf(uid) || isAdmin();
 
       allow create: if isSelf(uid)
-        && request.resource.data.keys().hasAll(['name', 'email', 'role', 'status', 'createdAt'])
+        && validUser(request.resource.data)
         && request.resource.data.role == 'buyer'
-        && request.resource.data.status == 'active';
+        && request.resource.data.status == 'active'
+        && request.resource.data.createdAt == request.time;
 
       allow update: if (isSelf(uid)
-          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name']))
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name'])
+          && validUser(request.resource.data))
         || (isAdmin()
           && request.resource.data.diff(resource.data).affectedKeys()
-               .hasOnly(['role', 'status', 'suspendedAt', 'reinstatedAt', 'suspendedUntil']));
+               .hasOnly(['role', 'status', 'suspendedAt', 'reinstatedAt', 'suspendedUntil'])
+          && validUser(request.resource.data));
 
       allow delete: if false;
     }
@@ -175,6 +295,7 @@ service cloud.firestore {
       // the device list forever and crowd out the user's real devices, since the
       // server notifies the ten most recently seen.
       allow create, update: if isSelf(uid)
+        && token.size() <= 512
         && request.resource.data.keys().hasOnly(['platform', 'updatedAt'])
         && request.resource.data.keys().hasAll(['platform', 'updatedAt'])
         && request.resource.data.platform in ['android', 'ios', 'web']
@@ -197,9 +318,7 @@ service cloud.firestore {
       // used to steal anything, so allowing it costs nothing and keeps signup
       // independent of the server being reachable.
       allow create: if isSelf(uid)
-        && request.resource.data.balance == 0
-        && request.resource.data.keys().hasAll(['userId', 'balance', 'updatedAt'])
-        && request.resource.data.userId == uid;
+        && validWalletCreate(request.resource.data, uid);
 
       // Every subsequent balance change belongs to the Admin SDK. An admin is
       // refused here exactly as a buyer is.
@@ -248,40 +367,7 @@ service cloud.firestore {
 
       allow create: if isSignedIn()
         && isActive()
-        && request.resource.data.userId == request.auth.uid
-
-        // hasOnly, not hasAll. An exact key set is what keeps `pointsAwarded`,
-        // `photoHash`, `screenConfidence`, `reviewedBy` and every other
-        // server-owned field out of a client-authored document. hasAll would
-        // permit extra keys and the whole guarantee would leak.
-        && request.resource.data.keys().hasOnly([
-             'userId', 'binId', 'photoUrl', 'photoPublicId',
-             'capturedLat', 'capturedLng', 'distanceMeters',
-             'declaredItemCount', 'itemType',
-             'status', 'flags', 'createdAt'
-           ])
-        && request.resource.data.keys().hasAll([
-             'userId', 'binId', 'photoUrl', 'photoPublicId',
-             'capturedLat', 'capturedLng', 'distanceMeters',
-             'declaredItemCount', 'itemType',
-             'status', 'flags', 'createdAt'
-           ])
-
-        // A submission is born pending and unflagged. It cannot arrive approved.
-        && request.resource.data.status == 'pending'
-        && request.resource.data.flags.size() == 0
-
-        && request.resource.data.declaredItemCount is int
-        && request.resource.data.declaredItemCount > 0
-        && request.resource.data.declaredItemCount <= 100
-
-        && request.resource.data.capturedLat is number
-        && request.resource.data.capturedLng is number
-        && request.resource.data.distanceMeters is number
-
-        // Server timestamp only. A client-authored createdAt would undermine
-        // the lockout window it is compared against (§7.4).
-        && request.resource.data.createdAt == request.time
+        && validDisposalCreate(request.resource.data, request.auth.uid)
 
         && binIsOpen(request.resource.data.binId)
         && !lockoutActive(request.auth.uid, request.resource.data.binId);
@@ -313,34 +399,7 @@ service cloud.firestore {
 
       allow create: if isSignedIn()
         && isActive()
-        && request.resource.data.userId == request.auth.uid
-
-        // hasOnly, not hasAll. An exact key set is what keeps `pointsAwarded`,
-        // `photoHash` and `reviewedBy` out of a client-authored document.
-        && request.resource.data.keys().hasOnly([
-             'userId', 'actionType', 'photoUrl', 'photoPublicId',
-             'status', 'createdAt'
-           ])
-        && request.resource.data.keys().hasAll([
-             'userId', 'actionType', 'photoUrl', 'photoPublicId',
-             'status', 'createdAt'
-           ])
-
-        // Born pending. It cannot arrive approved.
-        && request.resource.data.status == 'pending'
-
-        // The vocabulary is closed here as well as in the client, because the
-        // client's copy is a convenience and this one is the enforcement.
-        && request.resource.data.actionType in [
-             'treePlanting', 'composting', 'refusedSingleUsePlastic',
-             'reusableBagOrBottle', 'communityCleanup'
-           ]
-
-        && request.resource.data.photoUrl is string
-        && request.resource.data.photoUrl.size() > 0
-
-        // A client clock value is rejected outright (§7.4).
-        && request.resource.data.createdAt == request.time;
+        && validClaimCreate(request.resource.data, request.auth.uid);
 
       // Approval is a payout decision, so it goes to the server like every
       // other one. This denies an administrator too — proven by the test named
@@ -355,12 +414,14 @@ service cloud.firestore {
     match /lockouts/{lockoutId} {
       // Readable so the app can say "you can submit at this bin again in 4h"
       // instead of letting the user photograph a bag for nothing.
-      allow read: if isSignedIn();
+      allow read: if isSignedIn()
+        && (lockoutId.matches('^' + request.auth.uid + '_.*$') || isAdmin());
       allow create, update, delete: if false;
     }
 
     match /claimQuotas/{quotaId} {
-      allow read: if isSignedIn();
+      allow read: if isSignedIn()
+        && (quotaId.matches('^' + request.auth.uid + '_.*$') || isAdmin());
       allow create, update, delete: if false;
     }
 
@@ -393,13 +454,20 @@ service cloud.firestore {
         && isActive()
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.status == 'pending'
-        && request.resource.data.keys().hasAll([
+        && request.resource.data.keys().hasOnly([
              'userId', 'businessName', 'description', 'status', 'createdAt'
-           ]);
+           ])
+        && validSellerApplication(request.resource.data)
+        && request.resource.data.createdAt == request.time;
 
       allow update: if isAdmin()
+        && resource.data.status == 'pending'
         && request.resource.data.diff(resource.data).affectedKeys()
-             .hasOnly(['status', 'reviewedBy', 'reviewedAt', 'reason']);
+             .hasOnly(['status', 'reviewedBy', 'reviewedAt', 'reason'])
+        && request.resource.data.status in ['approved', 'rejected']
+        && request.resource.data.reviewedBy == request.auth.uid
+        && request.resource.data.reviewedAt == request.time
+        && validSellerApplication(request.resource.data);
 
       allow delete: if false;
     }

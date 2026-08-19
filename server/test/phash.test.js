@@ -356,6 +356,9 @@ describe('an uncomputable hash must not auto-approve', () => {
   const clean = {
     distanceMeters: 12,
     radiusMeters: 50,
+    photoTrusted: true,
+    declarationValid: true,
+    locationValid: true,
     declaredItemCount: 3,
     screening: {
       confidence: 0.9,

@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../core/geo.dart';
 import '../../controllers/disposal_controller.dart';
 import '../../services/location_service.dart';
+import '../shared/flow_progress.dart';
 
 /// Step 3 of the disposal flow (F2.4, F2.5): capture a location fix and check it
 /// against the bin's geofence.
@@ -25,7 +26,10 @@ class DisposalLocationView extends ConsumerWidget {
 
     if (bin == null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Check location')),
+        appBar: AppBar(
+          title: const Text('Check location'),
+          bottom: const FlowProgress(current: 3, total: 4, label: 'Location'),
+        ),
         body: Center(
           child: Padding(
             padding: const EdgeInsets.all(24),
@@ -50,7 +54,10 @@ class DisposalLocationView extends ConsumerWidget {
     final withinRadius = draft.isWithinRadius;
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Check location')),
+      appBar: AppBar(
+        title: const Text('Check location'),
+        bottom: const FlowProgress(current: 3, total: 4, label: 'Location'),
+      ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(20),
         child: Center(
@@ -63,8 +70,10 @@ class DisposalLocationView extends ConsumerWidget {
                   child: ListTile(
                     leading: const Icon(Icons.delete_outline),
                     title: Text(bin.label),
-                    subtitle: Text('Accepts submissions within '
-                        '${bin.radiusMeters.round()} m'),
+                    subtitle: Text(
+                      'Accepts submissions within '
+                      '${bin.radiusMeters.round()} m',
+                    ),
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -78,7 +87,8 @@ class DisposalLocationView extends ConsumerWidget {
                 ),
                 const SizedBox(height: 16),
 
-                if (location == null || location.outcome == LocationOutcome.idle)
+                if (location == null ||
+                    location.outcome == LocationOutcome.idle)
                   _Placeholder(theme: theme)
                 else if (draft.isLocating)
                   const Padding(
@@ -107,9 +117,11 @@ class DisposalLocationView extends ConsumerWidget {
                   FilledButton.icon(
                     onPressed: controller.captureLocation,
                     icon: const Icon(Icons.my_location),
-                    label: Text(location != null && location.hasFix
-                        ? 'Check again'
-                        : 'Check my location'),
+                    label: Text(
+                      location != null && location.hasFix
+                          ? 'Check again'
+                          : 'Check my location',
+                    ),
                   ),
                   const SizedBox(height: 12),
                   FilledButton.icon(
@@ -146,8 +158,10 @@ class _Placeholder extends StatelessWidget {
         padding: const EdgeInsets.all(24),
         child: Row(
           children: [
-            Icon(Icons.location_searching,
-                color: theme.colorScheme.onSurfaceVariant),
+            Icon(
+              Icons.location_searching,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
             const SizedBox(width: 16),
             Expanded(
               child: Text(
@@ -222,7 +236,7 @@ class _FixResult extends StatelessWidget {
                         good
                             ? 'You are within the ${radius.round()} m radius.'
                             : 'Too far away. Move closer than ${radius.round()} m '
-                                'and check again.',
+                                  'and check again.',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: good
                               ? theme.colorScheme.onPrimaryContainer
@@ -264,7 +278,7 @@ class _LocationProblem extends StatelessWidget {
   Widget build(BuildContext context) {
     final needsSettings =
         location.outcome == LocationOutcome.deniedForever ||
-            location.outcome == LocationOutcome.serviceDisabled;
+        location.outcome == LocationOutcome.serviceDisabled;
 
     return Card(
       color: theme.colorScheme.errorContainer,
@@ -275,14 +289,15 @@ class _LocationProblem extends StatelessWidget {
           children: [
             Row(
               children: [
-                Icon(Icons.error_outline,
-                    color: theme.colorScheme.onErrorContainer),
+                Icon(
+                  Icons.error_outline,
+                  color: theme.colorScheme.onErrorContainer,
+                ),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
                     location.displayMessage,
-                    style: TextStyle(
-                        color: theme.colorScheme.onErrorContainer),
+                    style: TextStyle(color: theme.colorScheme.onErrorContainer),
                   ),
                 ),
               ],

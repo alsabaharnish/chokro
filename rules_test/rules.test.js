@@ -15,7 +15,7 @@ const {
   assertSucceeds,
 } = require('@firebase/rules-unit-testing');
 
-const { setDoc, getDoc, updateDoc, doc, setLogLevel } =
+const { setDoc, getDoc, updateDoc, doc, serverTimestamp, setLogLevel } =
   require('firebase/firestore');
 
 let testEnv;
@@ -71,7 +71,7 @@ describe('users', () => {
         email: 'alice@test.com',
         role: 'admin',
         status: 'active',
-        createdAt: new Date(),
+        createdAt: serverTimestamp(),
       }),
     );
   });
@@ -84,7 +84,7 @@ describe('users', () => {
         email: 'alice@test.com',
         role: 'buyer',
         status: 'active',
-        createdAt: new Date(),
+        createdAt: serverTimestamp(),
       }),
     );
   });
@@ -163,7 +163,7 @@ describe('users', () => {
     await assertFails(
       updateDoc(doc(db, 'users', ALICE), {
         name: 'Alice Rahman',
-        updatedAt: new Date(),
+        updatedAt: serverTimestamp(),
       }),
     );
   });
@@ -212,7 +212,7 @@ describe('wallets', () => {
       setDoc(doc(db, 'wallets', ALICE), {
         userId: ALICE,
         balance: 0,
-        updatedAt: new Date(),
+        updatedAt: serverTimestamp(),
       }),
     );
   });
@@ -256,7 +256,7 @@ describe('sellerApplications', () => {
         businessName: 'Test',
         description: 'A description long enough',
         status: 'pending',
-        createdAt: new Date(),
+        createdAt: serverTimestamp(),
       }),
     );
   });
@@ -271,7 +271,7 @@ describe('sellerApplications', () => {
         businessName: 'Test',
         description: 'A description long enough',
         status: 'pending',
-        createdAt: new Date(),
+        createdAt: serverTimestamp(),
       }),
     );
   });
@@ -312,7 +312,7 @@ describe('sellerApplications', () => {
       updateDoc(doc(db, 'sellerApplications', 'app1'), {
         status: 'approved',
         reviewedBy: ADMIN,
-        reviewedAt: new Date(),
+        reviewedAt: serverTimestamp(),
       }),
     );
   });
