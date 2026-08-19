@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
@@ -26,7 +25,7 @@ class PhotoUploadService {
 
   PhotoUploadService({http.Client? client}) : _client = client ?? http.Client();
 
-  /// Uploads [file] and returns its URL and Cloudinary public id.
+  /// Uploads [bytes] and returns its URL and Cloudinary public id.
   ///
   /// The public id is needed by the verification pipeline: the perceptual hash
   /// is computed from an 8x8 grayscale transform of the stored image, and that
@@ -34,25 +33,26 @@ class PhotoUploadService {
   /// it; it was previously discarded here.
   ///
   /// Throws [PhotoUploadException] with a message fit to show a user.
-  Future<UploadedPhoto> uploadDisposalPhoto(File file) =>
-      _upload(file, endpoint: '/photos/disposal');
+  Future<UploadedPhoto> uploadDisposalPhoto(Uint8List bytes) =>
+      _upload(bytes, endpoint: '/photos/disposal');
 
   /// Uploads evidence for a self-reported eco-action.
   ///
   /// Claims previously used the disposal endpoint, mixing two evidence types in
   /// one server folder and making provenance checks unable to distinguish them.
-  Future<UploadedPhoto> uploadClaimPhoto(File file) =>
-      _upload(file, endpoint: '/photos/claim');
+  Future<UploadedPhoto> uploadClaimPhoto(Uint8List bytes) =>
+      _upload(bytes, endpoint: '/photos/claim');
 
-  Future<UploadedPhoto> _upload(File file, {required String endpoint}) async {
+  Future<UploadedPhoto> _upload(
+    Uint8List bytes, {
+    required String endpoint,
+  }) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       throw const PhotoUploadException('You are not signed in.');
     }
 
     final token = await user.getIdToken();
-    final bytes = await file.readAsBytes();
-
     http.Response response;
     try {
       response = await _client
@@ -71,9 +71,6 @@ class PhotoUploadService {
       // produce the "took too long" message.
       _log('timed out after ${ApiConfig.coldStartTimeout}', error);
       throw PhotoUploadException(slowServerMessage);
-    } on SocketException catch (error) {
-      _log('socket failure — no route to the host', error);
-      throw PhotoUploadException(unreachableServerMessage);
     } on http.ClientException catch (error) {
       // On the web build this is the CORS signature: the browser refuses the
       // request and `package:http` reports "XMLHttpRequest error" with no

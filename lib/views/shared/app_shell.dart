@@ -3,6 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../controllers/auth_controller.dart';
 import '../../core/constants.dart';
+import '../../core/theme.dart';
+import 'brand_mark.dart';
+
+enum _AccountAction { profile, signOut }
 
 class ShellDestination {
   const ShellDestination(this.path, this.icon, this.selectedIcon, this.label);
@@ -28,17 +32,29 @@ class AppShell extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final user = ref.watch(currentUserProvider).value;
+    final scheme = Theme.of(context).colorScheme;
 
     final destinations = <ShellDestination>[
+      const ShellDestination('/home', Icons.home_outlined, Icons.home, 'Home'),
       const ShellDestination(
-          '/home', Icons.home_outlined, Icons.home, 'Home'),
-      const ShellDestination('/wallet', Icons.account_balance_wallet_outlined,
-          Icons.account_balance_wallet, 'Wallet'),
-      const ShellDestination('/history', Icons.receipt_long_outlined,
-          Icons.receipt_long, 'History'),
+        '/wallet',
+        Icons.account_balance_wallet_outlined,
+        Icons.account_balance_wallet,
+        'Wallet',
+      ),
+      const ShellDestination(
+        '/history',
+        Icons.receipt_long_outlined,
+        Icons.receipt_long,
+        'History',
+      ),
       if (user != null && user.isAdmin)
-        const ShellDestination('/admin/disposals', Icons.fact_check_outlined,
-            Icons.fact_check, 'Review'),
+        const ShellDestination(
+          '/admin/disposals',
+          Icons.fact_check_outlined,
+          Icons.fact_check,
+          'Review',
+        ),
     ];
 
     final location = GoRouterState.of(context).matchedLocation;
@@ -63,41 +79,79 @@ class AppShell extends ConsumerWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final isWide = constraints.maxWidth >= AppConstants.webBreakpoint;
+        final expandedRail = constraints.maxWidth >= 1280;
 
         return Scaffold(
+          backgroundColor: scheme.surfaceContainerLow,
           appBar: AppBar(
-            title: Text(title),
+            shape: Border(bottom: BorderSide(color: scheme.outlineVariant)),
+            title: location == '/home' && !isWide
+                ? const BrandMark(size: 34, showWordmark: true)
+                : Text(title),
             actions: [
-              // Not a navigation destination: the bar is already carrying four
-              // on an admin account, and the profile is somewhere you visit and
-              // come back from rather than a peer of Home. `push` gives the back
-              // button that makes that true.
-              if (location != '/profile')
-                IconButton(
-                  tooltip: 'Your profile',
-                  icon: const Icon(Icons.person_outline),
-                  onPressed: () => context.push('/profile'),
-                ),
-              IconButton(
-                tooltip: 'Sign out',
-                icon: const Icon(Icons.logout),
-                onPressed: () => _confirmSignOut(context, ref),
+              PopupMenuButton<_AccountAction>(
+                tooltip: 'Account menu',
+                onSelected: (action) {
+                  switch (action) {
+                    case _AccountAction.profile:
+                      context.push('/profile');
+                    case _AccountAction.signOut:
+                      _confirmSignOut(context, ref);
+                  }
+                },
+                itemBuilder: (context) => [
+                  if (location != '/profile')
+                    const PopupMenuItem(
+                      value: _AccountAction.profile,
+                      child: ListTile(
+                        leading: Icon(Icons.person_outline),
+                        title: Text('Profile'),
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                    ),
+                  const PopupMenuItem(
+                    value: _AccountAction.signOut,
+                    child: ListTile(
+                      leading: Icon(Icons.logout),
+                      title: Text('Sign out'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                ],
+                icon: _AccountAvatar(name: user?.name),
+                padding: const EdgeInsets.symmetric(horizontal: AppTheme.gapSm),
+                offset: const Offset(0, 8),
               ),
+              const SizedBox(width: AppTheme.gapSm),
             ],
           ),
           body: isWide && isDestination
               ? Row(
                   children: [
                     NavigationRail(
+                      extended: expandedRail,
                       selectedIndex: index,
                       onDestinationSelected: onSelect,
-                      labelType: NavigationRailLabelType.all,
+                      labelType: expandedRail
+                          ? NavigationRailLabelType.none
+                          : NavigationRailLabelType.all,
+                      groupAlignment: -.72,
+                      minExtendedWidth: 220,
+                      leading: Padding(
+                        padding: const EdgeInsets.only(
+                          top: AppTheme.gapMd,
+                          bottom: AppTheme.gapXl,
+                        ),
+                        child: BrandMark(size: 42, showWordmark: expandedRail),
+                      ),
                       destinations: destinations
-                          .map((d) => NavigationRailDestination(
-                                icon: Icon(d.icon),
-                                selectedIcon: Icon(d.selectedIcon),
-                                label: Text(d.label),
-                              ))
+                          .map(
+                            (d) => NavigationRailDestination(
+                              icon: Icon(d.icon),
+                              selectedIcon: Icon(d.selectedIcon),
+                              label: Text(d.label),
+                            ),
+                          )
                           .toList(),
                     ),
                     const VerticalDivider(width: 1),
@@ -111,11 +165,13 @@ class AppShell extends ConsumerWidget {
                   selectedIndex: index,
                   onDestinationSelected: onSelect,
                   destinations: destinations
-                      .map((d) => NavigationDestination(
-                            icon: Icon(d.icon),
-                            selectedIcon: Icon(d.selectedIcon),
-                            label: d.label,
-                          ))
+                      .map(
+                        (d) => NavigationDestination(
+                          icon: Icon(d.icon),
+                          selectedIcon: Icon(d.selectedIcon),
+                          label: d.label,
+                        ),
+                      )
                       .toList(),
                 ),
         );
@@ -148,7 +204,53 @@ class AppShell extends ConsumerWidget {
       ),
     );
 
-    if (confirmed != true) return;
+    if (confirmed != true || !context.mounted) return;
     await ref.read(authControllerProvider.notifier).signOut();
+  }
+}
+
+class _AccountAvatar extends StatelessWidget {
+  const _AccountAvatar({required this.name});
+
+  final String? name;
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final words = (name ?? '')
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((word) => word.isNotEmpty)
+        .toList();
+    final initials = words.isEmpty
+        ? ''
+        : words.length == 1
+        ? words.first.characters.first.toUpperCase()
+        : (words.first.characters.first + words.last.characters.first)
+              .toUpperCase();
+
+    return Container(
+      width: 38,
+      height: 38,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        color: scheme.primaryContainer,
+        shape: BoxShape.circle,
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: initials.isEmpty
+          ? Icon(
+              Icons.person_outline,
+              size: 20,
+              color: scheme.onPrimaryContainer,
+            )
+          : Text(
+              initials,
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: scheme.onPrimaryContainer,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+    );
   }
 }

@@ -1,5 +1,3 @@
-import 'dart:io';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -180,11 +178,12 @@ class DisposalDeclareView extends ConsumerWidget {
                       ListTile(
                         leading: ClipRRect(
                           borderRadius: BorderRadius.circular(6),
-                          child: Image.file(
-                            File(draft.photoPath!),
+                          child: Image.memory(
+                            draft.photoBytes!,
                             width: 48,
                             height: 48,
                             fit: BoxFit.cover,
+                            key: ObjectKey(draft.photoBytes),
                           ),
                         ),
                         title: Text(draft.itemType.label),

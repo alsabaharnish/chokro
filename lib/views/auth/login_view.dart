@@ -3,8 +3,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../controllers/auth_controller.dart';
 import '../../core/auth_errors.dart';
-import '../../core/theme.dart';
 import '../../core/validators.dart';
+import '../shared/auth_frame.dart';
 
 class LoginView extends ConsumerStatefulWidget {
   const LoginView({super.key});
@@ -101,7 +101,9 @@ class _LoginViewState extends ConsumerState<LoginView> {
           content: Text(
             error == null
                 ? 'If an account exists for $email, a reset link is on its way.'
-                : (error is AuthFailure ? error.message : authErrorMessage(null)),
+                : (error is AuthFailure
+                      ? error.message
+                      : authErrorMessage(null)),
           ),
           backgroundColor: error == null ? null : scheme.errorContainer,
           showCloseIcon: true,
@@ -116,7 +118,9 @@ class _LoginViewState extends ConsumerState<LoginView> {
 
     if (!_formKey.currentState!.validate()) return;
 
-    await ref.read(authControllerProvider.notifier).signIn(
+    await ref
+        .read(authControllerProvider.notifier)
+        .signIn(
           email: _emailController.text.trim(),
           password: _passwordController.text,
         );
@@ -149,121 +153,103 @@ class _LoginViewState extends ConsumerState<LoginView> {
   @override
   Widget build(BuildContext context) {
     final isLoading = ref.watch(authControllerProvider).isLoading;
-    final theme = Theme.of(context);
-
-    return Scaffold(
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(AppTheme.gapLg),
-            child: ConstrainedBox(
-              constraints:
-                  const BoxConstraints(maxWidth: AppTheme.maxFormWidth),
-              // AutofillGroup lets the platform password manager see the email
-              // and password as one credential and offer to save it.
-              child: AutofillGroup(
-                child: Form(
-                  key: _formKey,
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      Icon(Icons.eco,
-                          size: 64, color: theme.colorScheme.primary),
-                      const SizedBox(height: AppTheme.gapMd),
-                      Text(
-                        'Chokro',
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.headlineMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                          color: theme.colorScheme.primary,
-                        ),
-                      ),
-                      const SizedBox(height: AppTheme.gapSm),
-                      Text(
-                        'Sign in to continue',
-                        textAlign: TextAlign.center,
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          color: theme.colorScheme.onSurfaceVariant,
-                        ),
-                      ),
-                      const SizedBox(height: AppTheme.gapXl),
-                      TextFormField(
-                        controller: _emailController,
-                        keyboardType: TextInputType.emailAddress,
-                        textInputAction: TextInputAction.next,
-                        autofillHints: const [AutofillHints.email],
-                        autocorrect: false,
-                        // Email addresses are case-insensitive and never
-                        // capitalised; the default sentence-case keyboard made
-                        // every address start with a capital on iOS.
-                        textCapitalization: TextCapitalization.none,
-                        enabled: !isLoading,
-                        decoration: const InputDecoration(
-                          labelText: 'Email',
-                          prefixIcon: Icon(Icons.email_outlined),
-                        ),
-                        validator: validateEmail,
-                        onFieldSubmitted: (_) => _passwordFocus.requestFocus(),
-                      ),
-                      const SizedBox(height: AppTheme.gapMd),
-                      TextFormField(
-                        controller: _passwordController,
-                        focusNode: _passwordFocus,
-                        obscureText: _obscurePassword,
-                        textInputAction: TextInputAction.done,
-                        autofillHints: const [AutofillHints.password],
-                        enabled: !isLoading,
-                        decoration: InputDecoration(
-                          labelText: 'Password',
-                          prefixIcon: const Icon(Icons.lock_outlined),
-                          suffixIcon: IconButton(
-                            tooltip:
-                                _obscurePassword ? 'Show password' : 'Hide password',
-                            icon: Icon(_obscurePassword
-                                ? Icons.visibility_outlined
-                                : Icons.visibility_off_outlined),
-                            onPressed: () => setState(
-                                () => _obscurePassword = !_obscurePassword),
+    return AuthFrame(
+      title: 'Welcome back',
+      subtitle: 'Sign in to continue building your verified impact.',
+      child: AutofillGroup(
+        // AutofillGroup lets the platform password manager see the email and
+        // password as one credential and offer to save it.
+        child: Form(
+          key: _formKey,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              TextFormField(
+                controller: _emailController,
+                keyboardType: TextInputType.emailAddress,
+                textInputAction: TextInputAction.next,
+                autofillHints: const [AutofillHints.email],
+                autocorrect: false,
+                // Email addresses are case-insensitive and never
+                // capitalised; the default sentence-case keyboard made
+                // every address start with a capital on iOS.
+                textCapitalization: TextCapitalization.none,
+                enabled: !isLoading,
+                decoration: const InputDecoration(
+                  labelText: 'Email',
+                  prefixIcon: Icon(Icons.email_outlined),
+                ),
+                validator: validateEmail,
+                onFieldSubmitted: (_) => _passwordFocus.requestFocus(),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _passwordController,
+                focusNode: _passwordFocus,
+                obscureText: _obscurePassword,
+                textInputAction: TextInputAction.done,
+                autofillHints: const [AutofillHints.password],
+                enabled: !isLoading,
+                decoration: InputDecoration(
+                  labelText: 'Password',
+                  prefixIcon: const Icon(Icons.lock_outlined),
+                  suffixIcon: IconButton(
+                    tooltip: _obscurePassword
+                        ? 'Show password'
+                        : 'Hide password',
+                    icon: Icon(
+                      _obscurePassword
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                    ),
+                    onPressed: isLoading
+                        ? null
+                        : () => setState(
+                            () => _obscurePassword = !_obscurePassword,
                           ),
-                        ),
-                        // Only "required" on sign-in. A minimum length here was
-                        // wrong: it is a check on the password being *created*,
-                        // and applying it at sign-in refuses to even try an
-                        // older short password, showing a validation error where
-                        // the truthful answer is "that is not your password".
-                        validator: (v) => (v == null || v.isEmpty)
-                            ? 'Enter your password'
-                            : null,
-                        // The keyboard's done key submits, so the user never has
-                        // to dismiss it to reach the button.
-                        onFieldSubmitted: (_) => isLoading ? null : _submit(),
-                      ),
-                      const SizedBox(height: AppTheme.gapLg),
-                      FilledButton(
-                        onPressed: isLoading ? null : _submit,
-                        child: isLoading
-                            ? const SizedBox(
-                                height: 20,
-                                width: 20,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Text('Sign In'),
-                      ),
-                      const SizedBox(height: AppTheme.gapSm),
-                      TextButton(
-                        onPressed: isLoading ? null : _forgotPassword,
-                        child: const Text('Forgot your password?'),
-                      ),
-                      TextButton(
-                        onPressed: isLoading ? null : () => context.go('/register'),
-                        child: const Text("Don't have an account? Register"),
-                      ),
-                    ],
                   ),
                 ),
+                // Only "required" on sign-in. A minimum length here was
+                // wrong: it is a check on the password being *created*,
+                // and applying it at sign-in refuses to even try an
+                // older short password, showing a validation error where
+                // the truthful answer is "that is not your password".
+                validator: (v) =>
+                    (v == null || v.isEmpty) ? 'Enter your password' : null,
+                // The keyboard's done key submits, so the user never has
+                // to dismiss it to reach the button.
+                onFieldSubmitted: (_) => isLoading ? null : _submit(),
               ),
-            ),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  onPressed: isLoading ? null : _forgotPassword,
+                  child: const Text('Forgot password?'),
+                ),
+              ),
+              const SizedBox(height: 8),
+              FilledButton(
+                onPressed: isLoading ? null : _submit,
+                child: isLoading
+                    ? const SizedBox(
+                        height: 20,
+                        width: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Text('Sign in'),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  const Text('New to Chokro?'),
+                  TextButton(
+                    onPressed: isLoading ? null : () => context.go('/register'),
+                    child: const Text('Create account'),
+                  ),
+                ],
+              ),
+            ],
           ),
         ),
       ),

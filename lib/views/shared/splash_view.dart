@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
+import 'brand_mark.dart';
 
 /// Held while Firebase Auth resolves who is signed in.
 ///
@@ -16,30 +17,44 @@ class SplashView extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
+    final scheme = theme.colorScheme;
+
     return Scaffold(
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(Icons.eco, size: 72, color: theme.colorScheme.primary),
-            const SizedBox(height: AppTheme.gapMd),
-            Text(
-              'Chokro',
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.bold,
-                color: theme.colorScheme.primary,
+      body: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [scheme.primary, scheme.tertiary],
+          ),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              BrandMark(
+                size: 72,
+                showWordmark: true,
+                foregroundColor: scheme.onPrimary,
               ),
-            ),
-            const SizedBox(height: AppTheme.gapXl),
-            SizedBox(
-              width: 24,
-              height: 24,
-              child: CircularProgressIndicator(
-                strokeWidth: 2.5,
-                color: theme.colorScheme.primary,
+              const SizedBox(height: AppTheme.gapMd),
+              Text(
+                'Verified action. Trusted impact.',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: scheme.onPrimary.withValues(alpha: .74),
+                ),
               ),
-            ),
-          ],
+              const SizedBox(height: AppTheme.gapXl),
+              SizedBox(
+                width: 24,
+                height: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  color: scheme.onPrimary,
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

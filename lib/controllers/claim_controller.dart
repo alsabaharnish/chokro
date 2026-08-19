@@ -1,7 +1,5 @@
-import 'dart:io';
-import 'dart:typed_data';
-
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
@@ -63,7 +61,7 @@ final claimHistoryForReviewProvider =
 class ClaimDraft {
   const ClaimDraft({
     this.actionType,
-    this.photoPath,
+    this.photoBytes,
     this.isCapturing = false,
     this.isSubmitting = false,
     this.submittedId,
@@ -71,18 +69,18 @@ class ClaimDraft {
   });
 
   final ClaimActionType? actionType;
-  final String? photoPath;
+  final Uint8List? photoBytes;
   final bool isCapturing;
   final bool isSubmitting;
   final String? submittedId;
   final String? error;
 
-  bool get hasPhoto => photoPath != null;
+  bool get hasPhoto => photoBytes != null && photoBytes!.isNotEmpty;
   bool get isReadyToSubmit => actionType != null && hasPhoto;
 
   ClaimDraft copyWith({
     ClaimActionType? actionType,
-    String? photoPath,
+    Uint8List? photoBytes,
     bool? isCapturing,
     bool? isSubmitting,
     String? submittedId,
@@ -92,7 +90,7 @@ class ClaimDraft {
   }) {
     return ClaimDraft(
       actionType: actionType ?? this.actionType,
-      photoPath: clearPhoto ? null : (photoPath ?? this.photoPath),
+      photoBytes: clearPhoto ? null : (photoBytes ?? this.photoBytes),
       isCapturing: isCapturing ?? this.isCapturing,
       isSubmitting: isSubmitting ?? this.isSubmitting,
       submittedId: submittedId ?? this.submittedId,
@@ -121,7 +119,10 @@ class ClaimDraftController extends Notifier<ClaimDraft> {
 
     try {
       final shot = await ImagePicker().pickImage(
-        source: ImageSource.camera,
+        // Browsers cannot reliably launch a physical camera, but their file
+        // chooser can select a fresh mobile capture as well as an existing
+        // image. Native targets keep the direct camera flow.
+        source: kIsWeb ? ImageSource.gallery : ImageSource.camera,
         maxWidth: 1600,
         maxHeight: 1600,
         imageQuality: 90,
@@ -132,16 +133,16 @@ class ClaimDraftController extends Notifier<ClaimDraft> {
         return false;
       }
 
-      final original = File(shot.path);
-      final Uint8List? compressed = await FlutterImageCompress.compressWithFile(
-        shot.path,
+      final original = await shot.readAsBytes();
+      final compressed = await FlutterImageCompress.compressWithList(
+        original,
         quality: 70,
         minWidth: 1080,
         minHeight: 1080,
         keepExif: false,
       );
 
-      if (compressed == null) {
+      if (compressed.isEmpty) {
         state = state.copyWith(
           isCapturing: false,
           error: 'The photo could not be processed. Try taking it again.',
@@ -149,20 +150,19 @@ class ClaimDraftController extends Notifier<ClaimDraft> {
         return false;
       }
 
-      final outPath =
-          '${original.parent.path}/chokro_claim_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      await File(outPath).writeAsBytes(compressed, flush: true);
-
       state = state.copyWith(
         isCapturing: false,
-        photoPath: outPath,
+        photoBytes: compressed,
         clearError: true,
       );
       return true;
     } catch (err) {
       state = state.copyWith(
         isCapturing: false,
-        error: 'Could not open the camera. Check the app has permission.',
+        error: kIsWeb
+            ? 'Could not open the photo picker. Choose a supported image and '
+                  'try again.'
+            : 'Could not open the camera. Check the app has permission.',
       );
       return false;
     }
@@ -176,9 +176,9 @@ class ClaimDraftController extends Notifier<ClaimDraft> {
     final draft = state;
     final uid = ref.read(currentUidProvider);
     final type = draft.actionType;
-    final path = draft.photoPath;
+    final bytes = draft.photoBytes;
 
-    if (uid == null || type == null || path == null) {
+    if (uid == null || type == null || bytes == null || bytes.isEmpty) {
       state = state.copyWith(error: 'Choose an action and take a photo first.');
       return null;
     }
@@ -188,7 +188,7 @@ class ClaimDraftController extends Notifier<ClaimDraft> {
     try {
       final photo = await ref
           .read(photoUploadServiceProvider)
-          .uploadClaimPhoto(File(path));
+          .uploadClaimPhoto(bytes);
 
       final id = await ref
           .read(claimServiceProvider)

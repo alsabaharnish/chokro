@@ -10,6 +10,7 @@ import '../../core/theme.dart';
 import '../../core/validators.dart';
 import '../../models/user_model.dart';
 import '../shared/app_shell.dart';
+import '../shared/content_state.dart';
 
 /// Profile management (F1.1).
 ///
@@ -75,9 +76,7 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
     state.when(
       data: (_) {
         FocusScope.of(context).unfocus();
-        messenger.showSnackBar(
-          const SnackBar(content: Text('Name updated.')),
-        );
+        messenger.showSnackBar(const SnackBar(content: Text('Name updated.')));
       },
       loading: () {},
       error: (error, _) => messenger.showSnackBar(
@@ -101,10 +100,11 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
     return AppShell(
       title: 'Profile',
       child: async.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => const ContentLoading(label: 'Loading your profile…'),
         error: (error, _) => _Message(
           icon: Icons.error_outline,
-          text: 'Your profile could not be loaded. Check your connection and '
+          text:
+              'Your profile could not be loaded. Check your connection and '
               'try again.',
         ),
         data: (user) {
@@ -135,8 +135,9 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
 
                   Text(
                     'Your name',
-                    style: theme.textTheme.titleSmall
-                        ?.copyWith(fontWeight: FontWeight.bold),
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   const SizedBox(height: AppTheme.gapSm),
                   Form(
@@ -185,8 +186,9 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
                   const SizedBox(height: AppTheme.gapLg),
                   Text(
                     'Account',
-                    style: theme.textTheme.titleSmall
-                        ?.copyWith(fontWeight: FontWeight.bold),
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
                   ),
                   const SizedBox(height: AppTheme.gapSm),
                   _Fact(
@@ -236,11 +238,11 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
   }
 
   static String _roleLabel(String role) => switch (role) {
-        AppConstants.roleAdmin => 'Administrator',
-        AppConstants.roleSeller => 'Seller',
-        AppConstants.roleBuyer => 'Buyer',
-        _ => role,
-      };
+    AppConstants.roleAdmin => 'Administrator',
+    AppConstants.roleSeller => 'Seller',
+    AppConstants.roleBuyer => 'Buyer',
+    _ => role,
+  };
 }
 
 /// Initials on a coloured disc. No photo upload exists, and inventing one would
@@ -285,8 +287,11 @@ class _Avatar extends StatelessWidget {
 
   /// First letters of the first and last words, upper-cased.
   static String _initials(String name) {
-    final words =
-        name.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
+    final words = name
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((w) => w.isNotEmpty)
+        .toList();
     if (words.isEmpty) return '';
     if (words.length == 1) return words.first.characters.first.toUpperCase();
     return (words.first.characters.first + words.last.characters.first)
@@ -324,8 +329,9 @@ class _Fact extends StatelessWidget {
               children: [
                 Text(
                   label,
-                  style: theme.textTheme.labelMedium
-                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
                 const SizedBox(height: 2),
                 SelectableText(value, style: theme.textTheme.bodyLarge),
@@ -333,8 +339,9 @@ class _Fact extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(
                     note!,
-                    style: theme.textTheme.bodySmall
-                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ],
@@ -386,9 +393,9 @@ class _SuspensionNotice extends StatelessWidget {
                 Text(
                   until == null
                       ? 'Most actions are unavailable. Contact an '
-                          'administrator to have this reviewed.'
+                            'administrator to have this reviewed.'
                       : 'Most actions are unavailable until '
-                          '${formatDate(until)}.',
+                            '${formatDate(until)}.',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onErrorContainer,
                   ),

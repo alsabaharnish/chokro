@@ -18,21 +18,46 @@
 
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
-  <meta name="description" content="A new Flutter project.">
+  <meta name="description" content="Chokro verifies responsible actions and turns them into transparent, auditable rewards.">
+  <meta name="theme-color" content="#006C4C">
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="chokro">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Chokro">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <!-- Favicon -->
   <link rel="icon" type="image/png" href="favicon.png"/>
 
-  <title>chokro</title>
+  <title>Chokro · Verified impact</title>
   <link rel="manifest" href="manifest.json">
+  <style>
+    html, body { height: 100%; }
+    body { margin: 0; background: #006C4C; }
+    #app-loading {
+      position: fixed;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      color: white;
+      background: linear-gradient(145deg, #087F5B, #006C4C 56%, #075E68);
+      font: 700 22px system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: -.3px;
+    }
+    #app-loading div { display: grid; place-items: center; gap: 16px; }
+    #app-loading img { width: 76px; height: 76px; border-radius: 22px; }
+    #app-loading small { font-size: 13px; font-weight: 500; opacity: .72; letter-spacing: .2px; }
+  </style>
 </head>
 <body>
+  <div id="app-loading" role="status" aria-label="Loading Chokro">
+    <div>
+      <img src="icons/Icon-192.png" alt="">
+      <span>Chokro</span>
+      <small>Verified action. Trusted impact.</small>
+    </div>
+  </div>
   <!--
     You can customize the "flutter_bootstrap.js" script.
     This is useful to provide a custom configuration to the Flutter loader
@@ -42,5 +67,10 @@
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
   <script src="flutter_bootstrap.js" async></script>
+  <script>
+    window.addEventListener('flutter-first-frame', function () {
+      document.getElementById('app-loading')?.remove();
+    });
+  </script>
 </body>
 </html>

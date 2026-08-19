@@ -6,6 +6,7 @@ import '../../controllers/submission_history_controller.dart';
 import '../../core/label_format.dart';
 import '../../models/disposal_model.dart';
 import '../shared/app_shell.dart';
+import '../shared/content_state.dart';
 import '../shared/status_chip.dart';
 import '../../core/network_errors.dart';
 
@@ -31,7 +32,8 @@ class SubmissionHistoryView extends ConsumerWidget {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: _maxContentWidth),
           child: async.when(
-            loading: () => const Center(child: CircularProgressIndicator()),
+            loading: () =>
+                const ContentLoading(label: 'Loading your submissions…'),
             error: (error, _) => _ErrorState(
               error: error,
               onRetry: () => ref.invalidate(submissionHistoryProvider),
@@ -39,7 +41,16 @@ class SubmissionHistoryView extends ConsumerWidget {
             data: (items) {
               if (items.isEmpty) return const _EmptyState();
               return RefreshIndicator(
-                onRefresh: () async => ref.invalidate(submissionHistoryProvider),
+                onRefresh: () async {
+                  try {
+                    final refresh = ref.refresh(
+                      submissionHistoryProvider.future,
+                    );
+                    await refresh;
+                  } catch (_) {
+                    // The provider retains the error and renders it here.
+                  }
+                },
                 child: ListView.separated(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                   itemCount: items.length,
@@ -88,8 +99,9 @@ class _SubmissionCard extends StatelessWidget {
                     children: [
                       Text(
                         humanise(disposal.itemType),
-                        style: theme.textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w600),
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
                       ),
                       const SizedBox(height: 2),
                       Text(
@@ -189,8 +201,9 @@ class _PointsBadge extends StatelessWidget {
     if (!awarded) {
       return Text(
         status.isRejected ? 'No points' : '—',
-        style: theme.textTheme.labelMedium
-            ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+        style: theme.textTheme.labelMedium?.copyWith(
+          color: theme.colorScheme.onSurfaceVariant,
+        ),
       );
     }
 
@@ -206,8 +219,9 @@ class _PointsBadge extends StatelessWidget {
         ),
         Text(
           'points',
-          style: theme.textTheme.labelSmall
-              ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
         ),
       ],
     );
@@ -243,8 +257,10 @@ class _Note extends StatelessWidget {
               children: [
                 Text(
                   title,
-                  style: theme.textTheme.labelMedium
-                      ?.copyWith(color: tone, fontWeight: FontWeight.w600),
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: tone,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 const SizedBox(height: 2),
                 Text(body, style: theme.textTheme.bodySmall),
@@ -262,32 +278,12 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(
-              Icons.recycling_outlined,
-              size: 48,
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-            const SizedBox(height: 16),
-            Text('No submissions yet', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 6),
-            Text(
-              'Scan the code on a registered bin to record your first '
-              'disposal. Approved submissions appear here with what they '
-              'earned.',
-              textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-            ),
-          ],
-        ),
-      ),
+    return const ContentEmpty(
+      icon: Icons.recycling_outlined,
+      title: 'No submissions yet',
+      message:
+          'Scan a registered bin to record your first disposal. Its '
+          'status, decision reason and points will appear here.',
     );
   }
 }
@@ -313,18 +309,25 @@ class _ErrorState extends StatelessWidget {
               color: theme.colorScheme.error,
             ),
             const SizedBox(height: 14),
-            Text('Submissions did not load', style: theme.textTheme.titleMedium),
+            Text(
+              'Submissions did not load',
+              style: theme.textTheme.titleMedium,
+            ),
             const SizedBox(height: 6),
             Text(
               // Interpreted, not printed. `'$error'` rendered the vendor
               // prefix and class name straight to the user.
               friendlyErrorMessage(error),
               textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 16),
-            FilledButton.tonal(onPressed: onRetry, child: const Text('Try again')),
+            FilledButton.tonal(
+              onPressed: onRetry,
+              child: const Text('Try again'),
+            ),
           ],
         ),
       ),

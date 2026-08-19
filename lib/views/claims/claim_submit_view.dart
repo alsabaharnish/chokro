@@ -1,5 +1,4 @@
-import 'dart:io';
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -35,8 +34,9 @@ class ClaimSubmitView extends ConsumerWidget {
       title: 'Log an eco-action',
       child: Center(
         child: ConstrainedBox(
-          constraints:
-              const BoxConstraints(maxWidth: ClaimSubmitView._maxContentWidth),
+          constraints: const BoxConstraints(
+            maxWidth: ClaimSubmitView._maxContentWidth,
+          ),
           child: ListView(
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
             children: [
@@ -45,7 +45,8 @@ class ClaimSubmitView extends ConsumerWidget {
                 error: (error, _) => _Notice(
                   icon: Icons.cloud_off_outlined,
                   tone: theme.colorScheme.onSurfaceVariant,
-                  text: 'Your weekly quota could not be checked. You can still '
+                  text:
+                      'Your weekly quota could not be checked. You can still '
                       'submit; the server will decide.',
                 ),
                 data: (q) => _Notice(
@@ -62,15 +63,19 @@ class ClaimSubmitView extends ConsumerWidget {
               _Notice(
                 icon: Icons.person_search_outlined,
                 tone: theme.colorScheme.onSurfaceVariant,
-                text: 'Every eco-action is checked by a person, so points '
+                text:
+                    'Every eco-action is checked by a person, so points '
                     'arrive after review rather than straight away. Disposals '
                     'at a registered bin are verified automatically and pay '
                     'more.',
               ),
               const SizedBox(height: 20),
-              Text('What did you do?',
-                  style: theme.textTheme.titleMedium
-                      ?.copyWith(fontWeight: FontWeight.bold)),
+              Text(
+                'What did you do?',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
               const SizedBox(height: 10),
               // RadioGroup owns the selection and the callback; the tiles
               // below only declare their value. Flutter 3.32 deprecated the
@@ -99,25 +104,30 @@ class ClaimSubmitView extends ConsumerWidget {
                 ),
               ),
               const SizedBox(height: 20),
-              Text('Evidence',
-                  style: theme.textTheme.titleMedium
-                      ?.copyWith(fontWeight: FontWeight.bold)),
+              Text(
+                'Evidence',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
               const SizedBox(height: 4),
               Text(
                 draft.actionType?.evidenceHint ??
                     'Choose an action above, then photograph it.',
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
               ),
               const SizedBox(height: 12),
               if (draft.hasPhoto)
                 ClipRRect(
                   borderRadius: BorderRadius.circular(12),
-                  child: Image.file(
-                    File(draft.photoPath!),
+                  child: Image.memory(
+                    draft.photoBytes!,
                     height: 220,
                     width: double.infinity,
                     fit: BoxFit.cover,
+                    key: ObjectKey(draft.photoBytes),
                   ),
                 ),
               if (draft.hasPhoto) const SizedBox(height: 10),
@@ -125,23 +135,33 @@ class ClaimSubmitView extends ConsumerWidget {
                 onPressed: draft.isCapturing || draft.isSubmitting
                     ? null
                     : () =>
-                        ref.read(claimDraftProvider.notifier).capturePhoto(),
+                          ref.read(claimDraftProvider.notifier).capturePhoto(),
                 icon: draft.isCapturing
                     ? const SizedBox(
                         width: 16,
                         height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2))
-                    : const Icon(Icons.photo_camera_outlined),
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : Icon(
+                        kIsWeb
+                            ? Icons.add_photo_alternate_outlined
+                            : Icons.photo_camera_outlined,
+                      ),
                 label: Text(
-                  draft.hasPhoto ? 'Retake photo' : 'Take photo',
+                  kIsWeb
+                      ? (draft.hasPhoto
+                            ? 'Choose another photo'
+                            : 'Choose photo')
+                      : (draft.hasPhoto ? 'Retake photo' : 'Take photo'),
                 ),
               ),
               if (draft.error != null) ...[
                 const SizedBox(height: 14),
                 Text(
                   draft.error!,
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: theme.colorScheme.error),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.error,
+                  ),
                 ),
               ],
               const SizedBox(height: 22),
@@ -153,9 +173,12 @@ class ClaimSubmitView extends ConsumerWidget {
                     ? const SizedBox(
                         width: 16,
                         height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2))
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
                     : const Icon(Icons.send_outlined),
-                label: Text(draft.isSubmitting ? 'Submitting…' : 'Submit claim'),
+                label: Text(
+                  draft.isSubmitting ? 'Submitting…' : 'Submit claim',
+                ),
               ),
 
               // ── Earlier claims ───────────────────────────────────────────
@@ -170,8 +193,9 @@ class ClaimSubmitView extends ConsumerWidget {
               const SizedBox(height: AppTheme.gapMd),
               Text(
                 'Your eco-actions',
-                style: theme.textTheme.titleMedium
-                    ?.copyWith(fontWeight: FontWeight.bold),
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(height: AppTheme.gapSm),
               const ClaimHistoryList(),
@@ -197,8 +221,11 @@ class _ClaimSubmitted extends ConsumerWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(Icons.check_circle_outline,
-                  size: 56, color: theme.colorScheme.primary),
+              Icon(
+                Icons.check_circle_outline,
+                size: 56,
+                color: theme.colorScheme.primary,
+              ),
               const SizedBox(height: 16),
               Text('Sent for review', style: theme.textTheme.titleLarge),
               const SizedBox(height: 8),
@@ -207,8 +234,9 @@ class _ClaimSubmitted extends ConsumerWidget {
                 'wallet only if it is approved, and you will be told either '
                 'way.',
                 textAlign: TextAlign.center,
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
               ),
               const SizedBox(height: AppTheme.gapLg),
               // "Log another" was the only way off this screen, so a user who
@@ -266,20 +294,21 @@ class ClaimHistoryList extends ConsumerWidget {
                   claim.status.isApproved
                       ? Icons.check_circle_outline
                       : claim.status.isRejected
-                          ? Icons.cancel_outlined
-                          : Icons.hourglass_empty_outlined,
+                      ? Icons.cancel_outlined
+                      : Icons.hourglass_empty_outlined,
                   color: claim.status.isApproved
                       ? theme.colorScheme.primary
                       : claim.status.isRejected
-                          ? theme.colorScheme.error
-                          : theme.colorScheme.onSurfaceVariant,
+                      ? theme.colorScheme.error
+                      : theme.colorScheme.onSurfaceVariant,
                 ),
                 title: Text(claim.actionType.label),
                 subtitle: Text(
                   [
                     claim.userFacingStatus,
                     formatAge(claim.createdAt),
-                    if (claim.status.isRejected && claim.rejectionReason != null)
+                    if (claim.status.isRejected &&
+                        claim.rejectionReason != null)
                       claim.rejectionReason!,
                   ].join(' · '),
                   style: theme.textTheme.bodySmall,
@@ -318,10 +347,7 @@ class _Notice extends StatelessWidget {
         Expanded(
           child: Text(
             text,
-            style: Theme.of(context)
-                .textTheme
-                .bodySmall
-                ?.copyWith(color: tone),
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(color: tone),
           ),
         ),
       ],

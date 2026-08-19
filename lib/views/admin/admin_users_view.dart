@@ -41,7 +41,8 @@ class _AdminUsersViewState extends ConsumerState<AdminUsersView> {
     final now = DateTime.now();
 
     final filtered = users.where((user) {
-      final matchesQuery = query.isEmpty ||
+      final matchesQuery =
+          query.isEmpty ||
           user.name.toLowerCase().contains(query) ||
           user.email.toLowerCase().contains(query);
       if (!matchesQuery) return false;
@@ -110,8 +111,9 @@ class _AdminUsersViewState extends ConsumerState<AdminUsersView> {
 
     // Duration.zero is the sentinel for "indefinitely" — SimpleDialogOption
     // cannot return null and be distinguished from a dismissal.
-    final until =
-        choice == const Duration() ? null : DateTime.now().add(choice);
+    final until = choice == const Duration()
+        ? null
+        : DateTime.now().add(choice);
 
     await _run(
       () => ref.read(adminUserActionsProvider).suspend(user.uid, until: until),
@@ -128,18 +130,21 @@ class _AdminUsersViewState extends ConsumerState<AdminUsersView> {
     );
   }
 
-  Future<void> _run(Future<void> Function() action,
-      {required String success}) async {
+  Future<void> _run(
+    Future<void> Function() action, {
+    required String success,
+  }) async {
     try {
       await action();
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(success)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(success)));
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(friendlyErrorMessage(error))),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(friendlyErrorMessage(error))));
     }
   }
 
@@ -152,8 +157,9 @@ class _AdminUsersViewState extends ConsumerState<AdminUsersView> {
       title: 'Accounts',
       child: Center(
         child: ConstrainedBox(
-          constraints:
-              const BoxConstraints(maxWidth: AdminUsersView._maxContentWidth),
+          constraints: const BoxConstraints(
+            maxWidth: AdminUsersView._maxContentWidth,
+          ),
           child: async.when(
             loading: () => const Center(child: CircularProgressIndicator()),
             error: (error, _) => ErrorRetry(
@@ -179,22 +185,11 @@ class _AdminUsersViewState extends ConsumerState<AdminUsersView> {
                   ),
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
-                    child: Row(
-                      children: [
-                        for (final filter in _Filter.values)
-                          Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: ChoiceChip(
-                              label: Text(humanise(filter.name)),
-                              selected: _filter == filter,
-                              onSelected: (_) =>
-                                  setState(() => _filter = filter),
-                            ),
-                          ),
-                        const Spacer(),
-                        Text('${visible.length} of ${users.length}',
-                            style: Theme.of(context).textTheme.labelSmall),
-                      ],
+                    child: _FilterBar(
+                      selected: _filter,
+                      visibleCount: visible.length,
+                      totalCount: users.length,
+                      onSelected: (filter) => setState(() => _filter = filter),
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -220,6 +215,62 @@ class _AdminUsersViewState extends ConsumerState<AdminUsersView> {
           ),
         ),
       ),
+    );
+  }
+}
+
+class _FilterBar extends StatelessWidget {
+  const _FilterBar({
+    required this.selected,
+    required this.visibleCount,
+    required this.totalCount,
+    required this.onSelected,
+  });
+
+  final _Filter selected;
+  final int visibleCount;
+  final int totalCount;
+  final ValueChanged<_Filter> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final filters = Wrap(
+      spacing: 8,
+      runSpacing: 8,
+      children: [
+        for (final filter in _Filter.values)
+          ChoiceChip(
+            label: Text(humanise(filter.name)),
+            selected: selected == filter,
+            onSelected: (_) => onSelected(filter),
+          ),
+      ],
+    );
+    final count = Text(
+      '$visibleCount of $totalCount',
+      style: Theme.of(context).textTheme.labelSmall,
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 520) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              filters,
+              const SizedBox(height: 6),
+              Align(alignment: Alignment.centerRight, child: count),
+            ],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(child: filters),
+            const SizedBox(width: 12),
+            count,
+          ],
+        );
+      },
     );
   }
 }
@@ -274,8 +325,9 @@ class _UserCard extends StatelessWidget {
                         child: Text(
                           user.name,
                           overflow: TextOverflow.ellipsis,
-                          style: theme.textTheme.titleSmall
-                              ?.copyWith(fontWeight: FontWeight.w700),
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
                         ),
                       ),
                       if (isSelf) ...[
@@ -287,8 +339,9 @@ class _UserCard extends StatelessWidget {
                   Text(
                     user.email,
                     overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.bodySmall
-                        ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
                   ),
                   const SizedBox(height: 8),
                   Wrap(
@@ -310,8 +363,11 @@ class _UserCard extends StatelessWidget {
             if (isSelf)
               Tooltip(
                 message: 'You cannot suspend your own account',
-                child: Icon(Icons.block,
-                    size: 18, color: theme.colorScheme.onSurfaceVariant),
+                child: Icon(
+                  Icons.block,
+                  size: 18,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
               )
             else if (blocked)
               TextButton(onPressed: onReinstate, child: const Text('Reinstate'))
@@ -319,7 +375,8 @@ class _UserCard extends StatelessWidget {
               TextButton(
                 onPressed: onSuspend,
                 style: TextButton.styleFrom(
-                    foregroundColor: theme.colorScheme.error),
+                  foregroundColor: theme.colorScheme.error,
+                ),
                 child: const Text('Suspend'),
               ),
           ],
@@ -393,10 +450,10 @@ class _Pill extends StatelessWidget {
       ),
       child: Text(
         label,
-        style: Theme.of(context)
-            .textTheme
-            .labelSmall
-            ?.copyWith(color: foreground, fontWeight: FontWeight.w600),
+        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+          color: foreground,
+          fontWeight: FontWeight.w600,
+        ),
       ),
     );
   }

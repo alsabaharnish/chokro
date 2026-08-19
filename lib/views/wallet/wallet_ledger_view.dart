@@ -3,8 +3,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../controllers/ledger_controller.dart';
 import '../../core/label_format.dart';
+import '../../core/theme.dart';
 import '../../models/transaction_model.dart';
 import '../shared/app_shell.dart';
+import '../shared/content_state.dart';
 import '../shared/error_retry.dart';
 
 /// The wallet, told as a ledger (F3.2, NFR-4).
@@ -16,8 +18,6 @@ import '../shared/error_retry.dart';
 class WalletLedgerView extends ConsumerWidget {
   const WalletLedgerView({super.key});
 
-  static const double _maxContentWidth = 720;
-
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final async = ref.watch(ledgerProvider);
@@ -28,16 +28,23 @@ class WalletLedgerView extends ConsumerWidget {
       title: 'Wallet',
       child: Center(
         child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: _maxContentWidth),
+          constraints: const BoxConstraints(maxWidth: AppTheme.maxContentWidth),
           child: async.when(
-            loading: () => const Center(child: CircularProgressIndicator()),
+            loading: () => const ContentLoading(label: 'Loading your wallet…'),
             error: (error, _) => ErrorRetry(
               title: 'The ledger',
               error: error,
               onRetry: () => ref.invalidate(ledgerProvider),
             ),
             data: (entries) => RefreshIndicator(
-              onRefresh: () async => ref.invalidate(ledgerProvider),
+              onRefresh: () async {
+                try {
+                  final refresh = ref.refresh(ledgerProvider.future);
+                  await refresh;
+                } catch (_) {
+                  // The provider retains the error and the screen renders it.
+                }
+              },
               child: ListView(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
                 children: [
@@ -46,9 +53,9 @@ class WalletLedgerView extends ConsumerWidget {
                   Text(
                     'Activity',
                     style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                          letterSpacing: 0.4,
-                        ),
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 0.4,
+                    ),
                   ),
                   const SizedBox(height: 8),
                   if (entries.isEmpty)
@@ -118,7 +125,9 @@ class _BalanceHeader extends StatelessWidget {
                 ? '+$recentEarned earned across the entries below'
                 : 'Every change to this number is listed below.',
             style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onPrimaryContainer.withValues(alpha: 0.8),
+              color: theme.colorScheme.onPrimaryContainer.withValues(
+                alpha: 0.8,
+              ),
             ),
           ),
         ],
@@ -151,8 +160,9 @@ class _LedgerRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final credit = entry.isCredit;
-    final amountColour =
-        credit ? theme.colorScheme.primary : theme.colorScheme.onSurface;
+    final amountColour = credit
+        ? theme.colorScheme.primary
+        : theme.colorScheme.onSurface;
 
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 10),
@@ -179,8 +189,9 @@ class _LedgerRow extends StatelessWidget {
               children: [
                 Text(
                   entry.source.label,
-                  style: theme.textTheme.bodyLarge
-                      ?.copyWith(fontWeight: FontWeight.w600),
+                  style: theme.textTheme.bodyLarge?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
                 const SizedBox(height: 2),
                 Text(
@@ -188,8 +199,9 @@ class _LedgerRow extends StatelessWidget {
                     entry.source.description,
                     formatDateTime(entry.createdAt),
                   ].where((s) => s.isNotEmpty).join(' · '),
-                  style: theme.textTheme.bodySmall
-                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ],
             ),
@@ -208,8 +220,9 @@ class _LedgerRow extends StatelessWidget {
               if (entry.balanceAfter != null)
                 Text(
                   'balance ${entry.balanceAfter}',
-                  style: theme.textTheme.labelSmall
-                      ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
             ],
           ),
@@ -224,28 +237,12 @@ class _LedgerEmpty extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 40),
-      child: Column(
-        children: [
-          Icon(
-            Icons.receipt_long_outlined,
-            size: 40,
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-          const SizedBox(height: 14),
-          Text('Nothing here yet', style: theme.textTheme.titleMedium),
-          const SizedBox(height: 6),
-          Text(
-            'Points appear the moment a submission is approved, and every '
-            'entry says where it came from.',
-            textAlign: TextAlign.center,
-            style: theme.textTheme.bodySmall
-                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
-          ),
-        ],
-      ),
+    return const ContentEmpty(
+      icon: Icons.receipt_long_outlined,
+      title: 'Your wallet is ready',
+      message:
+          'Approved submissions will appear here with the points they '
+          'earned and your balance after each change.',
     );
   }
 }

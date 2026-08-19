@@ -121,7 +121,7 @@ class _PointsPolicyViewState extends ConsumerState<PointsPolicyView> {
       ),
     );
 
-    if (confirmed != true) return;
+    if (confirmed != true || !mounted) return;
 
     setState(() {
       _saving = true;
@@ -135,17 +135,18 @@ class _PointsPolicyViewState extends ConsumerState<PointsPolicyView> {
         _adoptLoaded(stored);
         _saving = false;
       });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Points policy updated.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Points policy updated.')));
     } on PolicyException catch (error) {
       if (!mounted) return;
       setState(() {
         _saving = false;
         _serverProblems = error.problems;
       });
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text(error.message)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
     }
   }
 
@@ -157,8 +158,9 @@ class _PointsPolicyViewState extends ConsumerState<PointsPolicyView> {
       title: 'Points policy',
       child: Center(
         child: ConstrainedBox(
-          constraints:
-              const BoxConstraints(maxWidth: PointsPolicyView._maxContentWidth),
+          constraints: const BoxConstraints(
+            maxWidth: PointsPolicyView._maxContentWidth,
+          ),
           child: async.when(
             loading: () => const Center(child: CircularProgressIndicator()),
             error: (error, _) => ErrorRetry(
@@ -182,8 +184,11 @@ class _PointsPolicyViewState extends ConsumerState<PointsPolicyView> {
     final (policy: draft, parseErrors: parseErrors) = _readForm();
 
     final invariantProblems = draft?.validate() ?? const <String>[];
-    final changes = draft == null ? <PolicyChange>[] : diffPolicies(base, draft);
-    final canSave = !_saving &&
+    final changes = draft == null
+        ? <PolicyChange>[]
+        : diffPolicies(base, draft);
+    final canSave =
+        !_saving &&
         draft != null &&
         invariantProblems.isEmpty &&
         changes.isNotEmpty;
@@ -198,8 +203,11 @@ class _PointsPolicyViewState extends ConsumerState<PointsPolicyView> {
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(Icons.history_toggle_off,
-                    size: 18, color: theme.colorScheme.onSurfaceVariant),
+                Icon(
+                  Icons.history_toggle_off,
+                  size: 18,
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
@@ -255,8 +263,7 @@ class _PointsPolicyViewState extends ConsumerState<PointsPolicyView> {
           children: [
             Expanded(
               child: FilledButton.icon(
-                onPressed:
-                    canSave ? () => _save(draft, changes) : null,
+                onPressed: canSave ? () => _save(draft, changes) : null,
                 icon: _saving
                     ? const SizedBox(
                         width: 16,
@@ -282,11 +289,11 @@ class _PointsPolicyViewState extends ConsumerState<PointsPolicyView> {
             onPressed: _saving
                 ? null
                 : () => setState(() {
-                      for (final field in policyFields) {
-                        _controllers[field.key]!.text =
-                            '${field.read(PointsPolicy.defaults)}';
-                      }
-                    }),
+                    for (final field in policyFields) {
+                      _controllers[field.key]!.text =
+                          '${field.read(PointsPolicy.defaults)}';
+                    }
+                  }),
             child: const Text('Load section 7.3 defaults'),
           ),
         ),
@@ -326,8 +333,9 @@ class _PolicyInput extends StatelessWidget {
         const SizedBox(height: 6),
         Text(
           field.help,
-          style: theme.textTheme.bodySmall
-              ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
         ),
       ],
     );
@@ -355,8 +363,10 @@ class _ProblemList extends StatelessWidget {
         children: [
           Text(
             title,
-            style: theme.textTheme.labelLarge
-                ?.copyWith(color: tone, fontWeight: FontWeight.w700),
+            style: theme.textTheme.labelLarge?.copyWith(
+              color: tone,
+              fontWeight: FontWeight.w700,
+            ),
           ),
           const SizedBox(height: 6),
           for (final problem in problems)
@@ -407,12 +417,14 @@ class _ProvenanceLine extends StatelessWidget {
     final text = provenance.isUntouched
         ? 'Never changed. These are the defaults.'
         : 'Last changed by ${provenance.editor}, '
-            '${formatDateTime(provenance.updatedAt)}.';
+              '${formatDateTime(provenance.updatedAt)}.';
 
     return Row(
       children: [
         Icon(
-          provenance.isUntouched ? Icons.settings_suggest_outlined : Icons.person_outline,
+          provenance.isUntouched
+              ? Icons.settings_suggest_outlined
+              : Icons.person_outline,
           size: 16,
           color: theme.colorScheme.onSurfaceVariant,
         ),
@@ -420,8 +432,9 @@ class _ProvenanceLine extends StatelessWidget {
         Expanded(
           child: Text(
             text,
-            style: theme.textTheme.bodySmall
-                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
           ),
         ),
       ],

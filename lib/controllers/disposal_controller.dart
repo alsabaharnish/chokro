@@ -1,7 +1,5 @@
-import 'dart:io';
-import 'dart:typed_data';
-
 import 'package:firebase_core/firebase_core.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
@@ -14,17 +12,21 @@ import '../services/photo_upload_service.dart';
 import '../services/verification_service.dart';
 import '../services/location_service.dart';
 
-final locationServiceProvider =
-    Provider<LocationService>((ref) => LocationService());
+final locationServiceProvider = Provider<LocationService>(
+  (ref) => LocationService(),
+);
 
-final disposalServiceProvider =
-    Provider<DisposalService>((ref) => DisposalService());
+final disposalServiceProvider = Provider<DisposalService>(
+  (ref) => DisposalService(),
+);
 
-final photoUploadServiceProvider =
-    Provider<PhotoUploadService>((ref) => PhotoUploadService());
+final photoUploadServiceProvider = Provider<PhotoUploadService>(
+  (ref) => PhotoUploadService(),
+);
 
-final verificationServiceProvider =
-    Provider<VerificationService>((ref) => VerificationService());
+final verificationServiceProvider = Provider<VerificationService>(
+  (ref) => VerificationService(),
+);
 
 /// The submission being composed, held across the steps of the flow.
 ///
@@ -35,8 +37,11 @@ final verificationServiceProvider =
 class DisposalDraft {
   final BinModel? bin;
 
-  /// Local path to the compressed photo, before upload.
-  final String? photoPath;
+  /// Compressed photo bytes, held only until upload.
+  ///
+  /// Bytes work on every Flutter target. A local `File` path does not exist in
+  /// a browser, and trying to preview one made the web flow fail after capture.
+  final Uint8List? photoBytes;
 
   /// Size in bytes before and after compression. Shown to the user, and useful
   /// evidence in the viva that compression actually happens (NFR-2).
@@ -70,7 +75,7 @@ class DisposalDraft {
 
   const DisposalDraft({
     this.bin,
-    this.photoPath,
+    this.photoBytes,
     this.originalBytes,
     this.compressedBytes,
     this.isCapturing = false,
@@ -85,7 +90,7 @@ class DisposalDraft {
     this.isVerifying = false,
   });
 
-  bool get hasPhoto => photoPath != null;
+  bool get hasPhoto => photoBytes != null && photoBytes!.isNotEmpty;
   bool get hasLocation => location?.hasFix ?? false;
 
   /// Distance from the bin in metres, computed on device.
@@ -131,7 +136,7 @@ class DisposalDraft {
 
   DisposalDraft copyWith({
     BinModel? bin,
-    String? photoPath,
+    Uint8List? photoBytes,
     int? originalBytes,
     int? compressedBytes,
     bool? isCapturing,
@@ -150,10 +155,11 @@ class DisposalDraft {
   }) {
     return DisposalDraft(
       bin: bin ?? this.bin,
-      photoPath: clearPhoto ? null : (photoPath ?? this.photoPath),
+      photoBytes: clearPhoto ? null : (photoBytes ?? this.photoBytes),
       originalBytes: clearPhoto ? null : (originalBytes ?? this.originalBytes),
-      compressedBytes:
-          clearPhoto ? null : (compressedBytes ?? this.compressedBytes),
+      compressedBytes: clearPhoto
+          ? null
+          : (compressedBytes ?? this.compressedBytes),
       isCapturing: isCapturing ?? this.isCapturing,
       location: location ?? this.location,
       isLocating: isLocating ?? this.isLocating,
@@ -162,8 +168,9 @@ class DisposalDraft {
       itemType: itemType ?? this.itemType,
       isSubmitting: isSubmitting ?? this.isSubmitting,
       submittedId: submittedId ?? this.submittedId,
-      verification:
-          clearVerification ? null : (verification ?? this.verification),
+      verification: clearVerification
+          ? null
+          : (verification ?? this.verification),
       isVerifying: isVerifying ?? this.isVerifying,
     );
   }
@@ -212,7 +219,7 @@ class DisposalDraftController extends Notifier<DisposalDraft> {
     try {
       final picker = ImagePicker();
       final shot = await picker.pickImage(
-        source: ImageSource.camera,
+        source: kIsWeb ? ImageSource.gallery : ImageSource.camera,
         // Cap the long edge before compression. A 12 MP phone photo is far more
         // detail than either the screening model or an administrator needs.
         maxWidth: 1600,
@@ -225,11 +232,10 @@ class DisposalDraftController extends Notifier<DisposalDraft> {
         return false;
       }
 
-      final originalFile = File(shot.path);
-      final originalBytes = await originalFile.length();
+      final original = await shot.readAsBytes();
 
-      final Uint8List? compressed = await FlutterImageCompress.compressWithFile(
-        shot.path,
+      final compressed = await FlutterImageCompress.compressWithList(
+        original,
         quality: 70,
         minWidth: 1080,
         minHeight: 1080,
@@ -237,7 +243,7 @@ class DisposalDraftController extends Notifier<DisposalDraft> {
         keepExif: false,
       );
 
-      if (compressed == null) {
+      if (compressed.isEmpty) {
         state = state.copyWith(
           isCapturing: false,
           error: 'The photo could not be processed. Try taking it again.',
@@ -245,17 +251,10 @@ class DisposalDraftController extends Notifier<DisposalDraft> {
         return false;
       }
 
-      // Write beside the original, which already sits in a temporary directory
-      // the OS manages. Avoids a path_provider dependency for a file that only
-      // needs to survive until upload.
-      final outPath =
-          '${originalFile.parent.path}/chokro_${DateTime.now().millisecondsSinceEpoch}.jpg';
-      await File(outPath).writeAsBytes(compressed, flush: true);
-
       state = state.copyWith(
         isCapturing: false,
-        photoPath: outPath,
-        originalBytes: originalBytes,
+        photoBytes: compressed,
+        originalBytes: original.length,
         compressedBytes: compressed.length,
         clearError: true,
       );
@@ -267,8 +266,11 @@ class DisposalDraftController extends Notifier<DisposalDraft> {
       // hold the grant itself (§4.1).
       state = state.copyWith(
         isCapturing: false,
-        error: 'Could not open the camera. Check that camera permission is '
-            'granted in Settings, then try again.',
+        error: kIsWeb
+            ? 'Could not open the photo picker. Choose a supported image and '
+                  'try again.'
+            : 'Could not open the camera. Check that camera permission is '
+                  'granted in Settings, then try again.',
       );
       return false;
     }
@@ -326,10 +328,14 @@ class DisposalDraftController extends Notifier<DisposalDraft> {
   Future<String?> submit({required String uid}) async {
     final draft = state;
     final bin = draft.bin;
-    final photoPath = draft.photoPath;
+    final photoBytes = draft.photoBytes;
     final location = draft.location;
 
-    if (bin == null || photoPath == null || location == null || !location.hasFix) {
+    if (bin == null ||
+        photoBytes == null ||
+        photoBytes.isEmpty ||
+        location == null ||
+        !location.hasFix) {
       state = state.copyWith(
         error: 'Something is missing from this submission. Start again.',
       );
@@ -345,7 +351,7 @@ class DisposalDraftController extends Notifier<DisposalDraft> {
       // PhotoUploadService for why, and §4.3 of the brief.
       final photo = await ref
           .read(photoUploadServiceProvider)
-          .uploadDisposalPhoto(File(photoPath));
+          .uploadDisposalPhoto(photoBytes);
 
       final disposal = DisposalModel(
         userId: uid,
@@ -385,8 +391,8 @@ class DisposalDraftController extends Notifier<DisposalDraft> {
       // rules actually check, rather than guessing at one cause.
       final message = err.code == 'permission-denied'
           ? 'This submission was refused. You may have submitted at this bin '
-              'recently, the bin may be closed, or your account may be '
-              'suspended. Try again later or use another bin.'
+                'recently, the bin may be closed, or your account may be '
+                'suspended. Try again later or use another bin.'
           : 'Could not submit: ${err.message ?? err.code}';
 
       state = state.copyWith(isSubmitting: false, error: message);
@@ -403,5 +409,5 @@ class DisposalDraftController extends Notifier<DisposalDraft> {
 
 final disposalDraftProvider =
     NotifierProvider<DisposalDraftController, DisposalDraft>(
-  DisposalDraftController.new,
-);
+      DisposalDraftController.new,
+    );

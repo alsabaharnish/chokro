@@ -62,75 +62,90 @@ class ActionCard extends StatelessWidget {
     final scheme = theme.colorScheme;
 
     final (Color iconBackground, Color iconColour) = switch (tone) {
-      ActionTone.primary => (scheme.primaryContainer, scheme.onPrimaryContainer),
+      ActionTone.primary => (
+        scheme.primaryContainer,
+        scheme.onPrimaryContainer,
+      ),
       ActionTone.neutral => (
-          scheme.tertiaryContainer,
-          scheme.onTertiaryContainer,
-        ),
+        scheme.tertiaryContainer,
+        scheme.onTertiaryContainer,
+      ),
       ActionTone.admin => (
-          scheme.secondaryContainer,
-          scheme.onSecondaryContainer,
-        ),
+        scheme.secondaryContainer,
+        scheme.onSecondaryContainer,
+      ),
     };
 
     final body = subtitle;
     final shownSubtitle = _enabled ? body : (disabledSubtitle ?? body);
 
-    return Card(
-      // Dim the whole card rather than only greying the text: a disabled card
-      // that looks enabled invites the tap that does nothing.
-      child: Opacity(
-        opacity: _enabled ? 1 : 0.55,
-        child: InkWell(
-          onTap: onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(AppTheme.gapMd),
-            child: Row(
-              children: [
-                Container(
-                  width: 48,
-                  height: 48,
-                  decoration: BoxDecoration(
-                    color: iconBackground,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(icon, color: iconColour, size: 22),
-                ),
-                const SizedBox(width: AppTheme.gapMd),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        title,
-                        style: theme.textTheme.titleMedium
-                            ?.copyWith(fontWeight: FontWeight.w600),
+    return Semantics(
+      button: true,
+      enabled: _enabled,
+      label:
+          '$title. $shownSubtitle'
+          '${badgeCount > 0 ? ' $badgeCount awaiting review.' : ''}',
+      excludeSemantics: true,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(minHeight: 96),
+        child: Card(
+          // Dim the whole card rather than only greying the text: a disabled
+          // card that looks enabled invites the tap that does nothing.
+          child: Opacity(
+            opacity: _enabled ? 1 : 0.55,
+            child: InkWell(
+              onTap: onTap,
+              mouseCursor: _enabled
+                  ? SystemMouseCursors.click
+                  : SystemMouseCursors.basic,
+              child: Padding(
+                padding: const EdgeInsets.all(AppTheme.gapMd),
+                child: Row(
+                  children: [
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: BoxDecoration(
+                        color: iconBackground,
+                        shape: BoxShape.circle,
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        shownSubtitle,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: scheme.onSurfaceVariant,
-                          height: 1.35,
-                        ),
+                      child: Icon(icon, color: iconColour, size: 22),
+                    ),
+                    const SizedBox(width: AppTheme.gapMd),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            title,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            shownSubtitle,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                              height: 1.35,
+                            ),
+                          ),
+                        ],
                       ),
+                    ),
+                    if (badgeCount > 0) ...[
+                      const SizedBox(width: AppTheme.gapSm),
+                      _CountBadge(count: badgeCount),
                     ],
-                  ),
+                    // The chevron is a hint that tapping goes somewhere. On a
+                    // disabled card it would be a lie, so it is dropped rather than
+                    // dimmed — which is what the original code did in three places
+                    // and forgot in the other five.
+                    if (_enabled)
+                      Icon(Icons.chevron_right, color: scheme.onSurfaceVariant),
+                  ],
                 ),
-                if (badgeCount > 0) ...[
-                  const SizedBox(width: AppTheme.gapSm),
-                  _CountBadge(count: badgeCount),
-                ],
-                // The chevron is a hint that tapping goes somewhere. On a
-                // disabled card it would be a lie, so it is dropped rather than
-                // dimmed — which is what the original code did in three places
-                // and forgot in the other five.
-                if (_enabled)
-                  Icon(
-                    Icons.chevron_right,
-                    color: scheme.onSurfaceVariant,
-                  ),
-              ],
+              ),
             ),
           ),
         ),
@@ -191,7 +206,10 @@ class SectionHeading extends StatelessWidget {
     final theme = Theme.of(context);
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: AppTheme.gapSm, top: AppTheme.gapXs),
+      padding: const EdgeInsets.only(
+        bottom: AppTheme.gapSm,
+        top: AppTheme.gapXs,
+      ),
       child: Row(
         children: [
           if (icon != null) ...[

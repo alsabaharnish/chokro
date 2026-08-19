@@ -1,5 +1,4 @@
-import 'dart:io';
-
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -95,12 +94,10 @@ class DisposalPhotoView extends ConsumerWidget {
                     ),
                     clipBehavior: Clip.antiAlias,
                     child: draft.hasPhoto
-                        ? Image.file(
-                            File(draft.photoPath!),
+                        ? Image.memory(
+                            draft.photoBytes!,
                             fit: BoxFit.cover,
-                            // A cached decode of a replaced file can show the
-                            // previous image; the key forces a fresh decode.
-                            key: ValueKey(draft.photoPath),
+                            key: ObjectKey(draft.photoBytes),
                           )
                         : Center(
                             child: Column(
@@ -171,7 +168,7 @@ class DisposalPhotoView extends ConsumerWidget {
                         child: OutlinedButton.icon(
                           onPressed: controller.capturePhoto,
                           icon: const Icon(Icons.refresh),
-                          label: const Text('Retake'),
+                          label: Text(kIsWeb ? 'Replace' : 'Retake'),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -187,8 +184,12 @@ class DisposalPhotoView extends ConsumerWidget {
                 else
                   FilledButton.icon(
                     onPressed: controller.capturePhoto,
-                    icon: const Icon(Icons.photo_camera),
-                    label: const Text('Take photo'),
+                    icon: Icon(
+                      kIsWeb
+                          ? Icons.add_photo_alternate_outlined
+                          : Icons.photo_camera,
+                    ),
+                    label: Text(kIsWeb ? 'Choose photo' : 'Take photo'),
                   ),
               ],
             ),

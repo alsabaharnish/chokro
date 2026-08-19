@@ -9,6 +9,7 @@ import '../../core/theme.dart';
 import '../../models/wallet_model.dart';
 import '../shared/action_card.dart';
 import '../shared/app_shell.dart';
+import '../shared/content_state.dart';
 
 /// The home screen: who you are, what you have, and what you can do.
 ///
@@ -28,21 +29,26 @@ class HomeView extends ConsumerWidget {
     return AppShell(
       title: 'Chokro',
       child: userAsync.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
-        error: (error, _) => _HomeError(
-          onRetry: () => ref.invalidate(currentUserProvider),
-        ),
+        loading: () => const ContentLoading(label: 'Preparing your dashboard…'),
+        error: (error, _) =>
+            _HomeError(onRetry: () => ref.invalidate(currentUserProvider)),
         data: (user) {
           if (user == null) {
-            return const Center(child: CircularProgressIndicator());
+            return const ContentLoading(label: 'Preparing your dashboard…');
           }
 
           final suspended = !user.isActive;
 
           return RefreshIndicator(
             onRefresh: () async {
-              ref.invalidate(walletProvider);
-              ref.invalidate(submissionHistoryProvider);
+              try {
+                await Future.wait<Object?>([
+                  ref.refresh(walletProvider.future),
+                  ref.refresh(submissionHistoryProvider.future),
+                ]);
+              } catch (_) {
+                // The providers retain the error and the screen renders it.
+              }
             },
             child: ListView(
               padding: const EdgeInsets.fromLTRB(
@@ -55,7 +61,7 @@ class HomeView extends ConsumerWidget {
                 Center(
                   child: ConstrainedBox(
                     constraints: const BoxConstraints(
-                      maxWidth: AppTheme.maxContentWidth,
+                      maxWidth: AppTheme.maxDashboardWidth,
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -71,36 +77,42 @@ class HomeView extends ConsumerWidget {
                         ],
 
                         const SizedBox(height: AppTheme.gapMd),
-                        _BalanceCard(walletAsync: walletAsync),
-
-                        const SizedBox(height: AppTheme.gapLg),
-                        const SectionHeading('Earn points'),
-
-                        ActionCard(
-                          icon: Icons.qr_code_scanner,
-                          title: 'Dispose waste',
-                          subtitle: 'Scan the code on a bin to start.',
-                          disabledSubtitle: 'Unavailable while suspended.',
-                          tone: ActionTone.primary,
-                          // Disabled for a suspended account. The Firestore
-                          // rules refuse the submission anyway (`isActive()` on
-                          // disposal create), so this is courtesy rather than
-                          // enforcement — it stops a user walking to a bin and
-                          // photographing a bag before finding out.
-                          onTap: suspended
-                              ? null
-                              : () => context.push('/dispose/scan'),
+                        _BalanceCard(
+                          walletAsync: walletAsync,
+                          onViewWallet: () => context.push('/wallet'),
                         ),
-                        const SizedBox(height: AppTheme.gapSm),
-                        ActionCard(
-                          icon: Icons.eco_outlined,
-                          title: 'Log an eco-action',
-                          subtitle: 'Composting, tree planting and similar. '
-                              'Checked by a reviewer.',
-                          disabledSubtitle: 'Unavailable while suspended.',
-                          onTap: suspended
-                              ? null
-                              : () => context.push('/claims/new'),
+
+                        const SizedBox(height: AppTheme.gapXl),
+                        const SectionHeading('Quick actions'),
+
+                        _ActionGrid(
+                          children: [
+                            ActionCard(
+                              icon: Icons.qr_code_scanner,
+                              title: 'Dispose waste',
+                              subtitle: 'Scan the code on a bin to start.',
+                              disabledSubtitle: 'Unavailable while suspended.',
+                              tone: ActionTone.primary,
+                              // Disabled for a suspended account. The Firestore
+                              // rules refuse the submission anyway (`isActive()`
+                              // on disposal create), so this is courtesy rather
+                              // than enforcement.
+                              onTap: suspended
+                                  ? null
+                                  : () => context.push('/dispose/scan'),
+                            ),
+                            ActionCard(
+                              icon: Icons.eco_outlined,
+                              title: 'Log an eco-action',
+                              subtitle:
+                                  'Record composting, planting and other '
+                                  'positive actions.',
+                              disabledSubtitle: 'Unavailable while suspended.',
+                              onTap: suspended
+                                  ? null
+                                  : () => context.push('/claims/new'),
+                            ),
+                          ],
                         ),
 
                         const SizedBox(height: AppTheme.gapLg),
@@ -109,39 +121,35 @@ class HomeView extends ConsumerWidget {
                         // Shown to every account, including a suspended one: a
                         // user who cannot submit can still need to read why an
                         // earlier submission was rejected.
-                        ActionCard(
-                          icon: Icons.receipt_long_outlined,
-                          title: 'My submissions',
-                          subtitle: switch (pendingCount) {
-                            0 => 'Status, reason and points for everything you '
-                                'have sent.',
-                            1 => '1 submission is waiting for review.',
-                            _ => '$pendingCount submissions are waiting for '
-                                'review.',
-                          },
-                          badgeCount: pendingCount,
-                          onTap: () => context.push('/history'),
-                        ),
+                        _ActionGrid(
+                          children: [
+                            ActionCard(
+                              icon: Icons.receipt_long_outlined,
+                              title: 'My submissions',
+                              subtitle: switch (pendingCount) {
+                                0 =>
+                                  'Status, reasons and points for everything '
+                                      'you have sent.',
+                                1 => '1 submission is waiting for review.',
+                                _ =>
+                                  '$pendingCount submissions are waiting for '
+                                      'review.',
+                              },
+                              badgeCount: pendingCount,
+                              onTap: () => context.push('/history'),
+                            ),
 
-                        // Separate from "My submissions", because that screen
-                        // reads disposals only. F7.2 asks for history "with
-                        // status and reason", and for eco-actions that lived
-                        // inside the submit form — visible only while composing a
-                        // new claim, gone the moment one was submitted.
-                        ActionCard(
-                          icon: Icons.eco_outlined,
-                          title: 'My eco-actions',
-                          subtitle: 'Status and reason for every action you '
-                              'have logged.',
-                          onTap: () => context.push('/claims'),
-                        ),
-                        const SizedBox(height: AppTheme.gapSm),
-                        ActionCard(
-                          icon: Icons.account_balance_wallet_outlined,
-                          title: 'Wallet',
-                          subtitle: 'Every point earned and spent, with what '
-                              'caused it.',
-                          onTap: () => context.push('/wallet'),
+                            // Kept separate from disposal submissions so the
+                            // status of each workflow is easy to scan.
+                            ActionCard(
+                              icon: Icons.eco_outlined,
+                              title: 'My eco-actions',
+                              subtitle:
+                                  'Review every action, its status and '
+                                  'the decision reason.',
+                              onTap: () => context.push('/claims'),
+                            ),
+                          ],
                         ),
 
                         if (user.isAdmin) ...[
@@ -150,54 +158,55 @@ class HomeView extends ConsumerWidget {
                             'Administration',
                             icon: Icons.shield_outlined,
                           ),
-                          ActionCard(
-                            icon: Icons.fact_check_outlined,
-                            title: 'Disposal review queue',
-                            subtitle: 'Approve or reject pending disposals.',
-                            tone: ActionTone.admin,
-                            onTap: () => context.push('/admin/disposals'),
-                          ),
-                          const SizedBox(height: AppTheme.gapSm),
-                          ActionCard(
-                            icon: Icons.eco_outlined,
-                            title: 'Claim review',
-                            subtitle: 'Self-reported eco-actions awaiting a '
-                                'decision.',
-                            tone: ActionTone.admin,
-                            onTap: () => context.push('/admin/claims'),
-                          ),
-                          const SizedBox(height: AppTheme.gapSm),
-                          ActionCard(
-                            icon: Icons.storefront_outlined,
-                            title: 'Seller applications',
-                            subtitle: 'Approve or reject requests to sell.',
-                            tone: ActionTone.admin,
-                            onTap: () => context.push('/admin/applications'),
-                          ),
-                          const SizedBox(height: AppTheme.gapSm),
-                          ActionCard(
-                            icon: Icons.qr_code_2,
-                            title: 'Bins',
-                            subtitle: 'Register a bin and print its code.',
-                            tone: ActionTone.admin,
-                            onTap: () => context.push('/admin/bins'),
-                          ),
-                          const SizedBox(height: AppTheme.gapSm),
-                          ActionCard(
-                            icon: Icons.people_outline,
-                            title: 'Accounts',
-                            subtitle: 'Suspend or reinstate an account.',
-                            tone: ActionTone.admin,
-                            onTap: () => context.push('/admin/users'),
-                          ),
-                          const SizedBox(height: AppTheme.gapSm),
-                          ActionCard(
-                            icon: Icons.tune,
-                            title: 'Points policy',
-                            subtitle: 'Tune awards, redemption and the '
-                                'anti-farming limits.',
-                            tone: ActionTone.admin,
-                            onTap: () => context.push('/admin/points'),
+                          _ActionGrid(
+                            children: [
+                              ActionCard(
+                                icon: Icons.fact_check_outlined,
+                                title: 'Disposal reviews',
+                                subtitle:
+                                    'Approve or reject pending disposals.',
+                                tone: ActionTone.admin,
+                                onTap: () => context.push('/admin/disposals'),
+                              ),
+                              ActionCard(
+                                icon: Icons.eco_outlined,
+                                title: 'Claim reviews',
+                                subtitle: 'Decide self-reported eco-actions.',
+                                tone: ActionTone.admin,
+                                onTap: () => context.push('/admin/claims'),
+                              ),
+                              ActionCard(
+                                icon: Icons.storefront_outlined,
+                                title: 'Seller applications',
+                                subtitle: 'Review requests to become a seller.',
+                                tone: ActionTone.admin,
+                                onTap: () =>
+                                    context.push('/admin/applications'),
+                              ),
+                              ActionCard(
+                                icon: Icons.qr_code_2,
+                                title: 'Bins',
+                                subtitle:
+                                    'Register bins and print their codes.',
+                                tone: ActionTone.admin,
+                                onTap: () => context.push('/admin/bins'),
+                              ),
+                              ActionCard(
+                                icon: Icons.people_outline,
+                                title: 'Accounts',
+                                subtitle: 'Suspend or reinstate an account.',
+                                tone: ActionTone.admin,
+                                onTap: () => context.push('/admin/users'),
+                              ),
+                              ActionCard(
+                                icon: Icons.tune,
+                                title: 'Points policy',
+                                subtitle:
+                                    'Tune rewards and anti-farming limits.',
+                                tone: ActionTone.admin,
+                                onTap: () => context.push('/admin/points'),
+                              ),
+                            ],
                           ),
                         ],
 
@@ -207,15 +216,21 @@ class HomeView extends ConsumerWidget {
                         if (!user.isSeller) ...[
                           const SizedBox(height: AppTheme.gapLg),
                           const SectionHeading('Selling'),
-                          ActionCard(
-                            icon: Icons.storefront_outlined,
-                            title: 'Become a seller',
-                            subtitle: 'Apply to list what you make. Reviewed by '
-                                'an administrator.',
-                            disabledSubtitle: 'Unavailable while suspended.',
-                            onTap: suspended
-                                ? null
-                                : () => context.push('/apply-seller'),
+                          _ActionGrid(
+                            children: [
+                              ActionCard(
+                                icon: Icons.storefront_outlined,
+                                title: 'Become a seller',
+                                subtitle:
+                                    'Apply to list what you make. Every '
+                                    'request is reviewed.',
+                                disabledSubtitle:
+                                    'Unavailable while suspended.',
+                                onTap: suspended
+                                    ? null
+                                    : () => context.push('/apply-seller'),
+                              ),
+                            ],
                           ),
                         ],
                       ],
@@ -241,25 +256,42 @@ class _Greeting extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Expanded(
-          child: Text(
-            'Hello, $name',
-            style: theme.textTheme.headlineSmall
-                ?.copyWith(fontWeight: FontWeight.bold),
-            // A long name used to push the role chip off the row and overflow.
-            maxLines: 2,
-            overflow: TextOverflow.ellipsis,
-          ),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Expanded(
+              child: Text(
+                'Hello, $name',
+                style: theme.textTheme.headlineMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: -.65,
+                ),
+                maxLines: 2,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            const SizedBox(width: AppTheme.gapSm),
+            Chip(
+              avatar: const Icon(Icons.verified_user_outlined, size: 16),
+              label: Text(role.toUpperCase()),
+              labelStyle: theme.textTheme.labelSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+                letterSpacing: 0.5,
+              ),
+              visualDensity: VisualDensity.compact,
+              padding: EdgeInsets.zero,
+            ),
+          ],
         ),
-        const SizedBox(width: AppTheme.gapSm),
-        Chip(
-          label: Text(role.toUpperCase()),
-          labelStyle: theme.textTheme.labelSmall
-              ?.copyWith(fontWeight: FontWeight.w700, letterSpacing: 0.5),
-          visualDensity: VisualDensity.compact,
-          padding: EdgeInsets.zero,
+        const SizedBox(height: AppTheme.gapXs),
+        Text(
+          'Here is your impact at a glance.',
+          style: theme.textTheme.bodyLarge?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
         ),
       ],
     );
@@ -271,85 +303,196 @@ class _Greeting extends StatelessWidget {
 /// Reads `wallets/{uid}`, which the client can only read — every mutation goes
 /// through the trusted server.
 class _BalanceCard extends StatelessWidget {
-  const _BalanceCard({required this.walletAsync});
+  const _BalanceCard({required this.walletAsync, required this.onViewWallet});
 
   final AsyncValue<WalletModel?> walletAsync;
+  final VoidCallback onViewWallet;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
 
-    return Container(
-      padding: const EdgeInsets.all(AppTheme.gapLg),
-      decoration: BoxDecoration(
-        color: scheme.primaryContainer,
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'POINTS BALANCE',
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: scheme.onPrimaryContainer,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.8,
-            ),
+    final foreground = scheme.onPrimary;
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              scheme.primary,
+              Color.lerp(scheme.primary, scheme.tertiary, .68)!,
+            ],
           ),
-          const SizedBox(height: AppTheme.gapSm),
-          walletAsync.when(
-            loading: () => SizedBox(
-              height: 44,
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: SizedBox(
-                  height: 22,
-                  width: 22,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: scheme.onPrimaryContainer,
+        ),
+        child: Stack(
+          children: [
+            Positioned(
+              right: -44,
+              top: -70,
+              child: Container(
+                width: 190,
+                height: 190,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: foreground.withValues(alpha: .1),
+                    width: 28,
                   ),
                 ),
               ),
             ),
-            // The raw exception used to be printed here. It says nothing to a
-            // user and it is not their problem to diagnose.
-            error: (_, _) => SizedBox(
-              height: 44,
-              child: Align(
-                alignment: Alignment.centerLeft,
+            Padding(
+              padding: const EdgeInsets.all(AppTheme.gapLg),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final value = _BalanceValue(
+                    walletAsync: walletAsync,
+                    foreground: foreground,
+                  );
+                  final button = OutlinedButton.icon(
+                    onPressed: onViewWallet,
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: foreground,
+                      side: BorderSide(color: foreground.withValues(alpha: .4)),
+                      backgroundColor: foreground.withValues(alpha: .08),
+                    ),
+                    icon: const Icon(Icons.arrow_forward, size: 18),
+                    label: const Text('View wallet'),
+                  );
+
+                  if (constraints.maxWidth < 440) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        value,
+                        const SizedBox(height: AppTheme.gapMd),
+                        button,
+                      ],
+                    );
+                  }
+
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Expanded(child: value),
+                      const SizedBox(width: AppTheme.gapMd),
+                      button,
+                    ],
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _BalanceValue extends StatelessWidget {
+  const _BalanceValue({required this.walletAsync, required this.foreground});
+
+  final AsyncValue<WalletModel?> walletAsync;
+  final Color foreground;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          'POINTS BALANCE',
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: foreground.withValues(alpha: .8),
+            fontWeight: FontWeight.w800,
+            letterSpacing: 1.1,
+          ),
+        ),
+        const SizedBox(height: AppTheme.gapSm),
+        walletAsync.when(
+          loading: () => SizedBox(
+            height: 52,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: SizedBox(
+                height: 24,
+                width: 24,
+                child: CircularProgressIndicator(
+                  strokeWidth: 2.5,
+                  color: foreground,
+                ),
+              ),
+            ),
+          ),
+          error: (_, _) => SizedBox(
+            height: 52,
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                'Balance unavailable',
+                style: theme.textTheme.titleMedium?.copyWith(color: foreground),
+              ),
+            ),
+          ),
+          data: (wallet) => Row(
+            crossAxisAlignment: CrossAxisAlignment.baseline,
+            textBaseline: TextBaseline.alphabetic,
+            children: [
+              Flexible(
                 child: Text(
-                  'Balance unavailable',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: scheme.onPrimaryContainer,
+                  '${wallet?.balance ?? 0}',
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.displayMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: -1.5,
+                    color: foreground,
                   ),
                 ),
               ),
-            ),
-            data: (wallet) => Row(
-              crossAxisAlignment: CrossAxisAlignment.baseline,
-              textBaseline: TextBaseline.alphabetic,
-              children: [
-                Text(
-                  '${wallet?.balance ?? 0}',
-                  style: theme.textTheme.displaySmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: scheme.onPrimaryContainer,
-                  ),
+              const SizedBox(width: AppTheme.gapSm),
+              Text(
+                'points',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  color: foreground.withValues(alpha: .82),
                 ),
-                const SizedBox(width: AppTheme.gapSm),
-                Text(
-                  'points',
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    color: scheme.onPrimaryContainer.withValues(alpha: 0.85),
-                  ),
-                ),
-              ],
-            ),
+              ),
+            ],
           ),
-        ],
-      ),
+        ),
+      ],
+    );
+  }
+}
+
+/// One column on phones, two on tablets and desktop. The fixed maximum keeps
+/// each card readable while making useful use of a wide browser window.
+class _ActionGrid extends StatelessWidget {
+  const _ActionGrid({required this.children});
+
+  final List<Widget> children;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final columns = constraints.maxWidth >= 700 ? 2 : 1;
+        final width = columns == 1
+            ? constraints.maxWidth
+            : (constraints.maxWidth - AppTheme.gapMd) / 2;
+
+        return Wrap(
+          spacing: AppTheme.gapMd,
+          runSpacing: AppTheme.gapMd,
+          children: [
+            for (final child in children) SizedBox(width: width, child: child),
+          ],
+        );
+      },
     );
   }
 }
@@ -374,7 +517,7 @@ class _SuspendedNotice extends StatelessWidget {
     final detail = indefinite || until == null
         ? 'Submitting and claiming are unavailable. Contact an administrator.'
         : 'Submitting and claiming are unavailable until '
-            '${formatDate(until)}. You can still read your history.';
+              '${formatDate(until)}. You can still read your history.';
 
     return Card(
       color: scheme.errorContainer,
@@ -399,8 +542,9 @@ class _SuspendedNotice extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(
                     detail,
-                    style: theme.textTheme.bodySmall
-                        ?.copyWith(color: scheme.onErrorContainer),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onErrorContainer,
+                    ),
                   ),
                 ],
               ),
@@ -410,7 +554,6 @@ class _SuspendedNotice extends StatelessWidget {
       ),
     );
   }
-
 }
 
 class _HomeError extends StatelessWidget {
@@ -428,20 +571,29 @@ class _HomeError extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(Icons.cloud_off_outlined,
-                size: 40, color: theme.colorScheme.error),
+            Icon(
+              Icons.cloud_off_outlined,
+              size: 40,
+              color: theme.colorScheme.error,
+            ),
             const SizedBox(height: AppTheme.gapMd),
-            Text('Your profile did not load',
-                style: theme.textTheme.titleMedium),
+            Text(
+              'Your profile did not load',
+              style: theme.textTheme.titleMedium,
+            ),
             const SizedBox(height: AppTheme.gapSm),
             Text(
               'Check your connection and try again.',
               textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: AppTheme.gapMd),
-            FilledButton.tonal(onPressed: onRetry, child: const Text('Try again')),
+            FilledButton.tonal(
+              onPressed: onRetry,
+              child: const Text('Try again'),
+            ),
           ],
         ),
       ),

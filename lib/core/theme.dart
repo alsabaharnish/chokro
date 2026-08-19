@@ -1,3 +1,4 @@
+import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
 
 /// The app's single source of visual truth.
@@ -13,8 +14,10 @@ import 'package:flutter/material.dart';
 class AppTheme {
   const AppTheme._();
 
-  /// Green 800. The recycling association is the point.
-  static const Color seed = Color(0xFF2E7D32);
+  /// A deep emerald that still reads as trustworthy rather than fluorescent.
+  /// The generated secondary and tertiary tones add enough blue to keep the
+  /// interface from looking like a generic "green app".
+  static const Color seed = Color(0xFF006C4C);
 
   /// Standard gaps, so vertical rhythm is a choice from a set rather than a
   /// number typed at each call site. The home screen had a doubled `16` and a
@@ -24,10 +27,16 @@ class AppTheme {
   static const double gapMd = 16;
   static const double gapLg = 24;
   static const double gapXl = 32;
+  static const double gap2Xl = 48;
+
+  static const double radiusSm = 12;
+  static const double radiusMd = 18;
+  static const double radiusLg = 28;
 
   /// Content stops stretching past this and centres. Long lines of text are
   /// hard to read, and a 1600 px-wide form looks broken.
-  static const double maxContentWidth = 720;
+  static const double maxContentWidth = 760;
+  static const double maxDashboardWidth = 1120;
   static const double maxFormWidth = 440;
 
   static ThemeData light() => _build(Brightness.light);
@@ -42,6 +51,21 @@ class AppTheme {
     return ThemeData(
       colorScheme: scheme,
       useMaterial3: true,
+      visualDensity: VisualDensity.standard,
+      materialTapTargetSize: MaterialTapTargetSize.padded,
+
+      // Route changes are intentionally quiet. iOS keeps its familiar swipe
+      // transition while the other targets share a short, low-motion fade.
+      pageTransitionsTheme: const PageTransitionsTheme(
+        builders: {
+          TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
+          TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.linux: FadeUpwardsPageTransitionsBuilder(),
+          TargetPlatform.windows: FadeUpwardsPageTransitionsBuilder(),
+          TargetPlatform.fuchsia: FadeUpwardsPageTransitionsBuilder(),
+        },
+      ),
 
       // Fill the surface rather than leaving cards floating on white: with
       // Material 3's low-contrast surfaces, elevation alone does not read as a
@@ -50,14 +74,16 @@ class AppTheme {
 
       appBarTheme: AppBarTheme(
         centerTitle: false,
-        backgroundColor: scheme.surface,
+        backgroundColor: scheme.surface.withValues(alpha: .96),
         foregroundColor: scheme.onSurface,
-        surfaceTintColor: scheme.surfaceTint,
+        surfaceTintColor: Colors.transparent,
         elevation: 0,
-        scrolledUnderElevation: 2,
+        scrolledUnderElevation: 0,
+        toolbarHeight: 64,
         titleTextStyle: TextStyle(
           fontSize: 20,
-          fontWeight: FontWeight.w600,
+          fontWeight: FontWeight.w700,
+          letterSpacing: -.25,
           color: scheme.onSurface,
         ),
       ),
@@ -66,9 +92,9 @@ class AppTheme {
         elevation: 0,
         margin: EdgeInsets.zero,
         clipBehavior: Clip.antiAlias,
-        color: scheme.surfaceContainerLow,
+        color: scheme.surfaceContainerLowest,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(radiusMd),
           // A hairline outline instead of a shadow. It survives dark mode,
           // where a shadow on a dark surface is invisible.
           side: BorderSide(color: scheme.outlineVariant),
@@ -79,24 +105,28 @@ class AppTheme {
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
         fillColor: scheme.surfaceContainerLowest,
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: gapMd,
+          vertical: 17,
+        ),
         border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(radiusSm),
           borderSide: BorderSide(color: scheme.outline),
         ),
         enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(radiusSm),
           borderSide: BorderSide(color: scheme.outlineVariant),
         ),
         focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(radiusSm),
           borderSide: BorderSide(color: scheme.primary, width: 2),
         ),
         errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(radiusSm),
           borderSide: BorderSide(color: scheme.error),
         ),
         focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(radiusSm),
           borderSide: BorderSide(color: scheme.error, width: 2),
         ),
       ),
@@ -120,7 +150,7 @@ class AppTheme {
         style: FilledButton.styleFrom(
           minimumSize: const Size(64, 48),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(radiusSm),
           ),
           textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
         ),
@@ -129,7 +159,7 @@ class AppTheme {
         style: OutlinedButton.styleFrom(
           minimumSize: const Size(64, 48),
           shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(radiusSm),
           ),
           textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
         ),
@@ -146,31 +176,63 @@ class AppTheme {
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(radiusSm),
         ),
         insetPadding: const EdgeInsets.all(gapMd),
+        showCloseIcon: true,
       ),
 
       dialogTheme: DialogThemeData(
+        backgroundColor: scheme.surfaceContainerLowest,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(20),
+          borderRadius: BorderRadius.circular(radiusLg),
+        ),
+      ),
+
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: scheme.surfaceContainerLowest,
+        modalBackgroundColor: scheme.surfaceContainerLowest,
+        showDragHandle: true,
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(radiusLg)),
         ),
       ),
 
       navigationBarTheme: NavigationBarThemeData(
-        backgroundColor: scheme.surfaceContainer,
+        backgroundColor: scheme.surfaceContainerLowest,
         indicatorColor: scheme.secondaryContainer,
         elevation: 0,
+        height: 72,
         labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
       ),
 
       navigationRailTheme: NavigationRailThemeData(
-        backgroundColor: scheme.surfaceContainer,
+        backgroundColor: scheme.surfaceContainerLowest,
         indicatorColor: scheme.secondaryContainer,
+        elevation: 0,
+        minWidth: 88,
+        useIndicator: true,
+      ),
+
+      popupMenuTheme: PopupMenuThemeData(
+        color: scheme.surfaceContainerLowest,
+        surfaceTintColor: Colors.transparent,
+        elevation: 4,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(radiusSm),
+          side: BorderSide(color: scheme.outlineVariant),
+        ),
+      ),
+
+      iconButtonTheme: IconButtonThemeData(
+        style: IconButton.styleFrom(minimumSize: const Size.square(44)),
       ),
 
       listTileTheme: const ListTileThemeData(
-        contentPadding: EdgeInsets.symmetric(horizontal: gapMd, vertical: gapXs),
+        contentPadding: EdgeInsets.symmetric(
+          horizontal: gapMd,
+          vertical: gapXs,
+        ),
       ),
 
       chipTheme: ChipThemeData(
@@ -186,8 +248,24 @@ class AppTheme {
         thickness: 1,
       ),
 
-      progressIndicatorTheme: ProgressIndicatorThemeData(
-        color: scheme.primary,
+      progressIndicatorTheme: ProgressIndicatorThemeData(color: scheme.primary),
+
+      scrollbarTheme: ScrollbarThemeData(
+        thickness: const WidgetStatePropertyAll(6),
+        radius: const Radius.circular(999),
+        thumbColor: WidgetStateProperty.resolveWith((states) {
+          final opacity = states.contains(WidgetState.hovered) ? .5 : .28;
+          return scheme.onSurfaceVariant.withValues(alpha: opacity);
+        }),
+      ),
+
+      tooltipTheme: TooltipThemeData(
+        waitDuration: const Duration(milliseconds: 450),
+        decoration: BoxDecoration(
+          color: scheme.inverseSurface,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        textStyle: TextStyle(color: scheme.onInverseSurface),
       ),
     );
   }
