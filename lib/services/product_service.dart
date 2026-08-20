@@ -10,6 +10,7 @@ import '../core/api_config.dart';
 import '../core/constants.dart';
 import '../core/network_errors.dart';
 import '../core/product_taxonomy.dart';
+import '../core/wire_values.dart';
 import '../models/product_model.dart';
 
 /// Marketplace listings (F4.1, F4.2).
@@ -197,11 +198,11 @@ class ProductService {
 
     final body = _decode(response.body);
     if (response.statusCode == 200) {
-      return (body['changed'] as num?)?.toInt() ?? 0;
+      return wireInt(body['changed']) ?? 0;
     }
 
     throw ProductException(
-      (body['message'] as String?) ??
+      wireString(body['message']) ??
           'Their listings could not be updated (${response.statusCode}).',
     );
   }

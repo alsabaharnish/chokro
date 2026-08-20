@@ -192,6 +192,17 @@ const String accountIncompletePath = '/account-incomplete';
 /// Auth or profile could not be read because the service/network failed.
 const String startupErrorPath = '/startup-error';
 
+/// Pure route policies, kept outside GoRouter so role/suspension agreement can
+/// be tested without constructing Firebase-backed providers.
+bool canAccessAdminRoutes(UserModel user) => user.isAdmin && user.isActive;
+
+String? activeRouteRedirect(UserModel user) => user.isActive ? null : '/home';
+
+String? sellerRouteRedirect(UserModel user) {
+  if (!user.isActive) return '/home';
+  return user.isSeller ? null : '/apply-seller';
+}
+
 /// What the gate knows about the signed-in account at redirect time.
 enum _Gate {
   /// Auth has not reported yet, or the user document is still loading. Not the
@@ -279,7 +290,10 @@ final routerProvider = Provider<GoRouter>((ref) {
       _Gate.anonymous => '/login',
       _Gate.profileMissing => accountIncompletePath,
       _Gate.failed => startupErrorPath,
-      _Gate.signedIn => user!.isAdmin ? null : '/home',
+      // The role alone is not authority. Firestore and the server both revoke
+      // privileged actions during a live suspension, so the route must agree
+      // instead of opening a console whose every request will be refused.
+      _Gate.signedIn => canAccessAdminRoutes(user!) ? null : '/home',
     };
   }
 
@@ -299,7 +313,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       _Gate.failed => startupErrorPath,
       // Sent to the application form rather than bounced to `/home`: a user who
       // reached this route wants to sell, and the next step exists.
-      _Gate.signedIn => user!.isSeller ? null : '/apply-seller',
+      _Gate.signedIn => sellerRouteRedirect(user!),
     };
   }
 
@@ -312,6 +326,12 @@ final routerProvider = Provider<GoRouter>((ref) {
       _Gate.failed => startupErrorPath,
       _Gate.signedIn => null,
     };
+  }
+
+  String? requireActive(BuildContext context, GoRouterState state) {
+    final signedIn = requireSignedIn(context, state);
+    if (signedIn != null) return signedIn;
+    return activeRouteRedirect(resolve().user!);
   }
 
   return GoRouter(
@@ -396,8 +416,8 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/apply-seller',
         builder: (context, state) => const SellerApplicationView(),
         redirect: (context, state) {
-          final signedIn = requireSignedIn(context, state);
-          if (signedIn != null) return signedIn;
+          final active = requireActive(context, state);
+          if (active != null) return active;
           // Already a seller: the application form has nothing to offer.
           return resolve().user!.isSeller ? '/home' : null;
         },
@@ -412,7 +432,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/claims/new',
         builder: (context, state) => const ClaimSubmitView(),
-        redirect: requireSignedIn,
+        redirect: requireActive,
       ),
       GoRoute(
         path: '/profile',
@@ -432,22 +452,22 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/dispose/scan',
         builder: (context, state) => const ScanView(),
-        redirect: requireSignedIn,
+        redirect: requireActive,
       ),
       GoRoute(
         path: '/dispose/photo',
         builder: (context, state) => const DisposalPhotoView(),
-        redirect: requireSignedIn,
+        redirect: requireActive,
       ),
       GoRoute(
         path: '/dispose/location',
         builder: (context, state) => const DisposalLocationView(),
-        redirect: requireSignedIn,
+        redirect: requireActive,
       ),
       GoRoute(
         path: '/dispose/declare',
         builder: (context, state) => const DisposalDeclareView(),
-        redirect: requireSignedIn,
+        redirect: requireActive,
       ),
       // ----- marketplace (F4.x) -----
       GoRoute(
@@ -469,7 +489,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/checkout',
         builder: (context, state) => const CheckoutView(),
-        redirect: requireSignedIn,
+        redirect: requireActive,
       ),
       GoRoute(
         path: '/orders',

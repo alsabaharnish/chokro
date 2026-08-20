@@ -24,13 +24,17 @@ class AppealService {
   CollectionReference<Map<String, dynamic>> get _appeals =>
       _db.collection('appeals');
 
-  /// Raises an appeal and returns its document id.
+  /// Raises an appeal and returns its deterministic document id.
+  ///
+  /// A second write for the same user and subject becomes an update, which the
+  /// rules deny. This protects the review queue even when the UI is bypassed.
   Future<String> create(AppealModel appeal) async {
-    final doc = await _appeals.add(<String, dynamic>{
+    final id = appeal.documentId;
+    await _appeals.doc(id).set(<String, dynamic>{
       ...appeal.toCreateJson(),
       'createdAt': FieldValue.serverTimestamp(),
     });
-    return doc.id;
+    return id;
   }
 
   /// A user's own appeals, newest first.

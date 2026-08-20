@@ -81,6 +81,17 @@ void main() {
         isNull,
       );
     });
+
+    test('wrong provenance field types do not throw', () {
+      final provenance = PolicyProvenance.fromJson({
+        'updatedBy': 42,
+        'updatedByName': <String>['not', 'a', 'name'],
+      });
+
+      expect(provenance.updatedBy, isNull);
+      expect(provenance.updatedByName, isNull);
+      expect(provenance.editor, 'an administrator');
+    });
   });
 
   group('PolicySnapshot.fromJson', () {

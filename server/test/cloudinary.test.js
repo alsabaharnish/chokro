@@ -1,7 +1,23 @@
 const {
+  decodeImage,
+  imageMimeType,
   isTrustedImageReference,
   PHOTO_KINDS,
 } = require('../src/cloudinary');
+
+describe('image payloads', () => {
+  test('preserves the actual MIME type for JPEG and PNG uploads', () => {
+    const jpeg = decodeImage(Buffer.from([0xff, 0xd8, 0xff, 0x00]).toString('base64'));
+    const png = decodeImage(
+      Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).toString(
+        'base64',
+      ),
+    );
+
+    expect(imageMimeType(jpeg)).toBe('image/jpeg');
+    expect(imageMimeType(png)).toBe('image/png');
+  });
+});
 
 describe('trusted Cloudinary references', () => {
   const clean = {

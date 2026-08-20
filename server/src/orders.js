@@ -156,11 +156,17 @@ async function confirmOrder({ orderId, buyerUid }) {
       configSnap.exists ? configSnap.data() : null,
     );
 
-    const payable = Number.isInteger(order.payable) ? order.payable : 0;
+    if (!Number.isSafeInteger(order.payable) || order.payable < 0) {
+      throw new Error('That order has an invalid payable amount.');
+    }
+    const payable = order.payable;
     const award = policyModule.purchaseAward(policy, payable);
 
     // ---- writes ----
-    let balanceAfter = walletSnap.data().balance || 0;
+    let balanceAfter = walletSnap.data().balance;
+    if (!Number.isSafeInteger(balanceAfter) || balanceAfter < 0) {
+      throw new Error('This wallet has an invalid balance.');
+    }
 
     if (award > 0) {
       // Through `award.js`, like every other credit in the system.

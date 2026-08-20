@@ -109,7 +109,9 @@ class TransactionModel {
   /// has been through JSON may arrive as `double` or as a numeric string.
   static int? _asInt(Object? value) {
     if (value is int) return value;
-    if (value is num) return value.toInt();
+    if (value is num && value.isFinite && value == value.truncateToDouble()) {
+      return value.toInt();
+    }
     if (value is String) return int.tryParse(value);
     return null;
   }
@@ -120,10 +122,10 @@ class TransactionModel {
     final created = data['createdAt'];
     return TransactionModel(
       id: id,
-      userId: (data['userId'] as String?) ?? '',
+      userId: data['userId'] is String ? data['userId'] as String : '',
       delta: _asInt(data['delta']) ?? 0,
       source: parseTransactionSource(data['source']),
-      refId: data['refId'] as String?,
+      refId: data['refId'] is String ? data['refId'] as String : null,
       balanceAfter: _asInt(data['balanceAfter']),
       createdAt: created is DateTime ? created : null,
     );

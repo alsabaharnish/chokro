@@ -151,6 +151,10 @@ function validAppeal(uid, subjectId, overrides = {}) {
   };
 }
 
+function appealId(uid, subjectId, subjectType = 'disposal') {
+  return `${uid}_${subjectType}_${subjectId}`;
+}
+
 beforeAll(async () => {
   setLogLevel('error');
   testEnv = await initializeTestEnvironment({
@@ -233,6 +237,45 @@ describe('creating a product', () => {
       setDoc(
         doc(db, 'products', 'p8'),
         validProduct(SELLER, { titleLower: 'organic honey' }),
+      ),
+    );
+  });
+
+  it('every search token must be a bounded normalized string', async () => {
+    const db = testEnv.authenticatedContext(SELLER).firestore();
+    await assertFails(
+      setDoc(
+        doc(db, 'products', 'bad_token_type'),
+        validProduct(SELLER, { searchTokens: ['bamboo', { nested: true }] }),
+      ),
+    );
+    await assertFails(
+      setDoc(
+        doc(db, 'products', 'bad_last_token'),
+        validProduct(SELLER, {
+          searchTokens: [
+            ...Array.from({ length: 29 }, (_, i) => `token${i}`),
+            'X'.repeat(200),
+          ],
+        }),
+      ),
+    );
+  });
+
+  it('every tag must be a bounded normalized string', async () => {
+    const db = testEnv.authenticatedContext(SELLER).firestore();
+    await assertFails(
+      setDoc(
+        doc(db, 'products', 'bad_tag'),
+        validProduct(SELLER, { tags: ['eco-friendly', 7] }),
+      ),
+    );
+    await assertFails(
+      setDoc(
+        doc(db, 'products', 'bad_last_tag'),
+        validProduct(SELLER, {
+          tags: ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'x'.repeat(41)],
+        }),
       ),
     );
   });
@@ -548,6 +591,33 @@ describe('carts', () => {
     );
   });
 
+  it('a cart item may carry only a product id and whole bounded quantity', async () => {
+    const db = testEnv.authenticatedContext(BUYER).firestore();
+    for (const item of [
+      { productId: 'p1', qty: 1, unitPrice: 1 },
+      { productId: 'p1', qty: 1.5 },
+      { productId: 'p1', qty: 0 },
+      { productId: 'p1', qty: 21 },
+      { productId: 'x'.repeat(129), qty: 1 },
+    ]) {
+      await assertFails(
+        setDoc(doc(db, 'carts', BUYER), { ...cart(BUYER), items: [item] }),
+      );
+    }
+  });
+
+  it('validates the final slot of a full cart', async () => {
+    const db = testEnv.authenticatedContext(BUYER).firestore();
+    const items = Array.from({ length: 20 }, (_, i) => ({
+      productId: `p${i}`,
+      qty: 1,
+    }));
+    items[19] = { productId: 'p19', qty: 0 };
+    await assertFails(
+      setDoc(doc(db, 'carts', BUYER), { ...cart(BUYER), items }),
+    );
+  });
+
   it('a cart beyond the item ceiling is refused', async () => {
     const db = testEnv.authenticatedContext(BUYER).firestore();
     await assertFails(
@@ -671,7 +741,10 @@ describe('raising an appeal', () => {
   it('a user may appeal their own rejected disposal', async () => {
     const db = testEnv.authenticatedContext(BUYER).firestore();
     await assertSucceeds(
-      setDoc(doc(db, 'appeals', 'a1'), validAppeal(BUYER, 'd_rejected')),
+      setDoc(
+        doc(db, 'appeals', appealId(BUYER, 'd_rejected')),
+        validAppeal(BUYER, 'd_rejected'),
+      ),
     );
   });
 
@@ -680,7 +753,7 @@ describe('raising an appeal', () => {
     const db = testEnv.authenticatedContext(BUYER).firestore();
     await assertSucceeds(
       setDoc(
-        doc(db, 'appeals', 'a2'),
+        doc(db, 'appeals', appealId(BUYER, 'c_rejected', 'claim')),
         validAppeal(BUYER, 'c_rejected', { subjectType: 'claim' }),
       ),
     );
@@ -689,7 +762,10 @@ describe('raising an appeal', () => {
   it('a user may not appeal somebody else rejection', async () => {
     const db = testEnv.authenticatedContext(SELLER).firestore();
     await assertFails(
-      setDoc(doc(db, 'appeals', 'a3'), validAppeal(SELLER, 'd_rejected')),
+      setDoc(
+        doc(db, 'appeals', appealId(SELLER, 'd_rejected')),
+        validAppeal(SELLER, 'd_rejected'),
+      ),
     );
   });
 
@@ -705,14 +781,20 @@ describe('raising an appeal', () => {
 
     const db = testEnv.authenticatedContext(BUYER).firestore();
     await assertFails(
-      setDoc(doc(db, 'appeals', 'a4'), validAppeal(BUYER, 'd_approved')),
+      setDoc(
+        doc(db, 'appeals', appealId(BUYER, 'd_approved')),
+        validAppeal(BUYER, 'd_approved'),
+      ),
     );
   });
 
   it('a user may not appeal a submission that does not exist', async () => {
     const db = testEnv.authenticatedContext(BUYER).firestore();
     await assertFails(
-      setDoc(doc(db, 'appeals', 'a5'), validAppeal(BUYER, 'no_such_disposal')),
+      setDoc(
+        doc(db, 'appeals', appealId(BUYER, 'no_such_disposal')),
+        validAppeal(BUYER, 'no_such_disposal'),
+      ),
     );
   });
 
@@ -720,7 +802,7 @@ describe('raising an appeal', () => {
     const db = testEnv.authenticatedContext(BUYER).firestore();
     await assertFails(
       setDoc(
-        doc(db, 'appeals', 'a6'),
+        doc(db, 'appeals', appealId(BUYER, 'd_rejected')),
         validAppeal(BUYER, 'd_rejected', { status: 'upheld' }),
       ),
     );
@@ -730,7 +812,7 @@ describe('raising an appeal', () => {
     const db = testEnv.authenticatedContext(BUYER).firestore();
     await assertFails(
       setDoc(
-        doc(db, 'appeals', 'a7'),
+        doc(db, 'appeals', appealId(BUYER, 'd_rejected')),
         validAppeal(BUYER, 'd_rejected', {
           response: 'Reviewed and accepted.',
           reviewedBy: ADMIN,
@@ -743,18 +825,35 @@ describe('raising an appeal', () => {
     const db = testEnv.authenticatedContext(BUYER).firestore();
     await assertFails(
       setDoc(
-        doc(db, 'appeals', 'a8'),
+        doc(db, 'appeals', appealId(BUYER, 'd_rejected')),
         validAppeal(BUYER, 'd_rejected', { message: 'unfair' }),
       ),
     );
   });
 
-  it('a suspended user may not appeal', async () => {
+  it('a suspended user may appeal their own rejection', async () => {
     await seedUser('susp', 'buyer', 'suspended');
     await seedRejectedDisposal('d_susp', 'susp');
     const db = testEnv.authenticatedContext('susp').firestore();
+    await assertSucceeds(
+      setDoc(
+        doc(db, 'appeals', appealId('susp', 'd_susp')),
+        validAppeal('susp', 'd_susp'),
+      ),
+    );
+  });
+
+  it('a user cannot raise a second appeal for the same rejection', async () => {
+    const db = testEnv.authenticatedContext(BUYER).firestore();
+    const ref = doc(db, 'appeals', appealId(BUYER, 'd_rejected'));
+    await assertSucceeds(setDoc(ref, validAppeal(BUYER, 'd_rejected')));
     await assertFails(
-      setDoc(doc(db, 'appeals', 'a9'), validAppeal('susp', 'd_susp')),
+      setDoc(
+        ref,
+        validAppeal(BUYER, 'd_rejected', {
+          message: 'I am submitting another explanation for the same decision.',
+        }),
+      ),
     );
   });
 });

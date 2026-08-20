@@ -141,6 +141,30 @@ describe('points policy parsing', () => {
     expect(policy.fromDoc(undefined)).toEqual(policy.defaults());
   });
 
+  test('does not truncate fractional or non-finite stored values', () => {
+    expect(policy.fromDoc({ disposalAward: 40.5 }).disposalAward).toBe(
+      policy.DEFAULTS.disposalAward,
+    );
+    expect(policy.fromDoc({ disposalAward: Infinity }).disposalAward).toBe(
+      policy.DEFAULTS.disposalAward,
+    );
+  });
+
+  test('strict request parsing refuses fractional and missing values', () => {
+    const body = policy.defaults();
+    body.disposalAward = 40.5;
+    const fractional = policy.fromRequest(body);
+    const missing = policy.fromRequest({});
+
+    expect(fractional.problems).toContain(
+      'disposalAward is required and must be a whole safe integer.',
+    );
+    expect(fractional.policy.disposalAward).toBe(
+      policy.DEFAULTS.disposalAward,
+    );
+    expect(missing.problems).toHaveLength(Object.keys(policy.DEFAULTS).length);
+  });
+
   test('reads tolerantly but does not silently fix an invalid policy', () => {
     const parsed = policy.fromDoc({ claimAward: 90 });
     expect(parsed.claimAward).toBe(90);

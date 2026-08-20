@@ -10,6 +10,7 @@ import '../core/api_config.dart';
 import '../models/bin_model.dart';
 
 import '../core/network_errors.dart';
+import '../core/wire_values.dart';
 
 /// Bin registration through the trusted service (F2.1).
 ///
@@ -55,7 +56,7 @@ class BinAdminService {
     if (response.statusCode == 200 || response.statusCode == 201) {
       final bin = body['bin'];
       if (bin is Map<String, dynamic>) {
-        return BinModel.fromJson(bin, id: bin['id'] as String?);
+        return BinModel.fromJson(bin, id: wireString(bin['id']));
       }
       throw const BinAdminException('The server did not return the new bin.');
     }
@@ -78,7 +79,7 @@ class BinAdminService {
     }
 
     throw BinAdminException(
-      (body['message'] as String?) ??
+      wireString(body['message']) ??
           'The bin could not be registered (${response.statusCode}).',
     );
   }
@@ -101,7 +102,7 @@ class BinAdminService {
 
     final body = _decode(response.body);
     throw BinAdminException(
-      (body['message'] as String?) ??
+      wireString(body['message']) ??
           'The change could not be saved (${response.statusCode}).',
     );
   }

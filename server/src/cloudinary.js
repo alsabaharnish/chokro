@@ -71,6 +71,12 @@ function looksLikePng(buffer) {
   return sig.every((byte, i) => buffer[i] === byte);
 }
 
+function imageMimeType(buffer) {
+  if (looksLikeJpeg(buffer)) return 'image/jpeg';
+  if (looksLikePng(buffer)) return 'image/png';
+  return null;
+}
+
 const MAX_BYTES = 5 * 1024 * 1024;
 
 /**
@@ -92,7 +98,7 @@ function decodeImage(base64) {
   if (buffer.length > MAX_BYTES) {
     throw new Error('That image is too large. The app should compress first.');
   }
-  if (!looksLikeJpeg(buffer) && !looksLikePng(buffer)) {
+  if (imageMimeType(buffer) === null) {
     throw new Error('That file is not a JPEG or PNG image.');
   }
 
@@ -119,7 +125,8 @@ async function uploadImage({ base64, uid, kind = 'disposals' }) {
   configure();
 
   const buffer = decodeImage(base64);
-  const dataUri = `data:image/jpeg;base64,${buffer.toString('base64')}`;
+  const mimeType = imageMimeType(buffer);
+  const dataUri = `data:${mimeType};base64,${buffer.toString('base64')}`;
 
   const result = await cloudinary.uploader.upload(dataUri, {
     folder: `chokro/${kind}/${uid}`,
@@ -216,6 +223,7 @@ function isTrustedImageReference({
 module.exports = {
   uploadImage,
   decodeImage,
+  imageMimeType,
   isTrustedImageReference,
   PHOTO_KINDS,
   MAX_BYTES,

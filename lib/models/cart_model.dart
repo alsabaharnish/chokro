@@ -11,12 +11,9 @@
 /// screen showed. Price is resolved from the product document at checkout, by
 /// the server, every time.
 ///
-/// It is also why `firestore.rules` can afford to be permissive about this
-/// document's contents. The cart is the user's own scratchpad and carries no
-/// value: the rules pin the owner, the top-level key set and the item count, and
-/// the *shape of each item* is enforced where it is read — the server resolves
-/// `productId` against a real listing and ignores everything else it finds. A
-/// malformed cart cannot buy anything; it fails checkout.
+/// Firestore rules validate every bounded item and the server validates again at
+/// checkout. The second check protects against legacy or imported data because
+/// trusted server code bypasses client security rules.
 library;
 
 /// One line the buyer intends to purchase.
@@ -50,7 +47,11 @@ class CartItem {
     final productId = raw['productId'];
     final qty = raw['qty'];
     if (productId is! String || productId.isEmpty) return null;
-    final count = qty is num ? qty.toInt() : null;
+    final count = qty is int
+        ? qty
+        : qty is num && qty.isFinite && qty == qty.truncateToDouble()
+        ? qty.toInt()
+        : null;
     if (count == null || count < 1 || count > maxQty) return null;
     return CartItem(productId: productId, qty: count);
   }

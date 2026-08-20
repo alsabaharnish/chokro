@@ -112,7 +112,7 @@ describe('groupBySeller', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Cart parsing — the "enforced where it is read" half of the rules bargain
+// Cart parsing — defence in depth behind the element-level Firestore rules
 // ---------------------------------------------------------------------------
 
 describe('readCartItems', () => {
@@ -176,14 +176,12 @@ describe('readCartItems', () => {
     ).toThrow();
   });
 
-  it('ignores anything a client parked alongside the two real keys', () => {
-    // The rules do not check element shape (they cannot iterate a list), so a
-    // cached price CAN reach the document. It must never reach the arithmetic.
-    const items = readCartItems({
-      items: [{ productId: 'p1', qty: 2, unitPrice: 1, subtotal: 1 }],
-    });
-
-    expect(items).toEqual([{ productId: 'p1', qty: 2 }]);
+  it('refuses fields parked alongside the two real keys', () => {
+    expect(() =>
+      readCartItems({
+        items: [{ productId: 'p1', qty: 2, unitPrice: 1, subtotal: 1 }],
+      }),
+    ).toThrow(/could not be read/i);
   });
 });
 

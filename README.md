@@ -39,7 +39,7 @@ flutter run --dart-define=CHOKRO_API=http://10.0.2.2:8787
 Use `localhost` for Flutter web/iOS simulator, `10.0.2.2` for the Android
 emulator, or the development computer's LAN address for a physical device.
 
-The trusted service uses Node 20+:
+The trusted service uses Node 22 LTS (the version pinned by `server/package.json`):
 
 ```bash
 cd server

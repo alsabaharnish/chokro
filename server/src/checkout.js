@@ -26,7 +26,7 @@
 const { db, admin, serverTimestamp } = require('./firebase');
 const policyModule = require('./pointsPolicy');
 const { creditWalletInTransaction, SOURCES } = require('./award');
-const { isActiveProfile } = require('./suspension');
+const { isTradingProfile } = require('./suspension');
 
 /** The only settlement method there is. No card data lives in any schema (§6.2). */
 const SETTLEMENT_METHODS = Object.freeze(['cashOnDelivery']);
@@ -106,12 +106,9 @@ function groupBySeller(lines) {
 /**
  * Reads the cart array into `{productId, qty}` pairs, refusing anything else.
  *
- * `firestore.rules` deliberately does not check the shape of each element — the
- * cart carries no value, and rules cannot iterate a list anyway (§6.3). This is
- * the "enforced where it is read" half of that bargain, and it is strict: a
- * malformed entry fails the checkout rather than being quietly skipped, because
- * silently dropping a line a buyer believes they are buying is worse than
- * telling them the cart is broken.
+ * Rules validate all 20 bounded slots before storage. This second validation is
+ * still required because the Admin SDK bypasses rules and legacy or imported
+ * data can exist. A malformed entry fails rather than being quietly skipped.
  */
 function readCartItems(cartData) {
   const raw = cartData && Array.isArray(cartData.items) ? cartData.items : [];
@@ -125,7 +122,14 @@ function readCartItems(cartData) {
   const items = [];
 
   for (const entry of raw) {
-    if (!entry || typeof entry !== 'object') {
+    if (
+      !entry ||
+      typeof entry !== 'object' ||
+      Array.isArray(entry) ||
+      Object.keys(entry).length !== 2 ||
+      !Object.prototype.hasOwnProperty.call(entry, 'productId') ||
+      !Object.prototype.hasOwnProperty.call(entry, 'qty')
+    ) {
       throw new Error('Your cart could not be read. Empty it and try again.');
     }
     const { productId, qty } = entry;
@@ -218,10 +222,18 @@ async function checkout({
       if (product.active !== true) {
         throw new Error(`"${product.title}" is no longer for sale.`);
       }
-      if (!Number.isInteger(product.price) || product.price < 1) {
+      if (
+        !Number.isSafeInteger(product.price) ||
+        product.price < 1 ||
+        product.price > 1000000
+      ) {
         throw new Error(`"${product.title}" has no valid price.`);
       }
-      if (!Number.isInteger(product.stock) || product.stock < qty) {
+      if (
+        !Number.isSafeInteger(product.stock) ||
+        product.stock < qty ||
+        product.stock > 100000
+      ) {
         throw new Error(
           `"${product.title}" has only ${product.stock || 0} left.`,
         );
@@ -231,6 +243,9 @@ async function checkout({
       // purchase points for moving money between your own hands.
       if (product.sellerId === buyerUid) {
         throw new Error('You cannot buy your own listing.');
+      }
+      if (typeof product.sellerId !== 'string' || product.sellerId.length === 0) {
+        throw new Error(`"${product.title}" no longer has a valid seller.`);
       }
 
       lines.push({
@@ -247,9 +262,11 @@ async function checkout({
 
     const groups = groupBySeller(lines);
 
-    // Seller profiles, for the verified name on the order and the suspension
-    // check. A suspended seller's listings are swept out of the catalogue, but
-    // a cart filled before the sweep would otherwise still close.
+    // Seller profiles, for the verified name and current trading authority. A
+    // suspended seller's listings are swept out of the catalogue, but a cart
+    // filled before the sweep would otherwise still close. Checking the role as
+    // well prevents new orders after an administrator demotes a seller while an
+    // old listing is still active.
     const sellerRefs = groups.map((group) =>
       firestore.collection('users').doc(group.sellerId),
     );
@@ -262,7 +279,7 @@ async function checkout({
         throw new Error('A seller in your cart no longer has an account.');
       }
       const seller = snap.data();
-      if (!isActiveProfile(seller)) {
+      if (!isTradingProfile(seller)) {
         throw new Error(
           `${seller.name || 'A seller'} is not currently trading. Remove their ` +
             'items to continue.',
@@ -276,7 +293,10 @@ async function checkout({
       group.lines.reduce((sum, line) => sum + line.unitPrice * line.qty, 0),
     );
     const subtotal = subtotals.reduce((sum, value) => sum + value, 0);
-    const balance = walletSnap.data().balance || 0;
+    const balance = walletSnap.data().balance;
+    if (!Number.isSafeInteger(balance) || balance < 0) {
+      throw new Error('Your wallet has an invalid balance. Contact support.');
+    }
 
     const redemption = policyModule.applyRedemption(policy, {
       subtotal,

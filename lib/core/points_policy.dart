@@ -110,7 +110,9 @@ class PointsPolicy {
     int read(String key, int fallback) {
       final value = map[key];
       if (value is int) return value;
-      if (value is num) return value.toInt();
+      if (value is num && value.isFinite && value.truncateToDouble() == value) {
+        return value.toInt();
+      }
       return fallback;
     }
 
@@ -118,12 +120,18 @@ class PointsPolicy {
       disposalAward: read('disposalAward', defaults.disposalAward),
       claimAward: read('claimAward', defaults.claimAward),
       claimQuotaPerWeek: read('claimQuotaPerWeek', defaults.claimQuotaPerWeek),
-      purchaseAwardPercent:
-          read('purchaseAwardPercent', defaults.purchaseAwardPercent),
-      redemptionPointsPerBlock:
-          read('redemptionPointsPerBlock', defaults.redemptionPointsPerBlock),
-      redemptionTakaPerBlock:
-          read('redemptionTakaPerBlock', defaults.redemptionTakaPerBlock),
+      purchaseAwardPercent: read(
+        'purchaseAwardPercent',
+        defaults.purchaseAwardPercent,
+      ),
+      redemptionPointsPerBlock: read(
+        'redemptionPointsPerBlock',
+        defaults.redemptionPointsPerBlock,
+      ),
+      redemptionTakaPerBlock: read(
+        'redemptionTakaPerBlock',
+        defaults.redemptionTakaPerBlock,
+      ),
       maxRedemptionPercentOfSubtotal: read(
         'maxRedemptionPercentOfSubtotal',
         defaults.maxRedemptionPercentOfSubtotal,
@@ -134,16 +142,16 @@ class PointsPolicy {
   }
 
   Map<String, dynamic> toJson() => <String, dynamic>{
-        'disposalAward': disposalAward,
-        'claimAward': claimAward,
-        'claimQuotaPerWeek': claimQuotaPerWeek,
-        'purchaseAwardPercent': purchaseAwardPercent,
-        'redemptionPointsPerBlock': redemptionPointsPerBlock,
-        'redemptionTakaPerBlock': redemptionTakaPerBlock,
-        'maxRedemptionPercentOfSubtotal': maxRedemptionPercentOfSubtotal,
-        'lockoutHours': lockoutHours,
-        'dailyDisposalCap': dailyDisposalCap,
-      };
+    'disposalAward': disposalAward,
+    'claimAward': claimAward,
+    'claimQuotaPerWeek': claimQuotaPerWeek,
+    'purchaseAwardPercent': purchaseAwardPercent,
+    'redemptionPointsPerBlock': redemptionPointsPerBlock,
+    'redemptionTakaPerBlock': redemptionTakaPerBlock,
+    'maxRedemptionPercentOfSubtotal': maxRedemptionPercentOfSubtotal,
+    'lockoutHours': lockoutHours,
+    'dailyDisposalCap': dailyDisposalCap,
+  };
 
   PointsPolicy copyWith({
     int? disposalAward,
@@ -355,16 +363,16 @@ class PointsPolicy {
 
   @override
   int get hashCode => Object.hash(
-        disposalAward,
-        claimAward,
-        claimQuotaPerWeek,
-        purchaseAwardPercent,
-        redemptionPointsPerBlock,
-        redemptionTakaPerBlock,
-        maxRedemptionPercentOfSubtotal,
-        lockoutHours,
-        dailyDisposalCap,
-      );
+    disposalAward,
+    claimAward,
+    claimQuotaPerWeek,
+    purchaseAwardPercent,
+    redemptionPointsPerBlock,
+    redemptionTakaPerBlock,
+    maxRedemptionPercentOfSubtotal,
+    lockoutHours,
+    dailyDisposalCap,
+  );
 }
 
 /// The result of applying points to an order. All amounts in whole taka.
@@ -455,8 +463,12 @@ class PolicyProvenance {
     final raw = json['updatedAt'];
     return PolicyProvenance(
       updatedAt: raw is String ? DateTime.tryParse(raw) : null,
-      updatedBy: json['updatedBy'] as String?,
-      updatedByName: json['updatedByName'] as String?,
+      updatedBy: json['updatedBy'] is String
+          ? json['updatedBy'] as String
+          : null,
+      updatedByName: json['updatedByName'] is String
+          ? json['updatedByName'] as String
+          : null,
     );
   }
 
@@ -481,7 +493,7 @@ class PolicySnapshot {
   final PolicyProvenance provenance;
 
   factory PolicySnapshot.fromJson(Map<String, dynamic> json) => PolicySnapshot(
-        policy: PointsPolicy.fromJson(json),
-        provenance: PolicyProvenance.fromJson(json),
-      );
+    policy: PointsPolicy.fromJson(json),
+    provenance: PolicyProvenance.fromJson(json),
+  );
 }

@@ -152,19 +152,20 @@ class ClaimModel {
 
   factory ClaimModel.fromJson(Map<String, dynamic> json, {String? id}) {
     return ClaimModel(
-      id: id ?? json['id'] as String?,
-      userId: (json['userId'] as String?) ?? '',
-      actionType: ClaimActionType.fromName(json['actionType'] as String?) ??
+      id: id ?? _nullableString(json['id']),
+      userId: _string(json['userId']),
+      actionType:
+          ClaimActionType.fromName(_nullableString(json['actionType'])) ??
           ClaimActionType.reusableBagOrBottle,
-      photoUrl: (json['photoUrl'] as String?) ?? '',
-      photoPublicId: (json['photoPublicId'] as String?) ?? '',
-      photoHash: json['photoHash'] as String?,
-      status: ClaimStatus.fromName(json['status'] as String?),
+      photoUrl: _string(json['photoUrl']),
+      photoPublicId: _string(json['photoPublicId']),
+      photoHash: _nullableString(json['photoHash']),
+      status: ClaimStatus.fromName(_nullableString(json['status'])),
       pointsAwarded: _toNullableInt(json['pointsAwarded']),
-      rejectionReason: json['rejectionReason'] as String?,
-      reviewedBy: json['reviewedBy'] as String?,
-      reviewedAt: json['reviewedAt'] as DateTime?,
-      createdAt: json['createdAt'] as DateTime?,
+      rejectionReason: _nullableString(json['rejectionReason']),
+      reviewedBy: _nullableString(json['reviewedBy']),
+      reviewedAt: _date(json['reviewedAt']),
+      createdAt: _date(json['createdAt']),
     );
   }
 
@@ -175,12 +176,12 @@ class ClaimModel {
   /// cannot accidentally send a field the rules would reject — it is not the
   /// security measure itself.
   Map<String, dynamic> toCreateJson() => <String, dynamic>{
-        'userId': userId,
-        'actionType': actionType.name,
-        'photoUrl': photoUrl,
-        'photoPublicId': photoPublicId,
-        'status': ClaimStatus.pending.name,
-      };
+    'userId': userId,
+    'actionType': actionType.name,
+    'photoUrl': photoUrl,
+    'photoPublicId': photoPublicId,
+    'status': ClaimStatus.pending.name,
+  };
 
   ClaimModel copyWith({
     String? id,
@@ -284,6 +285,18 @@ class ClaimQuota {
 
 int? _toNullableInt(Object? value) {
   if (value is int) return value;
-  if (value is num) return value.toInt();
+  if (value is num && value.isFinite && value == value.truncateToDouble()) {
+    return value.toInt();
+  }
+  return null;
+}
+
+String _string(Object? value) => value is String ? value : '';
+String? _nullableString(Object? value) => value is String ? value : null;
+
+DateTime? _date(Object? value) {
+  if (value is DateTime) return value;
+  if (value is String) return DateTime.tryParse(value);
+  if (value is int) return DateTime.fromMillisecondsSinceEpoch(value);
   return null;
 }

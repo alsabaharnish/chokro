@@ -6,26 +6,25 @@ void main() {
     OrderStatus status = OrderStatus.pending,
     String buyerId = 'buyer_uid',
     String sellerId = 'seller_uid',
-  }) =>
-      OrderModel(
-        id: 'o1',
-        buyerId: buyerId,
-        buyerName: 'Buyer',
-        sellerId: sellerId,
-        sellerName: 'Seller',
-        shopName: 'Green Corner',
-        checkoutId: 'c1',
-        items: const [
-          OrderLine(productId: 'p1', title: 'Bamboo brush', unitPrice: 250, qty: 2),
-        ],
-        subtotal: 500,
-        pointsApplied: 200,
-        discount: 20,
-        payable: 480,
-        settlementMethod: SettlementMethod.cashOnDelivery,
-        paymentStatus: PaymentStatus.pending,
-        status: status,
-      );
+  }) => OrderModel(
+    id: 'o1',
+    buyerId: buyerId,
+    buyerName: 'Buyer',
+    sellerId: sellerId,
+    sellerName: 'Seller',
+    shopName: 'Green Corner',
+    checkoutId: 'c1',
+    items: const [
+      OrderLine(productId: 'p1', title: 'Bamboo brush', unitPrice: 250, qty: 2),
+    ],
+    subtotal: 500,
+    pointsApplied: 200,
+    discount: 20,
+    payable: 480,
+    settlementMethod: SettlementMethod.cashOnDelivery,
+    paymentStatus: PaymentStatus.pending,
+    status: status,
+  );
 
   group('status machine', () {
     test('a seller ships, then delivers', () {
@@ -56,8 +55,14 @@ void main() {
     });
 
     test('a confirmed order is finished for both parties', () {
-      expect(OrderStatus.nextFor(OrderStatus.confirmed, isSeller: true), isNull);
-      expect(OrderStatus.nextFor(OrderStatus.confirmed, isSeller: false), isNull);
+      expect(
+        OrderStatus.nextFor(OrderStatus.confirmed, isSeller: true),
+        isNull,
+      );
+      expect(
+        OrderStatus.nextFor(OrderStatus.confirmed, isSeller: false),
+        isNull,
+      );
       expect(OrderStatus.confirmed.isTerminal, isTrue);
     });
 
@@ -91,8 +96,11 @@ void main() {
       // Self-dealing is refused at checkout (§7.4), so this order cannot exist;
       // the model resolving seller-first is what makes the impossible case fail
       // closed rather than granting the confirm-and-credit transition.
-      final self =
-          order(status: OrderStatus.delivered, buyerId: 'x', sellerId: 'x');
+      final self = order(
+        status: OrderStatus.delivered,
+        buyerId: 'x',
+        sellerId: 'x',
+      );
       expect(self.nextStatusFor('x'), isNull);
     });
   });
@@ -136,14 +144,53 @@ void main() {
       expect(parsed.items, isEmpty);
     });
 
-    test('a line whose title is missing still names something to the buyer', () {
-      final line = OrderLine.fromMap({'productId': 'p1', 'unitPrice': 10, 'qty': 1});
-      expect(line.title, isNotEmpty);
-    });
+    test(
+      'a line whose title is missing still names something to the buyer',
+      () {
+        final line = OrderLine.fromMap({
+          'productId': 'p1',
+          'unitPrice': 10,
+          'qty': 1,
+        });
+        expect(line.title, isNotEmpty);
+      },
+    );
 
     test('an unparseable items array yields no lines rather than throwing', () {
       final parsed = OrderModel.fromMap({'items': 'nonsense'}, id: 'o1');
       expect(parsed.items, isEmpty);
+    });
+
+    test('malformed line entries and enum fields fail closed', () {
+      final parsed = OrderModel.fromMap({
+        'items': [
+          'nonsense',
+          {'productId': 'p1', 'title': 'Item', 'unitPrice': 10, 'qty': 1},
+        ],
+        'settlementMethod': 7,
+        'paymentStatus': false,
+        'status': <String>['confirmed'],
+      }, id: 'o1');
+
+      expect(parsed.items, hasLength(1));
+      expect(parsed.status, OrderStatus.pending);
+      expect(parsed.paymentStatus, PaymentStatus.pending);
+      expect(parsed.settlementMethod, SettlementMethod.cashOnDelivery);
+    });
+
+    test('fractional money and quantities are not silently truncated', () {
+      final parsed = OrderModel.fromMap({
+        'items': [
+          {'productId': 'p1', 'title': 'Item', 'unitPrice': 10.5, 'qty': 1.5},
+        ],
+        'subtotal': 10.5,
+        'pointsAwarded': 5.5,
+      }, id: 'o1');
+
+      expect(parsed.items.single.unitPrice, 0);
+      expect(parsed.items.single.qty, 0);
+      expect(parsed.subtotal, 0);
+      expect(parsed.pointsAwarded, isNull);
     });
   });
 

@@ -167,7 +167,7 @@ class ProductModel {
       title: _string(data['title']),
       description: _string(data['description']),
       category:
-          ProductCategory.fromName(data['category'] as String?) ??
+          ProductCategory.fromName(_nullableString(data['category'])) ??
           ProductCategory.other,
       price: _int(data['price']),
       stock: _int(data['stock']),
@@ -320,10 +320,14 @@ String _string(Object? value, {String fallback = ''}) =>
 
 int _int(Object? value, {int fallback = 0}) {
   if (value is int) return value;
-  if (value is num) return value.toInt();
+  if (value is num && value.isFinite && value == value.truncateToDouble()) {
+    return value.toInt();
+  }
   if (value is String) return int.tryParse(value) ?? fallback;
   return fallback;
 }
+
+String? _nullableString(Object? value) => value is String ? value : null;
 
 List<String> _stringList(Object? value) {
   if (value is! List) return const <String>[];

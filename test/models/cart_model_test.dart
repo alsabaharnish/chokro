@@ -93,6 +93,7 @@ void main() {
           'nonsense',
           {'productId': 'p3', 'qty': 0},
           {'productId': 'p4', 'qty': 999},
+          {'productId': 'p5', 'qty': 1.5},
         ],
       }, userId: 'buyer');
 

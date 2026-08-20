@@ -7,6 +7,7 @@ class SellerApplicationModel {
   final String businessName;
   final String description;
   final String status;
+
   /// Server time the application was submitted.
   ///
   /// Nullable because it is written with `FieldValue.serverTimestamp()` per §6 —
@@ -33,35 +34,50 @@ class SellerApplicationModel {
   bool get isApproved => status == AppConstants.statusApproved;
 
   factory SellerApplicationModel.fromFirestore(DocumentSnapshot doc) {
-    final data = doc.data() as Map<String, dynamic>;
+    return SellerApplicationModel.fromMap(doc.data(), id: doc.id);
+  }
+
+  factory SellerApplicationModel.fromMap(Object? raw, {required String id}) {
+    final data = raw is Map<String, dynamic> ? raw : const <String, dynamic>{};
     return SellerApplicationModel(
-      id: doc.id,
-      userId: data['userId'] as String,
-      businessName: data['businessName'] as String,
-      description: data['description'] as String,
-      status: data['status'] as String,
+      id: id,
+      userId: _string(data['userId']),
+      businessName: _string(data['businessName']),
+      description: _string(data['description']),
+      // Unknown data must not acquire a decided state in the UI.
+      status: _string(data['status'], fallback: AppConstants.statusPending),
       // Nullable-tolerant: `createdAt` is a pending server timestamp for one
       // round trip after the write, and the old unchecked cast threw on exactly
       // the document it had just created.
-      createdAt: (data['createdAt'] as Timestamp?)?.toDate(),
-      reviewedBy: data['reviewedBy'] as String?,
-      reviewedAt: data['reviewedAt'] != null
-          ? (data['reviewedAt'] as Timestamp).toDate()
-          : null,
-      reason: data['reason'] as String?,
+      createdAt: _date(data['createdAt']),
+      reviewedBy: _nullableString(data['reviewedBy']),
+      reviewedAt: _date(data['reviewedAt']),
+      reason: _nullableString(data['reason']),
     );
   }
 
   Map<String, dynamic> toFirestore() => {
-        'userId': userId,
-        'businessName': businessName,
-        'description': description,
-        'status': status,
-        // Omitted deliberately; the service supplies
-        // `FieldValue.serverTimestamp()`. Writing the device clock here let a
-        // phone with a skewed clock date its own application (§6).
-        if (reviewedBy != null) 'reviewedBy': reviewedBy,
-        if (reviewedAt != null) 'reviewedAt': Timestamp.fromDate(reviewedAt!),
-        if (reason != null) 'reason': reason,
-      };
+    'userId': userId,
+    'businessName': businessName,
+    'description': description,
+    'status': status,
+    // Omitted deliberately; the service supplies
+    // `FieldValue.serverTimestamp()`. Writing the device clock here let a
+    // phone with a skewed clock date its own application (§6).
+    if (reviewedBy != null) 'reviewedBy': reviewedBy,
+    if (reviewedAt != null) 'reviewedAt': Timestamp.fromDate(reviewedAt!),
+    if (reason != null) 'reason': reason,
+  };
+}
+
+String _string(Object? value, {String fallback = ''}) =>
+    value is String ? value : fallback;
+String? _nullableString(Object? value) => value is String ? value : null;
+
+DateTime? _date(Object? value) {
+  if (value is Timestamp) return value.toDate();
+  if (value is DateTime) return value;
+  if (value is String) return DateTime.tryParse(value);
+  if (value is int) return DateTime.fromMillisecondsSinceEpoch(value);
+  return null;
 }

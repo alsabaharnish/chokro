@@ -273,6 +273,11 @@ service cloud.firestore {
 
       allow create: if isSelf(uid)
         && validUser(request.resource.data)
+        // Firebase Auth is the authority for the account address. Without this
+        // equality check a newly registered user could store somebody else's
+        // email in their private profile, corrupting identity and audit data.
+        && request.auth.token.email is string
+        && request.resource.data.email == request.auth.token.email
         && request.resource.data.role == 'buyer'
         && request.resource.data.status == 'active'
         && request.resource.data.createdAt == request.time;
@@ -587,6 +592,66 @@ service cloud.firestore {
         && (p.imageUrls.size() < 3 || validProductImage(p.imageUrls[2], uid));
     }
 
+    function validSearchToken(value) {
+      return validString(value, 2, 40)
+        && value.matches('^[a-z0-9]+(-[a-z0-9]+)*$');
+    }
+
+    function validTag(value) {
+      return validString(value, 1, 40)
+        && value.matches('^[a-z0-9]+(-[a-z0-9]+)*$');
+    }
+
+    // Rules cannot iterate arrays. Every bounded slot is therefore named so a
+    // malformed value cannot hide at the end of an otherwise valid index.
+    function validProductSearchTokens(p) {
+      return p.searchTokens is list
+        && p.searchTokens.size() >= 1 && p.searchTokens.size() <= 30
+        && (p.searchTokens.size() < 1 || validSearchToken(p.searchTokens[0]))
+        && (p.searchTokens.size() < 2 || validSearchToken(p.searchTokens[1]))
+        && (p.searchTokens.size() < 3 || validSearchToken(p.searchTokens[2]))
+        && (p.searchTokens.size() < 4 || validSearchToken(p.searchTokens[3]))
+        && (p.searchTokens.size() < 5 || validSearchToken(p.searchTokens[4]))
+        && (p.searchTokens.size() < 6 || validSearchToken(p.searchTokens[5]))
+        && (p.searchTokens.size() < 7 || validSearchToken(p.searchTokens[6]))
+        && (p.searchTokens.size() < 8 || validSearchToken(p.searchTokens[7]))
+        && (p.searchTokens.size() < 9 || validSearchToken(p.searchTokens[8]))
+        && (p.searchTokens.size() < 10 || validSearchToken(p.searchTokens[9]))
+        && (p.searchTokens.size() < 11 || validSearchToken(p.searchTokens[10]))
+        && (p.searchTokens.size() < 12 || validSearchToken(p.searchTokens[11]))
+        && (p.searchTokens.size() < 13 || validSearchToken(p.searchTokens[12]))
+        && (p.searchTokens.size() < 14 || validSearchToken(p.searchTokens[13]))
+        && (p.searchTokens.size() < 15 || validSearchToken(p.searchTokens[14]))
+        && (p.searchTokens.size() < 16 || validSearchToken(p.searchTokens[15]))
+        && (p.searchTokens.size() < 17 || validSearchToken(p.searchTokens[16]))
+        && (p.searchTokens.size() < 18 || validSearchToken(p.searchTokens[17]))
+        && (p.searchTokens.size() < 19 || validSearchToken(p.searchTokens[18]))
+        && (p.searchTokens.size() < 20 || validSearchToken(p.searchTokens[19]))
+        && (p.searchTokens.size() < 21 || validSearchToken(p.searchTokens[20]))
+        && (p.searchTokens.size() < 22 || validSearchToken(p.searchTokens[21]))
+        && (p.searchTokens.size() < 23 || validSearchToken(p.searchTokens[22]))
+        && (p.searchTokens.size() < 24 || validSearchToken(p.searchTokens[23]))
+        && (p.searchTokens.size() < 25 || validSearchToken(p.searchTokens[24]))
+        && (p.searchTokens.size() < 26 || validSearchToken(p.searchTokens[25]))
+        && (p.searchTokens.size() < 27 || validSearchToken(p.searchTokens[26]))
+        && (p.searchTokens.size() < 28 || validSearchToken(p.searchTokens[27]))
+        && (p.searchTokens.size() < 29 || validSearchToken(p.searchTokens[28]))
+        && (p.searchTokens.size() < 30 || validSearchToken(p.searchTokens[29]));
+    }
+
+    function validProductTags(p) {
+      return p.tags is list
+        && p.tags.size() <= 8
+        && (p.tags.size() < 1 || validTag(p.tags[0]))
+        && (p.tags.size() < 2 || validTag(p.tags[1]))
+        && (p.tags.size() < 3 || validTag(p.tags[2]))
+        && (p.tags.size() < 4 || validTag(p.tags[3]))
+        && (p.tags.size() < 5 || validTag(p.tags[4]))
+        && (p.tags.size() < 6 || validTag(p.tags[5]))
+        && (p.tags.size() < 7 || validTag(p.tags[6]))
+        && (p.tags.size() < 8 || validTag(p.tags[7]));
+    }
+
     // A listing, in the exact shape lib/models/product_model.dart writes.
     //
     // `hiddenBySuspension` is in the hasOnly list but not in hasAll: the server
@@ -612,14 +677,13 @@ service cloud.firestore {
         // The index must describe the title buyers actually see. Without this a
         // seller could sell one thing and be found under the name of another.
         && p.titleLower == p.title.trim().lower()
-        && p.searchTokens is list
-        && p.searchTokens.size() >= 1 && p.searchTokens.size() <= 30
+        && validProductSearchTokens(p)
         && validString(p.description, 10, 2000)
         && p.category in [
           'homeAndLiving', 'personalCare', 'foodAndDrink', 'fashion',
           'stationery', 'gardening', 'electronics', 'other'
         ]
-        && p.tags is list && p.tags.size() <= 8
+        && validProductTags(p)
         // Whole taka. The points economy is integer arithmetic end to end (§7.3),
         // so a fractional price would produce a discount that does not reconcile
         // against the ledger.
@@ -649,6 +713,39 @@ service cloud.firestore {
         && (!('response' in a) || validString(a.response, 10, 1000))
         && (!('reviewedBy' in a) || validString(a.reviewedBy, 1, 128))
         && (!('reviewedAt' in a) || a.reviewedAt is timestamp);
+    }
+
+    function validCartItem(item) {
+      return item is map
+        && item.keys().hasOnly(['productId', 'qty'])
+        && item.keys().hasAll(['productId', 'qty'])
+        && validString(item.productId, 1, 128)
+        && item.qty is int && item.qty >= 1 && item.qty <= 20;
+    }
+
+    function validCartItems(c) {
+      return c.items is list
+        && c.items.size() <= 20
+        && (c.items.size() < 1 || validCartItem(c.items[0]))
+        && (c.items.size() < 2 || validCartItem(c.items[1]))
+        && (c.items.size() < 3 || validCartItem(c.items[2]))
+        && (c.items.size() < 4 || validCartItem(c.items[3]))
+        && (c.items.size() < 5 || validCartItem(c.items[4]))
+        && (c.items.size() < 6 || validCartItem(c.items[5]))
+        && (c.items.size() < 7 || validCartItem(c.items[6]))
+        && (c.items.size() < 8 || validCartItem(c.items[7]))
+        && (c.items.size() < 9 || validCartItem(c.items[8]))
+        && (c.items.size() < 10 || validCartItem(c.items[9]))
+        && (c.items.size() < 11 || validCartItem(c.items[10]))
+        && (c.items.size() < 12 || validCartItem(c.items[11]))
+        && (c.items.size() < 13 || validCartItem(c.items[12]))
+        && (c.items.size() < 14 || validCartItem(c.items[13]))
+        && (c.items.size() < 15 || validCartItem(c.items[14]))
+        && (c.items.size() < 16 || validCartItem(c.items[15]))
+        && (c.items.size() < 17 || validCartItem(c.items[16]))
+        && (c.items.size() < 18 || validCartItem(c.items[17]))
+        && (c.items.size() < 19 || validCartItem(c.items[18]))
+        && (c.items.size() < 20 || validCartItem(c.items[19]));
     }
 
     // Whether this user owns a disposal that was actually rejected.
@@ -720,11 +817,8 @@ service cloud.firestore {
     // -------------------------------------------------------------------------
     //
     // A cart holds product ids and quantities and NEVER a price (§6.2). That one
-    // invariant is what makes this document safe to leave loosely typed: the
-    // rules pin the owner, the top-level key set and the item count, and the
-    // shape of each element is enforced where it is read — the server resolves
-    // every productId against a live listing at checkout and ignores anything
-    // else it finds. A malformed cart cannot buy anything; it fails checkout.
+    // invariant is protected twice: rules validate every bounded element before
+    // it is stored, and the server validates again before checkout arithmetic.
     //
     // Had a price been cached here, none of that would hold: a stale figure would
     // be a quotation the buyer could hold the seller to, and rules cannot compare
@@ -740,8 +834,7 @@ service cloud.firestore {
         && request.resource.data.keys().hasOnly(['userId', 'items', 'updatedAt'])
         && request.resource.data.keys().hasAll(['userId', 'items', 'updatedAt'])
         && request.resource.data.userId == uid
-        && request.resource.data.items is list
-        && request.resource.data.items.size() <= 20
+        && validCartItems(request.resource.data)
         && request.resource.data.updatedAt == request.time;
 
       allow delete: if isSelf(uid);
@@ -793,8 +886,13 @@ service cloud.firestore {
         && (resource.data.userId == request.auth.uid || isAdmin());
 
       allow create: if isSignedIn()
-        && isActive()
         && request.resource.data.userId == request.auth.uid
+        // One appeal per user and rejected subject. A deterministic id turns a
+        // second create into an update, which the appellant is not allowed to
+        // perform, instead of allowing an unlimited duplicate queue.
+        && appealId == request.auth.uid + '_'
+             + request.resource.data.subjectType + '_'
+             + request.resource.data.subjectId
         && request.resource.data.status == 'pending'
         && request.resource.data.createdAt == request.time
         // A decision is the administrator's to write, and only on an appeal that

@@ -108,6 +108,13 @@ class AppealModel {
   static const int responseMin = 10;
   static const int responseMax = 1000;
 
+  /// Deterministic so one rejection can create at most one appeal per user.
+  String get documentId => '${userId}_${subjectType.name}_$subjectId';
+
+  /// Type-qualified key for client-side lookups. Claim and disposal document
+  /// ids can coincidentally be equal and must not hide each other's button.
+  String get subjectKey => '${subjectType.name}:$subjectId';
+
   /// The exact key set `firestore.rules` allows a user to create. `createdAt` is
   /// supplied by the service as a server timestamp.
   Map<String, dynamic> toCreateJson() => <String, dynamic>{
@@ -122,15 +129,15 @@ class AppealModel {
     final data = raw ?? const <String, dynamic>{};
     return AppealModel(
       id: id,
-      userId: (data['userId'] as String?) ?? '',
+      userId: _string(data['userId']),
       subjectType:
-          AppealSubject.fromName(data['subjectType'] as String?) ??
+          AppealSubject.fromName(_nullableString(data['subjectType'])) ??
           AppealSubject.disposal,
-      subjectId: (data['subjectId'] as String?) ?? '',
-      message: (data['message'] as String?) ?? '',
-      status: AppealStatus.fromName(data['status'] as String?),
-      response: data['response'] as String?,
-      reviewedBy: data['reviewedBy'] as String?,
+      subjectId: _string(data['subjectId']),
+      message: _string(data['message']),
+      status: AppealStatus.fromName(_nullableString(data['status'])),
+      response: _nullableString(data['response']),
+      reviewedBy: _nullableString(data['reviewedBy']),
       reviewedAt: _date(data['reviewedAt']),
       createdAt: _date(data['createdAt']),
     );
@@ -164,6 +171,9 @@ class AppealModel {
     return null;
   }
 }
+
+String _string(Object? value) => value is String ? value : '';
+String? _nullableString(Object? value) => value is String ? value : null;
 
 DateTime? _date(Object? value) {
   if (value is DateTime) return value;

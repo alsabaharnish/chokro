@@ -17,16 +17,12 @@ final userAppealsProvider = StreamProvider.autoDispose<List<AppealModel>>((
   return ref.watch(appealServiceProvider).watchUserAppeals(uid);
 });
 
-/// The subject ids this user has already appealed.
-///
-/// The submission history uses it to hide a second "Appeal" button on a
-/// rejection that already has one open. Rules do not forbid a second appeal
-/// against the same submission — an exact-key rule cannot express "not already
-/// present in this collection" — so this is a courtesy, not a guarantee, and the
-/// administrator's queue would show both if someone worked around it.
+/// The subject ids this user has already appealed. The submission history uses
+/// it to link to the existing appeal; deterministic ids and rules enforce the
+/// same one-per-subject invariant at the database boundary.
 final appealedSubjectIdsProvider = Provider.autoDispose<Set<String>>((ref) {
   final appeals = ref.watch(userAppealsProvider).asData?.value ?? const [];
-  return appeals.map((appeal) => appeal.subjectId).toSet();
+  return appeals.map((appeal) => appeal.subjectKey).toSet();
 });
 
 /// The administrator's queue, oldest first.

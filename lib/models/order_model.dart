@@ -280,11 +280,8 @@ class OrderModel {
       checkoutId: _string(data['checkoutId']),
       items: rawItems is List
           ? rawItems
-                .map(
-                  (item) => OrderLine.fromMap(
-                    item is Map<String, dynamic> ? item : null,
-                  ),
-                )
+                .whereType<Map<String, dynamic>>()
+                .map(OrderLine.fromMap)
                 .toList()
           : const <OrderLine>[],
       subtotal: _int(data['subtotal']),
@@ -292,13 +289,13 @@ class OrderModel {
       discount: _int(data['discount']),
       payable: _int(data['payable']),
       settlementMethod: SettlementMethod.fromName(
-        data['settlementMethod'] as String?,
+        _nullableString(data['settlementMethod']),
       ),
-      paymentStatus: PaymentStatus.fromName(data['paymentStatus'] as String?),
-      status: OrderStatus.fromName(data['status'] as String?),
-      pointsAwarded: data['pointsAwarded'] is num
-          ? (data['pointsAwarded'] as num).toInt()
-          : null,
+      paymentStatus: PaymentStatus.fromName(
+        _nullableString(data['paymentStatus']),
+      ),
+      status: OrderStatus.fromName(_nullableString(data['status'])),
+      pointsAwarded: _nullableInt(data['pointsAwarded']),
       createdAt: _date(data['createdAt']),
       shippedAt: _date(data['shippedAt']),
       deliveredAt: _date(data['deliveredAt']),
@@ -316,10 +313,22 @@ String _string(Object? value, {String fallback = ''}) =>
 
 int _int(Object? value, {int fallback = 0}) {
   if (value is int) return value;
-  if (value is num) return value.toInt();
+  if (value is num && value.isFinite && value == value.truncateToDouble()) {
+    return value.toInt();
+  }
   if (value is String) return int.tryParse(value) ?? fallback;
   return fallback;
 }
+
+int? _nullableInt(Object? value) {
+  if (value is int) return value;
+  if (value is num && value.isFinite && value == value.truncateToDouble()) {
+    return value.toInt();
+  }
+  return null;
+}
+
+String? _nullableString(Object? value) => value is String ? value : null;
 
 DateTime? _date(Object? value) {
   if (value is DateTime) return value;

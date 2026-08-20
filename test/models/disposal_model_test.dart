@@ -113,6 +113,12 @@ void main() {
         DisposalModel.fromJson(<String, dynamic>{'flags': 'nonsense'}).flags,
         isEmpty,
       );
+      expect(
+        DisposalModel.fromJson(<String, dynamic>{
+          'flags': <dynamic>['outsideRadius', 7, null],
+        }).flags,
+        <DisposalFlag>[DisposalFlag.outsideRadius],
+      );
     });
 
     test('every flag has an explanation for the review queue', () {
@@ -228,6 +234,46 @@ void main() {
       });
       expect(parsed.itemType, DisposalItemType.plasticOther);
     });
+
+    test('wrongly typed strings and fractional integers fail closed', () {
+      final parsed = DisposalModel.fromJson(<String, dynamic>{
+        'userId': 7,
+        'itemType': <String>['plasticBottle'],
+        'status': true,
+        'declaredItemCount': 2.5,
+        'pointsAwarded': 50.5,
+      });
+
+      expect(parsed.userId, isEmpty);
+      expect(parsed.itemType, DisposalItemType.plasticOther);
+      expect(parsed.status, DisposalStatus.pending);
+      expect(parsed.declaredItemCount, 0);
+      expect(parsed.pointsAwarded, isNull);
+    });
+  });
+
+  group('verification recovery', () {
+    test('an unfinished pending submission needs a retry', () {
+      expect(pendingSubmission().needsVerificationRetry, isTrue);
+    });
+
+    test('a flagged verified submission is ready for a reviewer', () {
+      final reviewable = pendingSubmission().copyWith(
+        verificationCompleted: true,
+        flags: const <DisposalFlag>[DisposalFlag.lowConfidence],
+      );
+      expect(reviewable.needsVerificationRetry, isFalse);
+    });
+
+    test(
+      'a verified flagless pending submission retries the legacy award path',
+      () {
+        final stranded = pendingSubmission().copyWith(
+          verificationCompleted: true,
+        );
+        expect(stranded.needsVerificationRetry, isTrue);
+      },
+    );
   });
 
   group('validation', () {

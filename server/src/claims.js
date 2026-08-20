@@ -20,7 +20,11 @@
 
 const { db, admin, serverTimestamp } = require('./firebase');
 const policyModule = require('./pointsPolicy');
-const { creditWalletInTransaction, SOURCES } = require('./award');
+const {
+  creditWalletInTransaction,
+  readNonNegativeCounter,
+  SOURCES,
+} = require('./award');
 // Push on a decision (F7.1).
 const pushModule = require('./push');
 const { isTrustedImageReference } = require('./cloudinary');
@@ -100,7 +104,12 @@ async function approveClaim({ claimId, adminUid }) {
     const weekKey = policyModule.isoWeekKey(new Date());
     const quotaRef = firestore.collection('claimQuotas').doc(`${uid}_${weekKey}`);
     const quotaSnap = await txn.get(quotaRef);
-    const approvedThisWeek = quotaSnap.exists ? quotaSnap.data().count || 0 : 0;
+    const approvedThisWeek = quotaSnap.exists
+      ? readNonNegativeCounter(
+          quotaSnap.data().count,
+          `Claim quota ${uid}_${weekKey}`,
+        )
+      : 0;
 
     if (approvedThisWeek >= policy.claimQuotaPerWeek) {
       throw new Error(
@@ -117,7 +126,7 @@ async function approveClaim({ claimId, adminUid }) {
       delta: award,
       source: SOURCES.CLAIM,
       refId: claimId,
-      currentBalance: walletSnap.data().balance || 0,
+      currentBalance: walletSnap.data().balance,
     });
 
     txn.update(claimRef, {
@@ -239,7 +248,12 @@ async function claimQuotaStatus(uid) {
   ]);
 
   const policy = policyModule.fromDoc(configSnap.exists ? configSnap.data() : null);
-  const used = quotaSnap.exists ? quotaSnap.data().count || 0 : 0;
+  const used = quotaSnap.exists
+    ? readNonNegativeCounter(
+        quotaSnap.data().count,
+        `Claim quota ${uid}_${weekKey}`,
+      )
+    : 0;
 
   return {
     weekKey,

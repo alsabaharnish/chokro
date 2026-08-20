@@ -24,7 +24,7 @@ const { findDuplicate, hashImage } = require('./phash');
 const { decide, hasCompletedVerification } = require('./decide');
 const { screenImage, isValidItemType } = require('./screen');
 const { isTrustedImageReference } = require('./cloudinary');
-const { approveDisposal } = require('./award');
+const { approveDisposal, readNonNegativeCounter } = require('./award');
 
 /**
  * How many of a user's previous hashes to compare against.
@@ -69,7 +69,9 @@ async function approvedTodayCount(uid) {
     .doc(`${uid}_${policyModule.dayKey(new Date())}`)
     .get();
 
-  return snap.exists ? snap.data().count || 0 : 0;
+  return snap.exists
+    ? readNonNegativeCounter(snap.data().count, 'Daily approval counter')
+    : 0;
 }
 
 /**
@@ -121,12 +123,34 @@ async function verifyDisposal({ disposalId, callerUid }) {
   // Returning the stored evidence rather than recomputing it is also the more
   // honest answer: the flags on the document are what the reviewer is looking at.
   if (hasCompletedVerification(disposal)) {
+    const storedFlags = Array.isArray(disposal.flags) ? disposal.flags : [];
+
+    // Recovery for submissions caught by the old two-write auto-approval path:
+    // evidence was committed first, then the award failed. They are pending,
+    // verified and flagless. Re-enter the authoritative transaction so the
+    // daily cap, wallet and ledger are checked again and committed together.
+    if (storedFlags.length === 0) {
+      const result = await approveDisposal({
+        disposalId,
+        adminUid: null,
+        flags: [],
+      });
+      return {
+        disposalId,
+        status: 'autoApproved',
+        pointsAwarded: result.pointsAwarded,
+        balanceAfter: result.balanceAfter,
+        flags: [],
+        distanceMeters: disposal.distanceMeters ?? null,
+      };
+    }
+
     return {
       disposalId,
       status: disposal.status,
       alreadyVerified: true,
       pointsAwarded: disposal.pointsAwarded ?? 0,
-      flags: disposal.flags ?? [],
+      flags: storedFlags,
       distanceMeters: disposal.distanceMeters ?? null,
     };
   }
@@ -266,19 +290,21 @@ async function verifyDisposal({ disposalId, callerUid }) {
       };
 
   if (outcome.decision === 'autoApprove') {
-    // Write the evidence before crediting, so an approved submission always
-    // carries the hash and distance that justified it.
-    await disposalRef.update({
+    // Evidence and credit commit together inside approveDisposal. A separate
+    // evidence write used to create a crash window: if the award then failed,
+    // retries saw verificationCompleted and never attempted the award again.
+    const verificationEvidence = {
       photoHash,
       distanceMeters,
       verificationCompleted: true,
       ...screeningFields,
-    });
+    };
 
     const result = await approveDisposal({
       disposalId,
       adminUid: null,
       flags: [],
+      verificationEvidence,
     });
 
     return {

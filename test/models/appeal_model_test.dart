@@ -11,9 +11,16 @@ void main() {
         message: 'The photograph clearly shows six bottles at the bin.',
       );
 
-      expect(appeal.toCreateJson().keys.toSet(),
-          {'userId', 'subjectType', 'subjectId', 'message', 'status'});
+      expect(appeal.toCreateJson().keys.toSet(), {
+        'userId',
+        'subjectType',
+        'subjectId',
+        'message',
+        'status',
+      });
       expect(appeal.toCreateJson()['status'], 'pending');
+      expect(appeal.documentId, 'u_disposal_d1');
+      expect(appeal.subjectKey, 'disposal:d1');
     });
 
     test('trims the message it writes', () {
@@ -24,8 +31,10 @@ void main() {
         message: '   I planted the sapling on the date shown.   ',
       );
 
-      expect(appeal.toCreateJson()['message'],
-          'I planted the sapling on the date shown.');
+      expect(
+        appeal.toCreateJson()['message'],
+        'I planted the sapling on the date shown.',
+      );
     });
   });
 
@@ -50,6 +59,22 @@ void main() {
       final appeal = AppealModel.fromMap({'subjectType': 'order'});
       expect(appeal.subjectType, AppealSubject.disposal);
     });
+
+    test('wrongly typed stored fields fail closed instead of throwing', () {
+      final appeal = AppealModel.fromMap({
+        'userId': 7,
+        'subjectType': <String>['claim'],
+        'message': false,
+        'status': 99,
+        'response': <String, dynamic>{},
+      });
+
+      expect(appeal.userId, isEmpty);
+      expect(appeal.subjectType, AppealSubject.disposal);
+      expect(appeal.message, isEmpty);
+      expect(appeal.status, AppealStatus.pending);
+      expect(appeal.response, isNull);
+    });
   });
 
   group('validation mirrors the rules bounds', () {
@@ -72,7 +97,10 @@ void main() {
     test('an administrator cannot resolve with an empty answer', () {
       expect(AppealModel.validateResponse(''), isNotNull);
       expect(AppealModel.validateResponse('  '), isNotNull);
-      expect(AppealModel.validateResponse('a' * AppealModel.responseMin), isNull);
+      expect(
+        AppealModel.validateResponse('a' * AppealModel.responseMin),
+        isNull,
+      );
     });
   });
 }

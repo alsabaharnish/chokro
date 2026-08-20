@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
@@ -8,6 +9,7 @@ import 'package:http/http.dart' as http;
 import '../core/api_config.dart';
 
 import '../core/network_errors.dart';
+import '../core/wire_values.dart';
 
 /// Uploads disposal photographs through the trusted service.
 ///
@@ -67,9 +69,9 @@ class PhotoUploadService {
       throw const PhotoUploadException('You are not signed in.');
     }
 
-    final token = await user.getIdToken();
     http.Response response;
     try {
+      final token = await user.getIdToken();
       response = await _client
           .post(
             ApiConfig.path(endpoint),
@@ -86,6 +88,9 @@ class PhotoUploadService {
       // produce the "took too long" message.
       _log('timed out after ${ApiConfig.coldStartTimeout}', error);
       throw PhotoUploadException(slowServerMessage);
+    } on SocketException catch (error) {
+      _log('socket failure — no route to the host', error);
+      throw PhotoUploadException(unreachableServerMessage);
     } on http.ClientException catch (error) {
       // On the web build this is the CORS signature: the browser refuses the
       // request and `package:http` reports "XMLHttpRequest error" with no
@@ -102,8 +107,8 @@ class PhotoUploadService {
     }
 
     if (response.statusCode == 200) {
-      final body = jsonDecode(response.body) as Map<String, dynamic>;
-      final url = body['photoUrl'] as String?;
+      final body = _decode(response.body);
+      final url = wireString(body['photoUrl']);
       if (url == null || url.isEmpty) {
         throw const PhotoUploadException(
           'The server did not return a photo URL.',
@@ -121,7 +126,7 @@ class PhotoUploadService {
         // This comment previously asserted the same outcome while nothing
         // implemented it — the skipped check produced no flag at all, so an
         // empty id auto-approved with the duplicate defence never having run.
-        publicId: (body['publicId'] as String?) ?? '',
+        publicId: wireString(body['publicId']) ?? '',
       );
     }
 
@@ -129,8 +134,8 @@ class PhotoUploadService {
     // caller's fault; everything else gets a generic one.
     String message = 'The photo could not be uploaded.';
     try {
-      final body = jsonDecode(response.body) as Map<String, dynamic>;
-      final serverMessage = body['message'] as String?;
+      final body = _decode(response.body);
+      final serverMessage = wireString(body['message']);
       if (serverMessage != null && serverMessage.isNotEmpty) {
         message = serverMessage;
       }
@@ -146,6 +151,16 @@ class PhotoUploadService {
     }
 
     throw PhotoUploadException(message);
+  }
+
+  Map<String, dynamic> _decode(String body) {
+    try {
+      final decoded = jsonDecode(body);
+      return decoded is Map<String, dynamic> ? decoded : <String, dynamic>{};
+    } catch (error) {
+      _log('response body was not JSON', error);
+      return <String, dynamic>{};
+    }
   }
 }
 

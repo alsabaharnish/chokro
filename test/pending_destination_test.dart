@@ -1,4 +1,5 @@
 import 'package:chokro/routing/router.dart';
+import 'package:chokro/models/user_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 /// The destination the auth gate defers (F7.1 deep links, admin deep links).
@@ -54,6 +55,35 @@ void main() {
       // an admin path remembered. Restoring an intention is not authorising it.
       final pending = PendingDestination()..remember('/admin/users');
       expect(pending.consume(), '/admin/users');
+    });
+  });
+
+  group('privileged route policies', () {
+    UserModel user({required String role, String status = 'active'}) =>
+        UserModel(
+          uid: 'u1',
+          name: 'User',
+          email: 'user@test.com',
+          role: role,
+          status: status,
+        );
+
+    test('a suspended administrator cannot enter privileged consoles', () {
+      final suspended = user(role: 'admin', status: 'suspended');
+      expect(canAccessAdminRoutes(suspended), isFalse);
+      expect(activeRouteRedirect(suspended), '/home');
+      expect(sellerRouteRedirect(suspended), '/home');
+    });
+
+    test('active administrators and sellers can enter the seller console', () {
+      expect(canAccessAdminRoutes(user(role: 'admin')), isTrue);
+      expect(activeRouteRedirect(user(role: 'buyer')), isNull);
+      expect(sellerRouteRedirect(user(role: 'admin')), isNull);
+      expect(sellerRouteRedirect(user(role: 'seller')), isNull);
+    });
+
+    test('an active buyer is directed to the seller application', () {
+      expect(sellerRouteRedirect(user(role: 'buyer')), '/apply-seller');
     });
   });
 }

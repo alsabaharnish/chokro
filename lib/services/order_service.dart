@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import '../core/api_config.dart';
 import '../core/constants.dart';
 import '../core/network_errors.dart';
+import '../core/wire_values.dart';
 import '../models/order_model.dart';
 
 /// Orders (F4.4–F4.8).
@@ -103,18 +104,18 @@ class OrderService {
     if (response.statusCode == 201) {
       final rawOrders = body['orders'];
       return CheckoutOutcome(
-        checkoutId: (body['checkoutId'] as String?) ?? '',
+        checkoutId: wireString(body['checkoutId']) ?? '',
         orderIds: rawOrders is List
             ? rawOrders
-                  .map((o) => o is Map ? o['orderId'] as String? : null)
+                  .map((o) => o is Map ? wireString(o['orderId']) : null)
                   .whereType<String>()
                   .toList()
             : const <String>[],
-        subtotal: (body['subtotal'] as num?)?.toInt() ?? 0,
-        pointsApplied: (body['pointsApplied'] as num?)?.toInt() ?? 0,
-        discount: (body['discount'] as num?)?.toInt() ?? 0,
-        payable: (body['payable'] as num?)?.toInt() ?? 0,
-        balanceAfter: (body['balanceAfter'] as num?)?.toInt(),
+        subtotal: wireInt(body['subtotal']) ?? 0,
+        pointsApplied: wireInt(body['pointsApplied']) ?? 0,
+        discount: wireInt(body['discount']) ?? 0,
+        payable: wireInt(body['payable']) ?? 0,
+        balanceAfter: wireInt(body['balanceAfter']),
       );
     }
 
@@ -122,7 +123,7 @@ class OrderService {
     // product, "only 2 left", a seller who is not trading. Surfaced verbatim,
     // because a generic failure at checkout leaves nothing to act on.
     throw OrderException(
-      (body['message'] as String?) ??
+      wireString(body['message']) ??
           'Your order could not be placed (${response.statusCode}).',
     );
   }
@@ -142,11 +143,11 @@ class OrderService {
 
     final body = _decode(response.body);
     if (response.statusCode == 200) {
-      return OrderStatus.fromName(body['status'] as String?);
+      return OrderStatus.fromName(wireString(body['status']));
     }
 
     throw OrderException(
-      (body['message'] as String?) ??
+      wireString(body['message']) ??
           'The order could not be updated (${response.statusCode}).',
     );
   }
@@ -167,13 +168,13 @@ class OrderService {
     if (response.statusCode == 200) {
       return ConfirmOutcome(
         orderId: orderId,
-        pointsAwarded: (body['pointsAwarded'] as num?)?.toInt() ?? 0,
-        balanceAfter: (body['balanceAfter'] as num?)?.toInt(),
+        pointsAwarded: wireInt(body['pointsAwarded']) ?? 0,
+        balanceAfter: wireInt(body['balanceAfter']),
       );
     }
 
     throw OrderException(
-      (body['message'] as String?) ??
+      wireString(body['message']) ??
           'The order could not be confirmed (${response.statusCode}).',
     );
   }

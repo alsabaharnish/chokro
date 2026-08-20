@@ -10,6 +10,7 @@ import '../core/api_config.dart';
 import '../core/points_policy.dart';
 
 import '../core/network_errors.dart';
+import '../core/wire_values.dart';
 
 /// Reads and writes `config/points` through the trusted service (F3.3).
 ///
@@ -22,7 +23,7 @@ class PointsPolicyService {
   final http.Client _client;
 
   PointsPolicyService({http.Client? client})
-      : _client = client ?? http.Client();
+    : _client = client ?? http.Client();
 
   /// Current policy. Any signed-in user may read it — the values are visible
   /// in the app anyway, as the amount a disposal is worth.
@@ -41,8 +42,13 @@ class PointsPolicyService {
       return PolicySnapshot.fromJson(body);
     }
 
-    throw PolicyException(_messageFor(response, 'The policy could not be '
-        'loaded.'));
+    throw PolicyException(
+      _messageFor(
+        response,
+        'The policy could not be '
+        'loaded.',
+      ),
+    );
   }
 
   /// Writes [policy] after the server revalidates it.
@@ -146,7 +152,7 @@ class PointsPolicyService {
 
   String _messageFor(http.Response response, String fallback) {
     final body = _decode(response.body);
-    final message = body['message'] as String?;
+    final message = wireString(body['message']);
     if (message != null && message.isNotEmpty) return message;
     return '$fallback (${response.statusCode})';
   }

@@ -172,6 +172,11 @@ void main() {
       expect(wallet.userId, 'uid-1', reason: 'falls back to the document id');
     });
 
+    test('a fractional balance is not silently truncated', () {
+      expect(_wallet({'balance': 99.5}).balance, 0);
+      expect(_wallet({'balance': 99.0}).balance, 99);
+    });
+
     test('omits updatedAt on write, leaving it to the server', () {
       final map = const WalletModel(userId: 'uid-1', balance: 0).toFirestore();
 

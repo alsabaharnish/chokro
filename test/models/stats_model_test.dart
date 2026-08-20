@@ -55,6 +55,11 @@ void main() {
     expect(stats.pointsIssued, 500);
   });
 
+  test('does not silently truncate a fractional counter', () {
+    final stats = PlatformStats.fromMap({'pointsIssued': 500.5});
+    expect(stats.pointsIssued, 0);
+  });
+
   test('ignores a counter stored with a nonsense type', () {
     final stats = PlatformStats.fromMap({'pointsIssued': 'lots'});
     expect(stats.pointsIssued, 0);

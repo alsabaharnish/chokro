@@ -31,6 +31,14 @@ const SOURCES = Object.freeze({
   REDEMPTION: 'redemption',
 });
 
+/** Read a persisted usage counter without allowing coercion or overflow. */
+function readNonNegativeCounter(value, label) {
+  if (!Number.isSafeInteger(value) || value < 0) {
+    throw new Error(`${label} has an invalid count.`);
+  }
+  return value;
+}
+
 /**
  * Credits or debits a wallet inside an existing transaction.
  *
@@ -53,12 +61,18 @@ function creditWalletInTransaction(
   if (!Object.values(SOURCES).includes(source)) {
     throw new Error(`Unknown ledger source: ${source}`);
   }
-  if (!Number.isInteger(delta) || delta === 0) {
+  if (!Number.isSafeInteger(delta) || delta === 0) {
     throw new Error(`Ledger delta must be a non-zero integer, got: ${delta}`);
+  }
+  if (!Number.isSafeInteger(currentBalance) || currentBalance < 0) {
+    throw new Error(`Wallet ${uid} has an invalid balance.`);
   }
 
   const balanceAfter = currentBalance + delta;
 
+  if (!Number.isSafeInteger(balanceAfter)) {
+    throw new Error(`Wallet ${uid} would exceed safe integer bounds.`);
+  }
   if (balanceAfter < 0) {
     // A debit that would overdraw. Refusing here rather than clamping means a
     // bug in a caller surfaces as a failed request instead of silently losing
@@ -94,13 +108,20 @@ function creditWalletInTransaction(
  * @param {string|null} args.adminUid  null for an automatic approval
  * @param {string[]|null} args.flags   why it went to review; null preserves the
  *                                     flags already on the document
+ * @param {object|null} args.verificationEvidence  trusted evidence produced by
+ *                                     verifyDisposal for an atomic auto-award
  * @returns {Promise<object>} outcome summary
  *
  * The award is read from the live policy and **snapshotted onto the disposal**.
  * An administrator lowering the disposal award later must not rewrite what past
  * submissions were worth (§6.2).
  */
-async function approveDisposal({ disposalId, adminUid = null, flags = null }) {
+async function approveDisposal({
+  disposalId,
+  adminUid = null,
+  flags = null,
+  verificationEvidence = null,
+}) {
   const firestore = db();
   const disposalRef = firestore.collection('disposals').doc(disposalId);
 
@@ -130,7 +151,9 @@ async function approveDisposal({ disposalId, adminUid = null, flags = null }) {
     // fallback keeps submissions verified by the previous server release
     // reviewable: that release wrote these three evidence keys but not the
     // explicit marker.
-    if (!hasCompletedVerification(disposal)) {
+    const hasSuppliedVerification =
+      verificationEvidence?.verificationCompleted === true;
+    if (!hasCompletedVerification(disposal) && !hasSuppliedVerification) {
       throw new Error(
         'Verification is still running. Wait for its evidence before approving.',
       );
@@ -169,7 +192,12 @@ async function approveDisposal({ disposalId, adminUid = null, flags = null }) {
     const capKey = `${uid}_${policyModule.dayKey(new Date())}`;
     const capRef = firestore.collection('dailyCaps').doc(capKey);
     const capSnap = await txn.get(capRef);
-    const approvedToday = capSnap.exists ? capSnap.data().count || 0 : 0;
+    const approvedToday = capSnap.exists
+      ? readNonNegativeCounter(
+          capSnap.data().count,
+          `Daily cap ${capKey}`,
+        )
+      : 0;
 
     if (approvedToday >= policy.dailyDisposalCap) {
       throw new Error(
@@ -185,10 +213,28 @@ async function approveDisposal({ disposalId, adminUid = null, flags = null }) {
       delta: award,
       source: SOURCES.DISPOSAL,
       refId: disposalId,
-      currentBalance: walletSnap.data().balance || 0,
+      currentBalance: walletSnap.data().balance,
     });
 
+    // On the automatic path the evidence and the payout land in this same
+    // transaction. The previous two-write sequence could store
+    // `verificationCompleted: true` and then fail before crediting; retries saw
+    // the marker, returned `alreadyVerified`, and stranded a clean submission
+    // forever. Explicit fields keep this internal bridge from becoming an
+    // arbitrary update surface.
+    const evidenceUpdate = hasSuppliedVerification
+      ? {
+          photoHash: verificationEvidence.photoHash ?? null,
+          distanceMeters: verificationEvidence.distanceMeters ?? null,
+          verificationCompleted: true,
+          screenConfidence: verificationEvidence.screenConfidence ?? null,
+          screenItemCount: verificationEvidence.screenItemCount ?? null,
+          screenNotes: verificationEvidence.screenNotes ?? null,
+        }
+      : {};
+
     txn.update(disposalRef, {
+      ...evidenceUpdate,
       status: adminUid ? 'manualApproved' : 'autoApproved',
       pointsAwarded: award,
       // `flags ?? existing`, never a bare `flags`.
@@ -371,6 +417,7 @@ async function rejectDisposal({ disposalId, adminUid, reason, flags = null }) {
 module.exports = {
   SOURCES,
   creditWalletInTransaction,
+  readNonNegativeCounter,
   approveDisposal,
   rejectDisposal,
 };

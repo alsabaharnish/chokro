@@ -14,7 +14,12 @@
  * server call returned 403 — permanently. These pin the agreement.
  */
 
-const { isActiveProfile, suspensionMessage, toDate } = require('../src/suspension');
+const {
+  isActiveProfile,
+  isTradingProfile,
+  suspensionMessage,
+  toDate,
+} = require('../src/suspension');
 
 /** A Firestore Timestamp, as the Admin SDK hands one back. */
 const timestamp = (date) => ({ toDate: () => date });
@@ -110,6 +115,32 @@ describe('isActiveProfile', () => {
         NOW,
       ),
     ).toBe(false);
+  });
+});
+
+describe('isTradingProfile', () => {
+  test('only active sellers and administrators may receive new orders', () => {
+    expect(isTradingProfile({ status: 'active', role: 'seller' }, NOW)).toBe(true);
+    expect(isTradingProfile({ status: 'active', role: 'admin' }, NOW)).toBe(true);
+    expect(isTradingProfile({ status: 'active', role: 'buyer' }, NOW)).toBe(false);
+  });
+
+  test('a seller cannot trade during a live suspension', () => {
+    expect(
+      isTradingProfile(
+        { status: 'suspended', role: 'seller', suspendedUntil: hoursFromNow(1) },
+        NOW,
+      ),
+    ).toBe(false);
+  });
+
+  test('a seller may trade after a timed suspension lapses', () => {
+    expect(
+      isTradingProfile(
+        { status: 'suspended', role: 'seller', suspendedUntil: hoursFromNow(-1) },
+        NOW,
+      ),
+    ).toBe(true);
   });
 });
 

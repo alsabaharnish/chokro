@@ -39,10 +39,7 @@ void main() {
 
       expect(equal.validate(), isNotEmpty);
       expect(greater.validate(), isNotEmpty);
-      expect(
-        greater.validate().single,
-        contains('must pay less'),
-      );
+      expect(greater.validate().single, contains('must pay less'));
     });
 
     test('rejects non-positive awards and windows', () {
@@ -151,9 +148,15 @@ void main() {
           balance: 5000,
           pointsRequested: 5000,
         );
-        expect(outcome.discount + outcome.payable, subtotal,
-            reason: 'failed at subtotal $subtotal');
-        expect(outcome.pointsApplied, policy.pointsToSpendForTaka(outcome.discount));
+        expect(
+          outcome.discount + outcome.payable,
+          subtotal,
+          reason: 'failed at subtotal $subtotal',
+        );
+        expect(
+          outcome.pointsApplied,
+          policy.pointsToSpendForTaka(outcome.discount),
+        );
       }
     });
   });
@@ -315,6 +318,18 @@ void main() {
         'disposalAward': 40.0,
       });
       expect(parsed.disposalAward, 40);
+    });
+
+    test('does not truncate a fractional or non-finite policy value', () {
+      final fractional = PointsPolicy.fromJson(<String, dynamic>{
+        'disposalAward': 40.5,
+      });
+      final nonFinite = PointsPolicy.fromJson(<String, dynamic>{
+        'disposalAward': double.infinity,
+      });
+
+      expect(fractional.disposalAward, PointsPolicyDefaults.disposalAward);
+      expect(nonFinite.disposalAward, PointsPolicyDefaults.disposalAward);
     });
 
     test('reads tolerantly but does not silently fix an invalid policy', () {

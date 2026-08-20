@@ -44,6 +44,19 @@ const { parseAllowedOrigins, isAllowedOrigin } = require('./cors');
 
 const app = express();
 
+// Baseline browser protections for this JSON API. The Flutter web client does
+// not need responses to be framed, MIME-sniffed or to propagate referrers.
+app.disable('x-powered-by');
+app.use((req, res, next) => {
+  res.set({
+    'X-Content-Type-Options': 'nosniff',
+    'X-Frame-Options': 'DENY',
+    'Referrer-Policy': 'no-referrer',
+    'Permissions-Policy': 'camera=(), microphone=(), geolocation=()',
+  });
+  next();
+});
+
 // Render terminates TLS in front of the app; without this, request IPs and
 // protocol are wrong in logs.
 app.set('trust proxy', 1);
@@ -774,24 +787,51 @@ app.use((err, req, res, next) => {
  * unhandled rejection is to terminate, which on a single free-tier instance
  * means every user is offline until Render notices.
  *
- * `uncaughtException` deliberately does NOT exit. The conventional advice is to
- * log and terminate, because the process may be in an unknown state — that
- * advice assumes a supervisor that restarts in milliseconds and siblings that
- * absorb the traffic. Here there is one instance with a 30-60 second cold start,
- * so staying up in a suspect state serves users better than a guaranteed
- * outage. Every wallet write is inside a Firestore transaction, so a half-
- * applied award is not among the states this can leave behind.
+ * A fatal exception can leave arbitrary module state corrupted. Stop accepting
+ * new work, give in-flight responses a short window to finish, then let the
+ * platform restart a clean process. Wallet writes remain transaction-safe.
  */
+let server;
+let shuttingDown = false;
+
+function shutdown(reason, exitCode) {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  console.error(`[shutdown] ${reason}`);
+
+  const forceExit = setTimeout(() => {
+    console.error('[shutdown] grace period expired; forcing exit.');
+    process.exit(exitCode);
+  }, 10000);
+  forceExit.unref();
+
+  if (!server) {
+    clearTimeout(forceExit);
+    process.exit(exitCode);
+    return;
+  }
+
+  server.close(() => {
+    clearTimeout(forceExit);
+    process.exit(exitCode);
+  });
+}
+
 process.on('unhandledRejection', (reason) => {
-  console.error(
-    'Unhandled promise rejection (a route is missing its try/catch):',
-    reason instanceof Error ? reason.message : reason,
+  shutdown(
+    `Unhandled promise rejection: ${
+      reason instanceof Error ? reason.message : reason
+    }`,
+    1,
   );
 });
 
 process.on('uncaughtException', (err) => {
-  console.error('Uncaught exception:', err.message);
+  shutdown(`Uncaught exception: ${err.message}`, 1);
 });
+
+process.on('SIGTERM', () => shutdown('SIGTERM received.', 0));
+process.on('SIGINT', () => shutdown('SIGINT received.', 0));
 
 const port = process.env.PORT || 8787;
 
@@ -804,7 +844,7 @@ try {
   process.exit(1);
 }
 
-app.listen(port, () => {
+server = app.listen(port, () => {
   console.log(`chokro-server listening on ${port}`);
 
   if (allowLoopbackOrigins) {

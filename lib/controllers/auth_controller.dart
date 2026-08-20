@@ -85,7 +85,9 @@ class AuthController extends AsyncNotifier<void> {
       final user = UserModel(
         uid: created.uid,
         name: name,
-        email: email,
+        // Persist the address Firebase Auth accepted, including any provider
+        // normalization. Firestore rules bind this field to the token claim.
+        email: created.email ?? email,
         role: AppConstants.roleBuyer,
         status: AppConstants.statusActive,
         // createdAt comes from the server — see UserModel.toFirestore.

@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../core/api_config.dart';
+import '../core/wire_values.dart';
 
 /// Asks the trusted service to verify a pending submission (F2.5, F2.12).
 ///
@@ -23,7 +24,7 @@ class VerificationService {
   final http.Client _client;
 
   VerificationService({http.Client? client})
-      : _client = client ?? http.Client();
+    : _client = client ?? http.Client();
 
   Future<VerificationOutcome> verify(String disposalId) async {
     final user = FirebaseAuth.instance.currentUser;
@@ -108,9 +109,9 @@ class VerificationOutcome {
 
     return VerificationOutcome(
       disposalId: disposalId,
-      status: (json['status'] as String?) ?? 'pending',
-      pointsAwarded: (json['pointsAwarded'] as num?)?.toInt() ?? 0,
-      balanceAfter: (json['balanceAfter'] as num?)?.toInt(),
+      status: wireString(json['status']) ?? 'pending',
+      pointsAwarded: wireInt(json['pointsAwarded']) ?? 0,
+      balanceAfter: wireInt(json['balanceAfter']),
       flags: rawFlags is List
           ? rawFlags.map((f) => '$f').toList(growable: false)
           : const <String>[],

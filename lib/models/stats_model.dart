@@ -92,7 +92,9 @@ class PlatformStats {
     int read(String key) {
       final value = data[key];
       if (value is int) return value;
-      if (value is num) return value.toInt();
+      if (value is num && value.isFinite && value == value.truncateToDouble()) {
+        return value.toInt();
+      }
       return 0;
     }
 

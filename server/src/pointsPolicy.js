@@ -25,9 +25,7 @@ const DEFAULTS = Object.freeze({
 
 function readInt(source, key) {
   const value = source ? source[key] : undefined;
-  if (typeof value === 'number' && Number.isFinite(value)) {
-    return Math.trunc(value);
-  }
+  if (Number.isSafeInteger(value)) return value;
   return DEFAULTS[key];
 }
 
@@ -77,11 +75,11 @@ function fromRequest(body) {
   for (const key of Object.keys(DEFAULTS)) {
     const value = source[key];
 
-    if (typeof value !== 'number' || !Number.isFinite(value)) {
-      problems.push(`${key} is required and must be a number.`);
+    if (!Number.isSafeInteger(value)) {
+      problems.push(`${key} is required and must be a whole safe integer.`);
       policy[key] = DEFAULTS[key];
     } else {
-      policy[key] = Math.trunc(value);
+      policy[key] = value;
     }
   }
 
@@ -99,6 +97,12 @@ function fromRequest(body) {
  */
 function validate(policy) {
   const problems = [];
+
+  for (const [key, value] of Object.entries(policy)) {
+    if (!Number.isSafeInteger(value)) {
+      problems.push(`${key} must be a whole safe integer.`);
+    }
+  }
 
   const positive = (label, value) => {
     if (!(value > 0)) problems.push(`${label} must be greater than zero.`);

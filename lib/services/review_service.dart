@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import '../core/api_config.dart';
 
 import '../core/network_errors.dart';
+import '../core/wire_values.dart';
 
 /// Administrator decisions on pending submissions (F2.8).
 ///
@@ -38,10 +39,9 @@ class ReviewService {
       throw const ReviewException('You are not signed in.');
     }
 
-    final token = await user.getIdToken();
-
     http.Response response;
     try {
+      final token = await user.getIdToken();
       response = await _client
           .post(
             ApiConfig.path('/disposals/$disposalId/review'),
@@ -83,16 +83,16 @@ class ReviewService {
     if (response.statusCode == 200) {
       return ReviewOutcome(
         disposalId: disposalId,
-        status: body['status'] as String? ?? 'unknown',
-        pointsAwarded: body['pointsAwarded'] as int?,
-        balanceAfter: body['balanceAfter'] as int?,
+        status: wireString(body['status']) ?? 'unknown',
+        pointsAwarded: wireInt(body['pointsAwarded']),
+        balanceAfter: wireInt(body['balanceAfter']),
       );
     }
 
     // 409 carries a message written for an administrator to read — already
     // decided, daily cap reached, no wallet. Surface it verbatim.
     final message =
-        body['message'] as String? ??
+        wireString(body['message']) ??
         'The decision could not be recorded (${response.statusCode}).';
     _log('server refused the decision (${response.statusCode})', message);
     throw ReviewException(message);

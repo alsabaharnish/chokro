@@ -47,7 +47,13 @@ class WalletModel {
 
     return WalletModel(
       userId: data['userId'] is String ? data['userId'] as String : uid,
-      balance: balance is num ? balance.toInt() : 0,
+      balance: balance is int
+          ? balance
+          : balance is num &&
+                balance.isFinite &&
+                balance == balance.truncateToDouble()
+          ? balance.toInt()
+          : 0,
       updatedAt: updatedAt is Timestamp ? updatedAt.toDate() : null,
     );
   }
@@ -58,8 +64,5 @@ class WalletModel {
   /// timestamp, and the service layer supplies it. The rules require the key to
   /// be present when the document is created, and a server timestamp satisfies
   /// that.
-  Map<String, dynamic> toFirestore() => {
-        'userId': userId,
-        'balance': balance,
-      };
+  Map<String, dynamic> toFirestore() => {'userId': userId, 'balance': balance};
 }

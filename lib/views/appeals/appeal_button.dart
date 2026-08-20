@@ -11,10 +11,9 @@ import '../../models/appeal_model.dart';
 /// stateless and both history screens get identical behaviour from one place.
 ///
 /// Once an appeal exists for this submission the button becomes a link to it.
-/// Nothing in the rules forbids a second appeal against the same subject — an
-/// exact-key rule cannot express "not already present in this collection" — so
-/// this is a courtesy that keeps the administrator's queue from filling with
-/// duplicates, not a guarantee.
+/// New appeals use a deterministic document id, so the rules also prevent a
+/// second appeal against the same subject. This lookup changes the button into
+/// a useful link before the user attempts that refused write.
 class AppealButton extends ConsumerWidget {
   const AppealButton({
     super.key,
@@ -29,7 +28,7 @@ class AppealButton extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final alreadyAppealed = ref
         .watch(appealedSubjectIdsProvider)
-        .contains(subjectId);
+        .contains('${subjectType.name}:$subjectId');
 
     return Align(
       alignment: Alignment.centerLeft,

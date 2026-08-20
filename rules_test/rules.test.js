@@ -77,11 +77,28 @@ describe('users', () => {
   });
 
   test('a user can register as buyer', async () => {
-    const db = testEnv.authenticatedContext(ALICE).firestore();
+    const db = testEnv.authenticatedContext(ALICE, {
+      email: 'alice@test.com',
+    }).firestore();
     await assertSucceeds(
       setDoc(doc(db, 'users', ALICE), {
         name: 'Alice',
         email: 'alice@test.com',
+        role: 'buyer',
+        status: 'active',
+        createdAt: serverTimestamp(),
+      }),
+    );
+  });
+
+  test('a user cannot put a different email in their profile', async () => {
+    const db = testEnv.authenticatedContext(ALICE, {
+      email: 'alice@test.com',
+    }).firestore();
+    await assertFails(
+      setDoc(doc(db, 'users', ALICE), {
+        name: 'Alice',
+        email: 'someone-else@test.com',
         role: 'buyer',
         status: 'active',
         createdAt: serverTimestamp(),

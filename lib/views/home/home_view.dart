@@ -186,7 +186,7 @@ class HomeView extends ConsumerWidget {
                           ],
                         ),
 
-                        if (user.isAdmin) ...[
+                        if (user.isAdmin && !suspended) ...[
                           const SizedBox(height: AppTheme.gapLg),
                           const SectionHeading(
                             'Administration',
@@ -274,7 +274,11 @@ class HomeView extends ConsumerWidget {
                                 title: 'My listings',
                                 subtitle:
                                     'Add, edit and take products off the shop.',
-                                onTap: () => context.push('/seller/products'),
+                                disabledSubtitle:
+                                    'Unavailable while suspended.',
+                                onTap: suspended
+                                    ? null
+                                    : () => context.push('/seller/products'),
                               ),
                               ActionCard(
                                 icon: Icons.local_shipping_outlined,
@@ -289,7 +293,11 @@ class HomeView extends ConsumerWidget {
                                         'from you.',
                                 },
                                 badgeCount: openSellerOrders,
-                                onTap: () => context.push('/seller/orders'),
+                                disabledSubtitle:
+                                    'Unavailable while suspended.',
+                                onTap: suspended
+                                    ? null
+                                    : () => context.push('/seller/orders'),
                               ),
                             ] else
                               ActionCard(

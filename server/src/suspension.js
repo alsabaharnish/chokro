@@ -68,6 +68,14 @@ function isActiveProfile(profile, now = new Date()) {
   return now.getTime() > until.getTime();
 }
 
+/** Whether a profile may receive new marketplace orders. */
+function isTradingProfile(profile, now = new Date()) {
+  return (
+    isActiveProfile(profile, now) &&
+    (profile.role === 'seller' || profile.role === 'admin')
+  );
+}
+
 /**
  * A Firestore date field as a `Date`, or null.
  *
@@ -110,4 +118,9 @@ function suspensionMessage(profile, now = new Date()) {
   return `This account is suspended until ${until.toISOString()}.`;
 }
 
-module.exports = { isActiveProfile, suspensionMessage, toDate };
+module.exports = {
+  isActiveProfile,
+  isTradingProfile,
+  suspensionMessage,
+  toDate,
+};

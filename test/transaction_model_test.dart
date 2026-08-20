@@ -7,7 +7,10 @@ void main() {
       expect(parseTransactionSource('disposal'), TransactionSource.disposal);
       expect(parseTransactionSource('purchase'), TransactionSource.purchase);
       expect(parseTransactionSource('claim'), TransactionSource.claim);
-      expect(parseTransactionSource('redemption'), TransactionSource.redemption);
+      expect(
+        parseTransactionSource('redemption'),
+        TransactionSource.redemption,
+      );
     });
 
     test('an unrecognised source falls back to unknown, it does not throw', () {
@@ -31,13 +34,13 @@ void main() {
 
   group('TransactionModel.fromMap', () {
     Map<String, dynamic> base() => <String, dynamic>{
-          'userId': 'user_1',
-          'delta': 50,
-          'source': 'disposal',
-          'refId': 'disposal_9',
-          'balanceAfter': 150,
-          'createdAt': DateTime(2026, 8, 2, 9, 30),
-        };
+      'userId': 'user_1',
+      'delta': 50,
+      'source': 'disposal',
+      'refId': 'disposal_9',
+      'balanceAfter': 150,
+      'createdAt': DateTime(2026, 8, 2, 9, 30),
+    };
 
     test('maps a well-formed document', () {
       final entry = TransactionModel.fromMap('tx_1', base());
@@ -83,15 +86,29 @@ void main() {
       expect(entry.refId, isNull);
       expect(entry.balanceAfter, isNull);
     });
+
+    test('wrongly typed strings and fractional points fail closed', () {
+      final entry = TransactionModel.fromMap('tx_bad', {
+        'userId': 7,
+        'refId': false,
+        'delta': 4.5,
+        'balanceAfter': 10.5,
+      });
+
+      expect(entry.userId, isEmpty);
+      expect(entry.refId, isNull);
+      expect(entry.delta, 0);
+      expect(entry.balanceAfter, isNull);
+    });
   });
 
   group('display', () {
     TransactionModel entry(int delta) => TransactionModel(
-          id: 'tx',
-          userId: 'user_1',
-          delta: delta,
-          source: TransactionSource.disposal,
-        );
+      id: 'tx',
+      userId: 'user_1',
+      delta: delta,
+      source: TransactionSource.disposal,
+    );
 
     test('credits and debits are distinguished', () {
       expect(entry(50).isCredit, isTrue);
@@ -115,15 +132,17 @@ void main() {
       final entries = <TransactionModel>[];
       for (var i = 0; i < deltas.length; i++) {
         running += deltas[i];
-        entries.add(TransactionModel(
-          id: 'tx_$i',
-          userId: 'user_1',
-          delta: deltas[i],
-          source: deltas[i] > 0
-              ? TransactionSource.disposal
-              : TransactionSource.redemption,
-          balanceAfter: running,
-        ));
+        entries.add(
+          TransactionModel(
+            id: 'tx_$i',
+            userId: 'user_1',
+            delta: deltas[i],
+            source: deltas[i] > 0
+                ? TransactionSource.disposal
+                : TransactionSource.redemption,
+            balanceAfter: running,
+          ),
+        );
       }
 
       final newest = entries.last;

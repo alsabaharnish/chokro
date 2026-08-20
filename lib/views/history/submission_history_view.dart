@@ -3,6 +3,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../controllers/submission_history_controller.dart';
+import '../../controllers/disposal_controller.dart'
+    show verificationServiceProvider;
 import '../../core/label_format.dart';
 import '../../models/disposal_model.dart';
 import '../shared/app_shell.dart';
@@ -57,8 +59,10 @@ class SubmissionHistoryView extends ConsumerWidget {
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
                   itemCount: items.length,
                   separatorBuilder: (_, _) => const SizedBox(height: 10),
-                  itemBuilder: (context, index) =>
-                      _SubmissionCard(disposal: items[index]),
+                  itemBuilder: (context, index) => _SubmissionCard(
+                    key: ValueKey(items[index].id),
+                    disposal: items[index],
+                  ),
                 ),
               );
             },
@@ -69,13 +73,39 @@ class SubmissionHistoryView extends ConsumerWidget {
   }
 }
 
-class _SubmissionCard extends StatelessWidget {
-  const _SubmissionCard({required this.disposal});
+class _SubmissionCard extends ConsumerStatefulWidget {
+  const _SubmissionCard({super.key, required this.disposal});
 
   final DisposalModel disposal;
 
   @override
+  ConsumerState<_SubmissionCard> createState() => _SubmissionCardState();
+}
+
+class _SubmissionCardState extends ConsumerState<_SubmissionCard> {
+  bool _retrying = false;
+  String? _retryMessage;
+
+  Future<void> _retryVerification() async {
+    final id = widget.disposal.id;
+    if (id == null || _retrying) return;
+
+    setState(() {
+      _retrying = true;
+      _retryMessage = null;
+    });
+
+    final outcome = await ref.read(verificationServiceProvider).verify(id);
+    if (!mounted) return;
+    setState(() {
+      _retrying = false;
+      _retryMessage = outcome.userMessage;
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final disposal = widget.disposal;
     final theme = Theme.of(context);
     final status = disposal.status;
     final points = disposal.pointsAwarded;
@@ -145,7 +175,34 @@ class _SubmissionCard extends StatelessWidget {
                 title: 'Sent for review because',
                 body: flags.map(humanise).join(' · '),
               ),
-            if (status.isPending && flags.isEmpty)
+            if (disposal.needsVerificationRetry) ...[
+              _Note(
+                icon: Icons.sync_problem_outlined,
+                tone: theme.colorScheme.error,
+                title: 'Verification was interrupted',
+                body:
+                    'Retry the secure checks so this submission can be '
+                    'approved or sent to a reviewer.',
+              ),
+              const SizedBox(height: 10),
+              FilledButton.tonalIcon(
+                onPressed: _retrying ? null : _retryVerification,
+                icon: _retrying
+                    ? const SizedBox.square(
+                        dimension: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.refresh),
+                label: Text(_retrying ? 'Retrying…' : 'Retry verification'),
+              ),
+              if (_retryMessage != null) ...[
+                const SizedBox(height: 8),
+                Text(_retryMessage!, style: theme.textTheme.bodySmall),
+              ],
+            ],
+            if (status.isPending &&
+                flags.isEmpty &&
+                !disposal.needsVerificationRetry)
               _Note(
                 icon: Icons.schedule_outlined,
                 tone: theme.colorScheme.onSurfaceVariant,

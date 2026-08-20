@@ -12,6 +12,7 @@ import '../core/constants.dart';
 import '../models/claim_model.dart';
 
 import '../core/network_errors.dart';
+import '../core/wire_values.dart';
 
 /// Self-reported eco-action claims (F6.1–F6.4).
 ///
@@ -93,9 +94,9 @@ class ClaimService {
     if (response.statusCode == 200) {
       final body = _decode(response.body);
       return ClaimQuotaStatus(
-        weekKey: (body['weekKey'] as String?) ?? '',
-        approvedThisWeek: (body['approvedThisWeek'] as num?)?.toInt() ?? 0,
-        limit: (body['limit'] as num?)?.toInt() ?? 3,
+        weekKey: wireString(body['weekKey']) ?? '',
+        approvedThisWeek: wireInt(body['approvedThisWeek']) ?? 0,
+        limit: wireInt(body['limit']) ?? 3,
       );
     }
 
@@ -131,16 +132,16 @@ class ClaimService {
     if (response.statusCode == 200) {
       return ClaimReviewOutcome(
         claimId: claimId,
-        status: (body['status'] as String?) ?? 'unknown',
-        pointsAwarded: (body['pointsAwarded'] as num?)?.toInt(),
-        balanceAfter: (body['balanceAfter'] as num?)?.toInt(),
+        status: wireString(body['status']) ?? 'unknown',
+        pointsAwarded: wireInt(body['pointsAwarded']),
+        balanceAfter: wireInt(body['balanceAfter']),
       );
     }
 
     // A 409 carries a message written for an administrator: already decided,
     // quota exhausted, no wallet. Surface it verbatim.
     throw ClaimException(
-      (body['message'] as String?) ??
+      wireString(body['message']) ??
           'The decision could not be recorded (${response.statusCode}).',
     );
   }
@@ -189,7 +190,7 @@ class ClaimService {
   }
 
   String _messageFor(http.Response response, String fallback) {
-    final message = _decode(response.body)['message'] as String?;
+    final message = wireString(_decode(response.body)['message']);
     if (message != null && message.isNotEmpty) return message;
     return '$fallback (${response.statusCode})';
   }

@@ -39,9 +39,30 @@ jest.mock('../src/push', () => ({
 
 const firebase = require('../src/firebase');
 const policyModule = require('../src/pointsPolicy');
-const { approveDisposal, rejectDisposal } = require('../src/award');
+const {
+  approveDisposal,
+  creditWalletInTransaction,
+  readNonNegativeCounter,
+  rejectDisposal,
+  SOURCES,
+} = require('../src/award');
 
 const DAY = policyModule.dayKey(new Date());
+
+describe('readNonNegativeCounter', () => {
+  test.each([0, 1, Number.MAX_SAFE_INTEGER])('accepts %p', (value) => {
+    expect(readNonNegativeCounter(value, 'Counter')).toBe(value);
+  });
+
+  test.each([-1, 1.5, '1', NaN, Infinity, Number.MAX_SAFE_INTEGER + 1])(
+    'refuses corrupt value %p',
+    (value) => {
+      expect(() => readNonNegativeCounter(value, 'Counter')).toThrow(
+        'Counter has an invalid count.',
+      );
+    },
+  );
+});
 
 /**
  * A Firestore stand-in that records what a transaction read and wrote.
@@ -238,6 +259,43 @@ describe('the balance and its ledger entry move together (NFR-4)', () => {
   });
 });
 
+describe('wallet arithmetic rejects corrupted data', () => {
+  const txn = { update: jest.fn(), set: jest.fn() };
+
+  beforeEach(() => {
+    fakeFirestore();
+    txn.update.mockClear();
+    txn.set.mockClear();
+  });
+
+  it('refuses a non-integer or negative stored balance', () => {
+    for (const currentBalance of ['100', 1.5, -1, Number.MAX_SAFE_INTEGER + 1]) {
+      expect(() =>
+        creditWalletInTransaction(txn, {
+          uid: 'u1',
+          delta: 50,
+          source: SOURCES.DISPOSAL,
+          refId: 'd1',
+          currentBalance,
+        }),
+      ).toThrow(/invalid balance/i);
+    }
+    expect(txn.update).not.toHaveBeenCalled();
+  });
+
+  it('refuses arithmetic that would exceed safe integer bounds', () => {
+    expect(() =>
+      creditWalletInTransaction(txn, {
+        uid: 'u1',
+        delta: 1,
+        source: SOURCES.DISPOSAL,
+        refId: 'd1',
+        currentBalance: Number.MAX_SAFE_INTEGER,
+      }),
+    ).toThrow(/safe integer/i);
+  });
+});
+
 describe('idempotence', () => {
   it('refuses a submission that was already approved', async () => {
     const fake = fakeFirestore(
@@ -281,6 +339,65 @@ describe('verification must have run before a payout', () => {
     await expect(approveDisposal({ disposalId: 'd1' })).rejects.toThrow(
       /Verification is still running/i,
     );
+  });
+
+  it('commits freshly computed evidence in the same update as an auto-award', async () => {
+    const fake = fakeFirestore(
+      baseSeed({
+        'disposals/d1': {
+          userId: 'u1',
+          binId: 'bin1',
+          status: 'pending',
+          flags: [],
+        },
+      }),
+    );
+
+    await approveDisposal({
+      disposalId: 'd1',
+      verificationEvidence: {
+        photoHash: 'fresh-hash',
+        distanceMeters: 8.5,
+        verificationCompleted: true,
+        screenConfidence: 0.96,
+        screenItemCount: 4,
+        screenNotes: 'Matches the declaration.',
+      },
+    });
+
+    const disposalWrites = fake.writesTo('disposals/d1');
+    expect(disposalWrites).toHaveLength(1);
+    expect(disposalWrites[0].data).toEqual(
+      expect.objectContaining({
+        status: 'autoApproved',
+        photoHash: 'fresh-hash',
+        distanceMeters: 8.5,
+        verificationCompleted: true,
+        screenConfidence: 0.96,
+        screenItemCount: 4,
+      }),
+    );
+    expect(fake.writesTo('wallets/u1')).toHaveLength(1);
+  });
+
+  it('does not accept an evidence object without the trusted completion marker', async () => {
+    fakeFirestore(
+      baseSeed({
+        'disposals/d1': {
+          userId: 'u1',
+          binId: 'bin1',
+          status: 'pending',
+          flags: [],
+        },
+      }),
+    );
+
+    await expect(
+      approveDisposal({
+        disposalId: 'd1',
+        verificationEvidence: { photoHash: 'not-enough' },
+      }),
+    ).rejects.toThrow(/Verification is still running/i);
   });
 });
 

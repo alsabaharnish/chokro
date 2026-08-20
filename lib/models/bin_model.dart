@@ -56,15 +56,15 @@ class BinModel {
 
   factory BinModel.fromJson(Map<String, dynamic> json, {String? id}) {
     return BinModel(
-      id: id ?? json['id'] as String?,
-      label: (json['label'] as String?) ?? '',
+      id: id ?? _nullableString(json['id']),
+      label: _string(json['label']),
       lat: _toDouble(json['lat']),
       lng: _toDouble(json['lng']),
       radiusMeters: _toDouble(json['radiusMeters'], fallback: 50.0),
-      qrPayload: (json['qrPayload'] as String?) ?? '',
-      active: (json['active'] as bool?) ?? true,
-      createdBy: (json['createdBy'] as String?) ?? '',
-      createdAt: json['createdAt'] as DateTime?,
+      qrPayload: _string(json['qrPayload']),
+      active: json['active'] is bool ? json['active'] as bool : true,
+      createdBy: _string(json['createdBy']),
+      createdAt: _date(json['createdAt']),
     );
   }
 
@@ -74,14 +74,14 @@ class BinModel {
   /// `FieldValue.serverTimestamp()` by the service layer, never with a
   /// client-authored clock value (§7.4).
   Map<String, dynamic> toJson() => <String, dynamic>{
-        'label': label,
-        'lat': lat,
-        'lng': lng,
-        'radiusMeters': radiusMeters,
-        'qrPayload': qrPayload,
-        'active': active,
-        'createdBy': createdBy,
-      };
+    'label': label,
+    'lat': lat,
+    'lng': lng,
+    'radiusMeters': radiusMeters,
+    'qrPayload': qrPayload,
+    'active': active,
+    'createdBy': createdBy,
+  };
 
   BinModel copyWith({
     String? id,
@@ -132,8 +132,10 @@ class BinModel {
       problems.add('Radius must be greater than zero.');
     }
     if (radiusMeters > 1000) {
-      problems.add('Radius may not exceed 1000 m — a geofence that large '
-          'no longer proves the user was at the bin.');
+      problems.add(
+        'Radius may not exceed 1000 m — a geofence that large '
+        'no longer proves the user was at the bin.',
+      );
     }
     return problems;
   }
@@ -161,16 +163,16 @@ class BinModel {
 
   @override
   int get hashCode => Object.hash(
-        id,
-        label,
-        lat,
-        lng,
-        radiusMeters,
-        qrPayload,
-        active,
-        createdBy,
-        createdAt,
-      );
+    id,
+    label,
+    lat,
+    lng,
+    radiusMeters,
+    qrPayload,
+    active,
+    createdBy,
+    createdAt,
+  );
 }
 
 double _toDouble(Object? value, {double fallback = 0.0}) {
@@ -178,4 +180,14 @@ double _toDouble(Object? value, {double fallback = 0.0}) {
   if (value is int) return value.toDouble();
   if (value is num) return value.toDouble();
   return fallback;
+}
+
+String _string(Object? value) => value is String ? value : '';
+String? _nullableString(Object? value) => value is String ? value : null;
+
+DateTime? _date(Object? value) {
+  if (value is DateTime) return value;
+  if (value is String) return DateTime.tryParse(value);
+  if (value is int) return DateTime.fromMillisecondsSinceEpoch(value);
+  return null;
 }

@@ -11,20 +11,19 @@ void main() {
     List<String> tags = const ['Eco Friendly', 'bamboo'],
     List<String> images = const [],
     bool active = true,
-  }) =>
-      ProductModel.forSave(
-        id: 'p1',
-        sellerId: 'seller_uid',
-        shopName: 'Green Corner',
-        title: title,
-        description: description,
-        category: ProductCategory.personalCare,
-        price: price,
-        stock: stock,
-        tags: tags,
-        imageUrls: images,
-        active: active,
-      );
+  }) => ProductModel.forSave(
+    id: 'p1',
+    sellerId: 'seller_uid',
+    shopName: 'Green Corner',
+    title: title,
+    description: description,
+    category: ProductCategory.personalCare,
+    price: price,
+    stock: stock,
+    tags: tags,
+    imageUrls: images,
+    active: active,
+  );
 
   group('forSave derives the index rather than trusting a form', () {
     test('computes titleLower and searchTokens', () {
@@ -67,23 +66,20 @@ void main() {
     });
 
     test('create carries exactly the allowed keys', () {
-      expect(
-        saved().toCreateJson().keys.toSet(),
-        {
-          'sellerId',
-          'shopName',
-          'title',
-          'titleLower',
-          'searchTokens',
-          'description',
-          'category',
-          'tags',
-          'price',
-          'stock',
-          'imageUrls',
-          'active',
-        },
-      );
+      expect(saved().toCreateJson().keys.toSet(), {
+        'sellerId',
+        'shopName',
+        'title',
+        'titleLower',
+        'searchTokens',
+        'description',
+        'category',
+        'tags',
+        'price',
+        'stock',
+        'imageUrls',
+        'active',
+      });
     });
 
     test('update omits sellerId, which the rules pin as unchangeable', () {
@@ -107,10 +103,10 @@ void main() {
     });
 
     test('an unknown category falls back to other rather than throwing', () {
-      final product = ProductModel.fromMap(
-        {'category': 'groceries', 'active': true},
-        id: 'p',
-      );
+      final product = ProductModel.fromMap({
+        'category': 'groceries',
+        'active': true,
+      }, id: 'p');
 
       expect(product.category, ProductCategory.other);
     });
@@ -125,11 +121,28 @@ void main() {
       expect(ProductModel.fromMap({'price': '250'}, id: 'p').price, 250);
     });
 
+    test('a fractional stored price or stock fails toward unsaleable', () {
+      final product = ProductModel.fromMap({
+        'price': 250.5,
+        'stock': 2.5,
+        'active': true,
+      }, id: 'p');
+
+      expect(product.price, 0);
+      expect(product.stock, 0);
+      expect(product.isPurchasable, isFalse);
+    });
+
+    test('a malformed category value does not throw', () {
+      final product = ProductModel.fromMap({'category': 7}, id: 'p');
+      expect(product.category, ProductCategory.other);
+    });
+
     test('ignores non-string entries in the list fields', () {
-      final product = ProductModel.fromMap(
-        {'tags': ['ok', 7, null], 'imageUrls': ['url', 3]},
-        id: 'p',
-      );
+      final product = ProductModel.fromMap({
+        'tags': ['ok', 7, null],
+        'imageUrls': ['url', 3],
+      }, id: 'p');
 
       expect(product.tags, ['ok']);
       expect(product.imageUrls, ['url']);

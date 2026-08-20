@@ -306,26 +306,26 @@ class DisposalModel {
     final flags = <DisposalFlag>[];
     if (rawFlags is List) {
       for (final entry in rawFlags) {
-        final flag = DisposalFlag.fromName(entry as String?);
+        final flag = DisposalFlag.fromName(_nullableString(entry));
         if (flag != null) flags.add(flag);
       }
     }
 
     return DisposalModel(
-      id: id ?? json['id'] as String?,
-      userId: (json['userId'] as String?) ?? '',
-      binId: (json['binId'] as String?) ?? '',
-      photoUrl: (json['photoUrl'] as String?) ?? '',
-      photoPublicId: (json['photoPublicId'] as String?) ?? '',
-      photoHash: json['photoHash'] as String?,
+      id: id ?? _nullableString(json['id']),
+      userId: _nullableString(json['userId']) ?? '',
+      binId: _nullableString(json['binId']) ?? '',
+      photoUrl: _nullableString(json['photoUrl']) ?? '',
+      photoPublicId: _nullableString(json['photoPublicId']) ?? '',
+      photoHash: _nullableString(json['photoHash']),
       capturedLat: _toDouble(json['capturedLat']),
       capturedLng: _toDouble(json['capturedLng']),
       distanceMeters: _toDouble(json['distanceMeters']),
       declaredItemCount: _toInt(json['declaredItemCount']),
       itemType:
-          DisposalItemType.fromName(json['itemType'] as String?) ??
+          DisposalItemType.fromName(_nullableString(json['itemType'])) ??
           DisposalItemType.plasticOther,
-      status: DisposalStatus.fromName(json['status'] as String?),
+      status: DisposalStatus.fromName(_nullableString(json['status'])),
       flags: flags,
       // Older verified documents predate the explicit marker but carry all
       // three server-only evidence keys. Keep them reviewable after upgrade.
@@ -336,12 +336,12 @@ class DisposalModel {
               json.containsKey('screenItemCount')),
       screenConfidence: _toNullableDouble(json['screenConfidence']),
       screenItemCount: _toNullableInt(json['screenItemCount']),
-      screenNotes: json['screenNotes'] as String?,
+      screenNotes: _nullableString(json['screenNotes']),
       pointsAwarded: _toNullableInt(json['pointsAwarded']),
-      rejectionReason: json['rejectionReason'] as String?,
-      reviewedBy: json['reviewedBy'] as String?,
-      reviewedAt: json['reviewedAt'] as DateTime?,
-      createdAt: json['createdAt'] as DateTime?,
+      rejectionReason: _nullableString(json['rejectionReason']),
+      reviewedBy: _nullableString(json['reviewedBy']),
+      reviewedAt: _date(json['reviewedAt']),
+      createdAt: _date(json['createdAt']),
     );
   }
 
@@ -468,6 +468,12 @@ class DisposalModel {
 
   bool get hasFlags => flags.isNotEmpty;
 
+  /// Verification never reached a reviewable or payable outcome. A verified,
+  /// flagless pending record is included to recover submissions stranded by the
+  /// server's former two-write auto-approval path.
+  bool get needsVerificationRetry =>
+      status.isPending && (!verificationCompleted || flags.isEmpty);
+
   /// One-line status for the user's history screen.
   String get userFacingStatus {
     switch (status) {
@@ -544,12 +550,25 @@ double? _toNullableDouble(Object? value) {
 
 int _toInt(Object? value, {int fallback = 0}) {
   if (value is int) return value;
-  if (value is num) return value.toInt();
+  if (value is num && value.isFinite && value == value.truncateToDouble()) {
+    return value.toInt();
+  }
   return fallback;
 }
 
 int? _toNullableInt(Object? value) {
   if (value is int) return value;
-  if (value is num) return value.toInt();
+  if (value is num && value.isFinite && value == value.truncateToDouble()) {
+    return value.toInt();
+  }
+  return null;
+}
+
+String? _nullableString(Object? value) => value is String ? value : null;
+
+DateTime? _date(Object? value) {
+  if (value is DateTime) return value;
+  if (value is String) return DateTime.tryParse(value);
+  if (value is int) return DateTime.fromMillisecondsSinceEpoch(value);
   return null;
 }

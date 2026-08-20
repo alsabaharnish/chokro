@@ -3,15 +3,15 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   BinModel validBin() => const BinModel(
-        id: 'bin_001',
-        label: 'Merul Badda — Block C gate',
-        lat: 23.7808,
-        lng: 90.4074,
-        radiusMeters: 50,
-        qrPayload: 'chokro:bin:001',
-        active: true,
-        createdBy: 'admin_uid',
-      );
+    id: 'bin_001',
+    label: 'Merul Badda — Block C gate',
+    lat: 23.7808,
+    lng: 90.4074,
+    radiusMeters: 50,
+    qrPayload: 'chokro:bin:001',
+    active: true,
+    createdBy: 'admin_uid',
+  );
 
   group('serialization', () {
     test('round-trips through JSON', () {
@@ -27,10 +27,10 @@ void main() {
     });
 
     test('takes the document id from the parameter over the payload', () {
-      final parsed = BinModel.fromJson(
-        <String, dynamic>{'id': 'from_payload', 'label': 'x'},
-        id: 'from_parameter',
-      );
+      final parsed = BinModel.fromJson(<String, dynamic>{
+        'id': 'from_payload',
+        'label': 'x',
+      }, id: 'from_parameter');
       expect(parsed.id, 'from_parameter');
     });
 
@@ -54,6 +54,20 @@ void main() {
     test('defaults a missing active flag to true', () {
       final parsed = BinModel.fromJson(<String, dynamic>{'label': 'x'});
       expect(parsed.active, isTrue);
+    });
+
+    test('wrongly typed fields use safe defaults instead of throwing', () {
+      final parsed = BinModel.fromJson(<String, dynamic>{
+        'id': 7,
+        'label': false,
+        'active': 'yes',
+        'createdAt': <String, dynamic>{},
+      });
+
+      expect(parsed.id, isNull);
+      expect(parsed.label, isEmpty);
+      expect(parsed.active, isTrue);
+      expect(parsed.createdAt, isNull);
     });
   });
 
