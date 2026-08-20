@@ -178,7 +178,20 @@ class DisposalDraft {
 
 class DisposalDraftController extends Notifier<DisposalDraft> {
   @override
-  DisposalDraft build() => const DisposalDraft();
+  DisposalDraft build() {
+    // Riverpod 3 auto-disposes by default, and this draft outlives the
+    // widget that creates it: the flow spans four screens, and the draft is
+    // seeded with `ref.read` (which takes no subscription) immediately before
+    // the route is pushed. Between those two statements nothing watches it, so
+    // without this its survival depends on frame timing rather than on a
+    // guarantee — and losing it drops the photo and the resolved bin, landing
+    // the user on "This submission is incomplete. Start again."
+    //
+    // The same trap already cost this codebase its auth gate; see the note on
+    // `_authGateProvider` in routing/router.dart.
+    ref.keepAlive();
+    return const DisposalDraft();
+  }
 
   void startForBin(BinModel bin) {
     state = DisposalDraft(bin: bin);

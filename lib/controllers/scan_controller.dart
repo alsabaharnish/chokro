@@ -5,11 +5,13 @@ import '../core/label_format.dart';
 import '../models/bin_model.dart';
 import '../services/bin_service.dart';
 import '../services/lockout_service.dart';
+import '../core/network_errors.dart';
 
 final binServiceProvider = Provider<BinService>((ref) => BinService());
 
-final lockoutServiceProvider =
-    Provider<LockoutService>((ref) => LockoutService());
+final lockoutServiceProvider = Provider<LockoutService>(
+  (ref) => LockoutService(),
+);
 
 /// What happened when a scanned code was looked up.
 ///
@@ -138,12 +140,23 @@ class ScanController extends Notifier<ScanState> {
 
       state = ScanState(outcome: ScanOutcome.resolved, bin: bin);
     } catch (err) {
-      state = ScanState(outcome: ScanOutcome.error, message: err.toString());
+      // `friendlyErrorMessage`, not `err.toString()`.
+      //
+      // This is the first screen of the disposal flow, so a rules or
+      // connectivity failure here used to put
+      // `[cloud_firestore/permission-denied] Missing or insufficient
+      // permissions.` in front of a resident standing at a bin — the exact
+      // string `network_errors.dart` was written to eliminate.
+      state = ScanState(
+        outcome: ScanOutcome.error,
+        message: friendlyErrorMessage(err),
+      );
     }
   }
 
   void reset() => state = const ScanState();
 }
 
-final scanControllerProvider =
-    NotifierProvider<ScanController, ScanState>(ScanController.new);
+final scanControllerProvider = NotifierProvider<ScanController, ScanState>(
+  ScanController.new,
+);

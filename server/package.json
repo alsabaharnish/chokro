@@ -10,7 +10,7 @@
   },
   "scripts": {
     "start": "node src/index.js",
-    "dev": "node --watch src/index.js",
+    "dev": "ALLOW_LOOPBACK_ORIGINS=true node --watch src/index.js",
     "test": "jest"
   },
   "dependencies": {

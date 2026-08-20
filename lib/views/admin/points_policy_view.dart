@@ -8,6 +8,7 @@ import '../../core/points_policy.dart';
 import '../../core/policy_fields.dart';
 import '../../services/points_policy_service.dart';
 import '../shared/app_shell.dart';
+import '../shared/content_state.dart';
 import '../shared/error_retry.dart';
 
 /// Administrator editor for the points policy (F3.3).
@@ -162,7 +163,14 @@ class _PointsPolicyViewState extends ConsumerState<PointsPolicyView> {
             maxWidth: PointsPolicyView._maxContentWidth,
           ),
           child: async.when(
-            loading: () => const Center(child: CircularProgressIndicator()),
+            // Was a bare `CircularProgressIndicator` with no text at all — the
+            // only loading state in the app that said nothing. This screen waits
+            // on the trusted service, so it is precisely the one that needed to
+            // explain a slow start.
+            loading: () => const ContentLoading(
+              label: 'Reading the points policy…',
+              slowHint: ContentLoading.serverWakingHint,
+            ),
             error: (error, _) => ErrorRetry(
               title: 'The policy',
               error: error,

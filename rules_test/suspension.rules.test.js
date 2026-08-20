@@ -24,6 +24,7 @@ const {
 const {
   setDoc,
   updateDoc,
+  getDoc,
   doc,
   serverTimestamp,
   setLogLevel,
@@ -252,13 +253,90 @@ describe('writing a suspension', () => {
   });
 
   it('a suspended admin cannot act as an admin', async () => {
-    // isAdmin() reads role, not status, so this is worth pinning down: the
-    // suspension has to bite on the write path, not on the role check.
+    // Kept, but note what it does NOT prove: a suspended *buyer* fails this
+    // assertion too, because `isActive()` on disposal create refuses both. It
+    // says nothing about administrator privilege, which is why the four tests
+    // below exist.
     await seedUser('admin2_uid', 'admin', 'suspended');
     await seedUser(ALICE, 'buyer', 'active');
     const db = testEnv.authenticatedContext('admin2_uid').firestore();
     await assertFails(
       setDoc(doc(db, 'disposals', 'd6'), validDisposal('admin2_uid')),
+    );
+  });
+
+  it('THE ESCALATION: a suspended admin cannot reinstate themselves', async () => {
+    // The shortest exploit there was: one document write, no server involved.
+    // Closed by two independent guards — `isAdmin()` now resolves the
+    // suspension, and the admin branch refuses a self-edit — so this test would
+    // have to defeat both.
+    await seedUser('susp_admin', 'admin', 'suspended');
+    const db = testEnv.authenticatedContext('susp_admin').firestore();
+
+    await assertFails(
+      updateDoc(doc(db, 'users', 'susp_admin'), { status: 'active' }),
+    );
+  });
+
+  it('an ACTIVE admin cannot edit their own role or status either', async () => {
+    // The self-edit guard is not conditional on being suspended. An admin who
+    // could rewrite their own record could entrench a compromised session, and
+    // the accounts screen already refuses to suspend the signed-in account — so
+    // this only makes the rule agree with the interface.
+    await seedUser(ADMIN, 'admin', 'active');
+    const db = testEnv.authenticatedContext(ADMIN).firestore();
+
+    await assertFails(
+      updateDoc(doc(db, 'users', ADMIN), { role: 'buyer' }),
+    );
+  });
+
+  it('a suspended admin cannot suspend or promote anybody else', async () => {
+    await seedUser('susp_admin2', 'admin', 'suspended');
+    await seedUser(ALICE, 'buyer', 'active');
+    const db = testEnv.authenticatedContext('susp_admin2').firestore();
+
+    await assertFails(
+      updateDoc(doc(db, 'users', ALICE), { role: 'admin' }),
+    );
+    await assertFails(
+      updateDoc(doc(db, 'users', ALICE), { status: 'suspended' }),
+    );
+  });
+
+  it('a suspended admin loses admin READ access too', async () => {
+    // Reads matter as much as writes here: an admin can read every wallet and
+    // every submission in the system, and a suspended one should not.
+    await seedUser('susp_admin3', 'admin', 'suspended');
+    await seedUser(ALICE, 'buyer', 'active');
+
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'wallets', ALICE), {
+        userId: ALICE,
+        balance: 500,
+        updatedAt: new Date(),
+      });
+    });
+
+    const db = testEnv.authenticatedContext('susp_admin3').firestore();
+    await assertFails(getDoc(doc(db, 'wallets', ALICE)));
+  });
+
+  it('an admin whose timed suspension has lapsed is an admin again', async () => {
+    // The other half of the rule. Nothing rewrites `status` back to 'active'
+    // when the clock runs out, so a lapsed suspension must resolve at request
+    // time — otherwise this fix would bar the account permanently.
+    await seedUser(
+      'lapsed_admin',
+      'admin',
+      'suspended',
+      new Date(Date.now() - HOUR),
+    );
+    await seedUser(ALICE, 'buyer', 'active');
+
+    const db = testEnv.authenticatedContext('lapsed_admin').firestore();
+    await assertSucceeds(
+      updateDoc(doc(db, 'users', ALICE), { status: 'suspended' }),
     );
   });
 

@@ -39,6 +39,8 @@ const claimsModule = require('./claims');
 const checkoutModule = require('./checkout');
 const ordersModule = require('./orders');
 const listingsModule = require('./listings');
+const { rateLimit } = require('./rateLimit');
+const { parseAllowedOrigins, isAllowedOrigin } = require('./cors');
 
 const app = express();
 
@@ -46,9 +48,6 @@ const app = express();
 // protocol are wrong in logs.
 app.set('trust proxy', 1);
 
-// Base64 inflates a payload by about a third, so the ceiling here has to exceed
-// the image ceiling with room to spare.
-app.use(express.json({ limit: '12mb' }));
 
 /**
  * CORS.
@@ -60,17 +59,51 @@ app.use(express.json({ limit: '12mb' }));
  * localhost for development — a wildcard would let any page on the internet make
  * authenticated calls with a token it tricked out of a user.
  */
-const allowedOrigins = (process.env.ALLOWED_ORIGINS || '')
-  .split(',')
-  .map((s) => s.trim())
-  .filter(Boolean);
+const allowedOrigins = parseAllowedOrigins(process.env.ALLOWED_ORIGINS);
+
+/**
+ * Whether loopback origins are accepted on top of the explicit list.
+ *
+ * ## Why this exists
+ *
+ * `ALLOWED_ORIGINS` has to name an exact origin, scheme and port. In local
+ * development that port is not stable: `flutter run -d chrome` picks a fresh one
+ * on every launch, and a pinned one can simply be taken — which is exactly what
+ * happened here, with an unrelated project holding 5000 for hours while the only
+ * allowlisted dev origin was `http://localhost:5000`.
+ *
+ * The failure is silent and expensive to diagnose. Every call to this service
+ * from the browser is refused, while Firestore reads keep working because they
+ * do not come through here — so the app looks *mostly* fine and precisely the
+ * screens that need the server break. That is a confusing signal to hand
+ * somebody, and it has now cost time twice.
+ *
+ * ## Why it is opt-in and not a `NODE_ENV !== 'production'` default
+ *
+ * A CORS allowlist is a real control: it is what stops a page on the open
+ * internet making authenticated calls with a token it tricked out of a user.
+ * Defaulting it open whenever an environment variable happens to be unset means
+ * one missing variable on a deploy silently removes the control — and nothing
+ * would report it.
+ *
+ * So this is off unless explicitly enabled, and `npm run dev` enables it. A
+ * production start never does, whatever `NODE_ENV` says.
+ */
+const allowLoopbackOrigins = process.env.ALLOW_LOOPBACK_ORIGINS === 'true';
+
+/** The predicate itself lives in `cors.js`, where it is unit-tested. */
+const originAllowed = (origin) =>
+  isAllowedOrigin(origin, {
+    allowedOrigins,
+    allowLoopback: allowLoopbackOrigins,
+  });
 
 app.use(
   cors({
     origin(origin, callback) {
       // No origin: a native app, curl, or a same-origin request. Allowed.
       if (!origin) return callback(null, true);
-      if (allowedOrigins.includes(origin)) return callback(null, true);
+      if (originAllowed(origin)) return callback(null, true);
 
       // Refused, NOT an error.
       //
@@ -90,12 +123,64 @@ app.use(
       // origin to add.
       console.warn(
         `[cors] refused origin ${origin}; ALLOWED_ORIGINS = ` +
-          `${allowedOrigins.join(', ') || '(empty)'}`,
+          `${allowedOrigins.join(', ') || '(empty)'}` +
+          `${allowLoopbackOrigins ? ' (+ any loopback)' : ''}. ` +
+          'For local development, start the server with `npm run dev`, which ' +
+          'accepts any localhost port.',
       );
       return callback(null, false);
     },
   }),
 );
+
+// ---------------------------------------------------------------------------
+// Rate limits
+// ---------------------------------------------------------------------------
+//
+// Applied per authenticated uid. The numbers are set well above what the app
+// does in normal use and well below what it costs to be abused — a disposal
+// takes four screens to compose, so twenty verifications an hour is generous for
+// a person and useless for a script.
+//
+// `verify` and the photo routes are the ones that matter: each verification is a
+// billed Groq vision call and each upload is a Cloudinary write, so without a
+// limit one authenticated account could spend the project's whole quota. The
+// others are here to keep a single account from monopolising a free instance.
+
+const verifyLimit = rateLimit({ name: 'verify', windowMs: 60 * 60 * 1000, max: 20 });
+const photoLimit = rateLimit({ name: 'photos', windowMs: 60 * 60 * 1000, max: 40 });
+const writeLimit = rateLimit({ name: 'writes', windowMs: 60 * 1000, max: 30 });
+
+// ---------------------------------------------------------------------------
+// Body parsing
+// ---------------------------------------------------------------------------
+//
+// Registered AFTER cors and, for the photo routes, after authentication.
+//
+// A single global `express.json({ limit: '12mb' })` used to sit above
+// everything, which meant an **unauthenticated** POST to any path — including
+// one that would 404 — made this free-tier instance buffer and parse up to 12 MB
+// before anything looked at who was asking. The ceiling has to be that high for
+// photo uploads (base64 inflates a payload by about a third), but only three
+// routes need it.
+//
+// So the token is verified first and the large limit is mounted only on
+// `/photos`. Everything else gets 64 KB, which is ample for a decision, a policy
+// or a checkout request.
+//
+// `req.method !== 'POST'` is load-bearing, not tidiness: an OPTIONS preflight
+// carries no Authorization header, so gating it on `requireAuth` would 401 every
+// cross-origin upload from the web build before the browser ever sent the real
+// request. `GET /photos/limits` is public for the same reason it always was.
+app.use('/photos', (req, res, next) => {
+  if (req.method !== 'POST') return next();
+  return requireAuth(req, res, next);
+});
+app.use('/photos', express.json({ limit: '12mb' }));
+
+// The second parser is a no-op for anything the first already handled — Express
+// skips a body that is already parsed.
+app.use(express.json({ limit: '64kb' }));
 
 // ---------------------------------------------------------------------------
 // Health and diagnostics
@@ -176,8 +261,11 @@ function photoUploadHandler(kind) {
   };
 }
 
-app.post('/photos/disposal', requireAuth, photoUploadHandler('disposals'));
-app.post('/photos/claim', requireAuth, photoUploadHandler('claims'));
+// No `requireAuth` here: the `/photos` mount above already ran it, before the
+// body was buffered. Repeating it would cost a second token verification and a
+// second Firestore read on the hottest path in the app.
+app.post('/photos/disposal', photoLimit, photoUploadHandler('disposals'));
+app.post('/photos/claim', photoLimit, photoUploadHandler('claims'));
 
 /**
  * A listing photograph (F4.1).
@@ -193,12 +281,7 @@ app.post('/photos/claim', requireAuth, photoUploadHandler('claims'));
  * web-primary (§5.5), so an upload that only worked on a phone would be the
  * wrong way round.
  */
-app.post(
-  '/photos/product',
-  requireAuth,
-  requireSeller,
-  photoUploadHandler('products'),
-);
+app.post('/photos/product', requireSeller, photoLimit, photoUploadHandler('products'));
 
 /** Lets the client show a sensible limit without hard-coding it twice. */
 app.get('/photos/limits', (req, res) => {
@@ -219,7 +302,7 @@ app.get('/photos/limits', (req, res) => {
  *
  * Body: { decision: 'approve' | 'reject', reason?: string }
  */
-app.post('/disposals/:id/review', requireAuth, requireAdmin, async (req, res) => {
+app.post('/disposals/:id/review', requireAuth, requireAdmin, writeLimit, async (req, res) => {
   const { id } = req.params;
   const { decision, reason } = req.body || {};
 
@@ -266,7 +349,7 @@ app.post('/disposals/:id/review', requireAuth, requireAdmin, async (req, res) =>
  * response from a lost request, so it will retry, and a retry must not credit
  * twice.
  */
-app.post('/disposals/:id/verify', requireAuth, async (req, res) => {
+app.post('/disposals/:id/verify', requireAuth, verifyLimit, async (req, res) => {
   try {
     const result = await verifyDisposal({
       disposalId: req.params.id,
@@ -316,7 +399,7 @@ app.get('/claims/quota', requireAuth, async (req, res) => {
  * submission, and it increments on approval rather than submission — otherwise
  * a user could exhaust their own week with rejected junk (§7.4).
  */
-app.post('/claims/:id/review', requireAuth, requireAdmin, async (req, res) => {
+app.post('/claims/:id/review', requireAuth, requireAdmin, writeLimit, async (req, res) => {
   const { decision, reason } = req.body || {};
 
   if (decision !== 'approve' && decision !== 'reject') {
@@ -365,7 +448,7 @@ app.post('/claims/:id/review', requireAuth, requireAdmin, async (req, res) => {
  * second set of orders. That is the safe direction to fail in: a duplicate
  * checkout would decrement stock twice and debit points twice.
  */
-app.post('/checkout', requireAuth, async (req, res) => {
+app.post('/checkout', requireAuth, writeLimit, async (req, res) => {
   const { pointsRequested, settlementMethod } = req.body || {};
 
   const points = Number.isFinite(pointsRequested)
@@ -399,7 +482,7 @@ app.post('/checkout', requireAuth, async (req, res) => {
  * replay a transition: the server refuses anything that is not the exact next
  * step for this order.
  */
-app.post('/orders/:id/status', requireAuth, requireSeller, async (req, res) => {
+app.post('/orders/:id/status', requireAuth, requireSeller, writeLimit, async (req, res) => {
   const { status } = req.body || {};
 
   if (!ordersModule.STATUSES.includes(status)) {
@@ -430,7 +513,7 @@ app.post('/orders/:id/status', requireAuth, requireSeller, async (req, res) => {
  * through the status check — a confirmed order refuses a second confirmation,
  * so a retry after a lost response cannot credit twice.
  */
-app.post('/orders/:id/confirm', requireAuth, async (req, res) => {
+app.post('/orders/:id/confirm', requireAuth, writeLimit, async (req, res) => {
   try {
     const result = await ordersModule.confirmOrder({
       orderId: req.params.id,
@@ -561,34 +644,54 @@ app.post('/bins/:id/active', requireAuth, requireAdmin, async (req, res) => {
  */
 app.get('/config/points', requireAuth, async (req, res) => {
   const { db } = require('./firebase');
-  const snap = await db().collection('config').doc('points').get();
-  const data = snap.exists ? snap.data() : null;
 
-  const policy = policyModule.fromDoc(data);
+  // The whole handler is wrapped, and that is not defensive habit.
+  //
+  // Express 4 does not await a handler's return value, so a rejected promise
+  // from an async route never reaches the error handler at the bottom of this
+  // file — for async routes that handler is dead code. Node then treats the
+  // unhandled rejection as an uncaught exception and **exits the process**.
+  //
+  // This endpoint is the worst possible place for that: the Flutter client
+  // calls it routinely, because every award figure it displays depends on the
+  // live policy. One transient Firestore error on a read the client makes on
+  // every launch would take the whole service down until Render restarted it.
+  try {
+    const snap = await db().collection('config').doc('points').get();
+    const data = snap.exists ? snap.data() : null;
 
-  // No document means nothing has ever been saved and these are the defaults
-  // from §7.3. Reported as nulls rather than invented values.
-  let updatedAt = null;
-  let updatedBy = null;
-  let updatedByName = null;
+    const policy = policyModule.fromDoc(data);
 
-  if (data) {
-    updatedAt = data.updatedAt?.toDate?.()?.toISOString() ?? null;
-    updatedBy = data.updatedBy ?? null;
+    // No document means nothing has ever been saved and these are the defaults
+    // from §7.3. Reported as nulls rather than invented values.
+    let updatedAt = null;
+    let updatedBy = null;
+    let updatedByName = null;
 
-    if (updatedBy) {
-      try {
-        const editor = await db().collection('users').doc(updatedBy).get();
-        updatedByName = editor.exists ? editor.data().name || null : null;
-      } catch (err) {
-        // A name is a convenience. Failing to resolve it must not fail the
-        // policy read, which every award decision on the client depends on.
-        console.error('Could not resolve the policy editor name:', err.message);
+    if (data) {
+      updatedAt = data.updatedAt?.toDate?.()?.toISOString() ?? null;
+      updatedBy = data.updatedBy ?? null;
+
+      if (updatedBy) {
+        try {
+          const editor = await db().collection('users').doc(updatedBy).get();
+          updatedByName = editor.exists ? editor.data().name || null : null;
+        } catch (err) {
+          // A name is a convenience. Failing to resolve it must not fail the
+          // policy read, which every award decision on the client depends on.
+          console.error('Could not resolve the policy editor name:', err.message);
+        }
       }
     }
-  }
 
-  res.json({ ...policy, updatedAt, updatedBy, updatedByName });
+    return res.json({ ...policy, updatedAt, updatedBy, updatedByName });
+  } catch (err) {
+    console.error('Policy read failed:', err.message);
+    return res.status(503).json({
+      error: 'policy_unavailable',
+      message: 'The points policy could not be read. Try again.',
+    });
+  }
 });
 
 /**
@@ -616,13 +719,27 @@ app.post('/config/points', requireAuth, requireAdmin, async (req, res) => {
   // just guaranteed all nine fields are present — the editor always sends the
   // complete policy. A merge would let a partial payload leave the document in a
   // combination nothing validated as a whole.
+  //
+  // Wrapped for the same reason as the read above: an unguarded `await` in an
+  // Express 4 async route exits the process rather than returning a 500.
+  try {
+    await db()
+      .collection('config')
+      .doc('points')
+      .set({
+        ...proposed,
+        updatedAt: serverTimestamp(),
+        updatedBy: req.user.uid,
+      });
 
-  await db()
-    .collection('config')
-    .doc('points')
-    .set({ ...proposed, updatedAt: serverTimestamp(), updatedBy: req.user.uid });
-
-  return res.json({ ok: true, policy: proposed });
+    return res.json({ ok: true, policy: proposed });
+  } catch (err) {
+    console.error('Policy write failed:', err.message);
+    return res.status(503).json({
+      error: 'policy_write_failed',
+      message: 'The policy could not be saved. Nothing was changed.',
+    });
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -648,6 +765,34 @@ app.use((err, req, res, next) => {
 // Startup
 // ---------------------------------------------------------------------------
 
+/**
+ * Last-resort backstops.
+ *
+ * Every async route in this file now has its own try/catch, and that is the
+ * real fix — these exist so that the *next* route added without one degrades to
+ * a logged error instead of a dead service. Node's default behaviour for an
+ * unhandled rejection is to terminate, which on a single free-tier instance
+ * means every user is offline until Render notices.
+ *
+ * `uncaughtException` deliberately does NOT exit. The conventional advice is to
+ * log and terminate, because the process may be in an unknown state — that
+ * advice assumes a supervisor that restarts in milliseconds and siblings that
+ * absorb the traffic. Here there is one instance with a 30-60 second cold start,
+ * so staying up in a suspect state serves users better than a guaranteed
+ * outage. Every wallet write is inside a Firestore transaction, so a half-
+ * applied award is not among the states this can leave behind.
+ */
+process.on('unhandledRejection', (reason) => {
+  console.error(
+    'Unhandled promise rejection (a route is missing its try/catch):',
+    reason instanceof Error ? reason.message : reason,
+  );
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught exception:', err.message);
+});
+
 const port = process.env.PORT || 8787;
 
 // Fail loudly at boot rather than on the first request. A missing service
@@ -662,7 +807,14 @@ try {
 app.listen(port, () => {
   console.log(`chokro-server listening on ${port}`);
 
-  if (allowedOrigins.length === 0) {
+  if (allowLoopbackOrigins) {
+    console.log(
+      '[cors] loopback origins accepted (ALLOW_LOOPBACK_ORIGINS=true). This ' +
+        'must not be set in production.',
+    );
+  }
+
+  if (allowedOrigins.length === 0 && !allowLoopbackOrigins) {
     console.warn(
       'ALLOWED_ORIGINS is empty — browser calls will be refused. Set it to ' +
         'your hosting URL before testing the web build.',

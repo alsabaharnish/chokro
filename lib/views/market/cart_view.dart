@@ -25,6 +25,9 @@ class CartView extends ConsumerWidget {
     final lines = ref.watch(cartLinesProvider);
     final problems = ref.watch(unavailableCartItemsProvider);
     final quote = ref.watch(checkoutQuoteProvider);
+    // The footer's total comes from the lines, not the quote, so a wallet or
+    // policy read failing does not take the subtotal down with it.
+    final subtotal = ref.watch(cartSubtotalProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -86,9 +89,9 @@ class CartView extends ConsumerWidget {
                               _CartLineTile(line: line),
                               const SizedBox(height: AppTheme.gapSm),
                             ],
-                            if (quote != null && quote.orderCount > 1) ...[
+                            if ((quote?.orderCount ?? 0) > 1) ...[
                               const SizedBox(height: AppTheme.gapSm),
-                              _SplitNotice(sellerCount: quote.orderCount),
+                              _SplitNotice(sellerCount: quote!.orderCount),
                             ],
                           ],
                         ),
@@ -97,8 +100,12 @@ class CartView extends ConsumerWidget {
                   ],
                 ),
               ),
-              if (quote != null && !quote.isEmpty)
-                _CartFooter(quote: quote, blocked: problems.isNotEmpty),
+              if (lines.isNotEmpty)
+                _CartFooter(
+                  subtotal: subtotal,
+                  sellerCount: quote?.orderCount,
+                  blocked: problems.isNotEmpty,
+                ),
             ],
           );
         },
@@ -361,9 +368,18 @@ class _SplitNotice extends StatelessWidget {
 }
 
 class _CartFooter extends StatelessWidget {
-  const _CartFooter({required this.quote, required this.blocked});
+  const _CartFooter({
+    required this.subtotal,
+    required this.sellerCount,
+    required this.blocked,
+  });
 
-  final CheckoutQuote quote;
+  final int subtotal;
+
+  /// Null while the quote is unavailable — the checkout button still works,
+  /// because the server is the thing that decides the split anyway.
+  final int? sellerCount;
+
   final bool blocked;
 
   @override
@@ -395,7 +411,7 @@ class _CartFooter extends StatelessWidget {
                           ),
                         ),
                         Text(
-                          formatTaka(quote.subtotal),
+                          formatTaka(subtotal),
                           style: theme.textTheme.headlineSmall?.copyWith(
                             fontWeight: FontWeight.w800,
                           ),

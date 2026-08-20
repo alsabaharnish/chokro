@@ -153,20 +153,23 @@ async function approveDisposal({ disposalId, adminUid = null, flags = null }) {
 
     // Daily cap (§7.3): a second line of defence against multi-bin farming that
     // the per-bin lockout cannot catch on its own.
-    const startOfDay = new Date();
-    startOfDay.setUTCHours(0, 0, 0, 0);
-
-    const approvedTodaySnap = await txn.get(
-      firestore
-        .collection('disposals')
-        .where('userId', '==', uid)
-        .where('createdAt', '>=', startOfDay),
-    );
-
-    const approvedToday = approvedTodaySnap.docs.filter((d) => {
-      const status = d.data().status;
-      return status === 'autoApproved' || status === 'manualApproved';
-    }).length;
+    //
+    // COUNTED AGAINST A SERVER-WRITTEN COUNTER, NOT A QUERY OVER `disposals`.
+    //
+    // The previous form queried `createdAt >= today's UTC midnight` and counted
+    // the approved results, which counts submissions *created* today rather than
+    // approvals *performed* today. The client chooses when to call `/verify`,
+    // and nothing opens the per-bin lockout until an approval — so a user could
+    // bank ten pending submissions on Monday and verify all ten on Tuesday. Each
+    // call looked at Tuesday's window, found nothing in it, and credited. The
+    // cap was defeated by waiting, which is the cheapest possible attack.
+    //
+    // Keying on the day the decision is made takes the choice away from the
+    // client. `claimQuotas` has always worked this way and was never vulnerable.
+    const capKey = `${uid}_${policyModule.dayKey(new Date())}`;
+    const capRef = firestore.collection('dailyCaps').doc(capKey);
+    const capSnap = await txn.get(capRef);
+    const approvedToday = capSnap.exists ? capSnap.data().count || 0 : 0;
 
     if (approvedToday >= policy.dailyDisposalCap) {
       throw new Error(
@@ -204,6 +207,19 @@ async function approveDisposal({ disposalId, adminUid = null, flags = null }) {
       reviewedBy: adminUid,
       reviewedAt: adminUid ? serverTimestamp() : null,
     });
+
+    // The counter moves in the same transaction as the credit, so a decision
+    // cannot pay without also being counted. `merge: true` creates the document
+    // on the day's first approval.
+    txn.set(
+      capRef,
+      {
+        userId: uid,
+        dayKey: policyModule.dayKey(new Date()),
+        count: admin.firestore.FieldValue.increment(1),
+      },
+      { merge: true },
+    );
 
     // Open the per-bin lockout window (F2.6). Rules read this document to refuse
     // a repeat submission at the same bin.

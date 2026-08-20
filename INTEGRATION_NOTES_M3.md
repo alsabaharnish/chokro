@@ -354,10 +354,18 @@ set on the update rule, not its absence from the shape. Two tests pin both halve
 |---|---|
 | `flutter analyze lib test` | clean |
 | `flutter test` | 425 passed |
-| `npm test --prefix server` | 212 passed |
-| `rules_test` against the emulator | 209 passed |
+| `npm test --prefix server` | 236 passed |
+| `rules_test` against the emulator | 214 passed |
 | `firebase deploy --only firestore:rules --dry-run` | compiles |
 | `flutter build web --release` | succeeds, Wasm dry run clean |
+
+An external audit of this milestone found 33 issues, five of them High. All five
+were reproduced against the source and fixed, along with fourteen Medium and Low
+findings — including two bugs introduced by this milestone: the suspension sweep
+skipped a relisted product permanently, and listing photographs skipped
+compression on a premise that turned out to be false. The counts above are after
+those changes; see `AUDIT_RESPONSE.md` for what was fixed, what was deliberately
+left, and the two findings that did not survive verification.
 
 **Not yet verified on real hardware or against the deployed service.** The
 marketplace has been exercised by unit tests, rules tests and a compile of both

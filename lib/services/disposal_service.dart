@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../core/constants.dart';
+
 import '../models/disposal_model.dart';
 
 /// Firestore and Storage access for disposal submissions (F2.3, F2.7, F7.2).
@@ -37,6 +39,7 @@ class DisposalService {
   Stream<List<DisposalModel>> watchUserDisposals(String uid) => _disposals
       .where('userId', isEqualTo: uid)
       .orderBy('createdAt', descending: true)
+      .limit(QueryLimits.ownHistory)
       .snapshots()
       .map((snap) => snap.docs.map(_fromDoc).toList());
 
@@ -52,7 +55,10 @@ class DisposalService {
   /// no addition to `firestore.indexes.json`. Filtering by status here instead
   /// would have: "approved" is two values (`autoApproved` and `manualApproved`),
   /// and an `in` filter alongside the ordering wants an index of its own.
-  Future<List<DisposalModel>> recentForUser(String uid, {int limit = 20}) async {
+  Future<List<DisposalModel>> recentForUser(
+    String uid, {
+    int limit = 20,
+  }) async {
     final snapshot = await _disposals
         .where('userId', isEqualTo: uid)
         .orderBy('createdAt', descending: true)
@@ -66,6 +72,7 @@ class DisposalService {
   Stream<List<DisposalModel>> watchPendingDisposals() => _disposals
       .where('status', isEqualTo: 'pending')
       .orderBy('createdAt')
+      .limit(QueryLimits.reviewQueue)
       .snapshots()
       .map((snap) => snap.docs.map(_fromDoc).toList());
 

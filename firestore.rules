@@ -67,16 +67,57 @@ service cloud.firestore {
       return isSignedIn() && request.auth.uid == uid;
     }
 
-    function role() {
-      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role;
-    }
-
-    function isAdmin() {
-      return isSignedIn() && role() == 'admin';
-    }
-
     function userData() {
       return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+
+    // Whether this account may act (F5.3).
+    //
+    // A suspension is either indefinite or timed. Nothing in this system runs
+    // on a schedule — Cloud Functions need a billing card and the free Render
+    // instance sleeps — so no process exists that could flip `status` back to
+    // 'active' when a timed suspension runs out. The expiry is therefore
+    // resolved here, at request time, exactly as lockoutActive() resolves its
+    // own window further down.
+    //
+    // A missing `suspendedUntil` means the suspension is indefinite, so its
+    // absence must never read as "expired" — hence the explicit key check
+    // rather than a comparison against a null.
+    //
+    // Declared above isAdmin() because isAdmin() now depends on it.
+    //
+    // Mirrored by UserModel.isActiveAt, and proven by
+    // rules_test/suspension.rules.test.js.
+    function isActiveWith(u) {
+      return u.status == 'active'
+        || (
+          u.status == 'suspended'
+          && 'suspendedUntil' in u
+          && u.suspendedUntil < request.time
+        );
+    }
+
+    // An administrator who may currently act.
+    //
+    // THE STATUS CHECK IS NOT DECORATION.
+    // This used to read the role alone. A suspended administrator therefore
+    // kept every privilege in this file — and because the admin branch of the
+    // `users` update rule below is a raw client write with no server in the
+    // path, the shortest exploit was one document write: a suspended admin sets
+    // `status: 'active'` on their own record and is reinstated. They could also
+    // change roles, promote a confederate, resolve appeals and read every
+    // wallet in the meantime. The server got this right (`requireAuth` resolves
+    // the suspension through `isActiveProfile`); the rules layer did not.
+    //
+    // Resolved from ONE userData() read, so this costs no more than the
+    // role-only version did — which matters, because rules do not cache get()
+    // and the budget is ten document reads per request.
+    function isAdmin() {
+      return isSignedIn() && isActiveAdminWith(userData());
+    }
+
+    function isActiveAdminWith(u) {
+      return u.role == 'admin' && isActiveWith(u);
     }
 
     function validString(value, min, max) {
@@ -192,30 +233,6 @@ service cloud.firestore {
           || ('reason' in a && validString(a.reason, 10, 500)));
     }
 
-    // Whether this account may act (F5.3).
-    //
-    // A suspension is either indefinite or timed. Nothing in this system runs
-    // on a schedule — Cloud Functions need a billing card and the free Render
-    // instance sleeps — so no process exists that could flip `status` back to
-    // 'active' when a timed suspension runs out. The expiry is therefore
-    // resolved here, at request time, exactly as lockoutActive() resolves its
-    // own window a few lines below.
-    //
-    // A missing `suspendedUntil` means the suspension is indefinite, so its
-    // absence must never read as "expired" — hence the explicit key check
-    // rather than a comparison against a null.
-    //
-    // Mirrored by UserModel.isActiveAt, and proven by
-    // rules_test/suspension.rules.test.js.
-    function isActiveWith(u) {
-      return u.status == 'active'
-        || (
-          u.status == 'suspended'
-          && 'suspendedUntil' in u
-          && u.suspendedUntil < request.time
-        );
-    }
-
     // Reads the user document exactly once.
     //
     // Firestore does not cache get() across calls within one rule evaluation,
@@ -264,6 +281,18 @@ service cloud.firestore {
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['name'])
           && validUser(request.resource.data))
         || (isAdmin()
+          // An administrator may not edit their OWN role or status.
+          //
+          // Without this, the admin branch is a self-service reinstatement:
+          // suspend an administrator and they write `status: 'active'` back to
+          // their own document. It also stops a compromised admin session
+          // entrenching itself, and it costs nothing legitimate — the accounts
+          // screen already refuses to suspend the signed-in account, so this
+          // makes the rule agree with the interface.
+          //
+          // The first administrator is still promoted by hand in the Firestore
+          // console, which bypasses rules entirely.
+          && uid != request.auth.uid
           && request.resource.data.diff(resource.data).affectedKeys()
                .hasOnly(['role', 'status', 'suspendedAt', 'reinstatedAt', 'suspendedUntil'])
           && validUser(request.resource.data));
@@ -440,6 +469,23 @@ service cloud.firestore {
     match /claimQuotas/{quotaId} {
       allow read: if isSignedIn()
         && (quotaId.matches('^' + request.auth.uid + '_.*$') || isAdmin());
+      allow create, update, delete: if false;
+    }
+
+    // The daily disposal cap's counter (§7.3, F2.6).
+    //
+    // Keyed {userId}_{yyyy-mm-dd} and incremented by the server inside the same
+    // transaction that credits an approval, exactly as claimQuotas is. It
+    // replaced a query over `disposals` that counted submissions *created* today
+    // rather than approvals *performed* today — which a client could sidestep by
+    // deferring verification to the next day. See the note in `award.js`.
+    //
+    // Readable so the app can tell a user they have reached today's limit;
+    // writable by nothing, because a client that could edit its own counter
+    // would have no cap at all.
+    match /dailyCaps/{capId} {
+      allow read: if isSignedIn()
+        && (capId.matches('^' + request.auth.uid + '_.*$') || isAdmin());
       allow create, update, delete: if false;
     }
 

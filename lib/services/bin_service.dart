@@ -1,5 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../core/constants.dart';
+
 import '../models/bin_model.dart';
 
 /// Firestore access for registered disposal bins (F2.1, F2.2).
@@ -30,8 +32,10 @@ class BinService {
     final trimmed = payload.trim();
     if (trimmed.isEmpty) return null;
 
-    final snapshot =
-        await _bins.where('qrPayload', isEqualTo: trimmed).limit(1).get();
+    final snapshot = await _bins
+        .where('qrPayload', isEqualTo: trimmed)
+        .limit(1)
+        .get();
 
     if (snapshot.docs.isEmpty) return null;
     return _fromDoc(snapshot.docs.first);
@@ -47,12 +51,15 @@ class BinService {
   /// All bins currently accepting submissions, for the admin bin list.
   Stream<List<BinModel>> watchActiveBins() => _bins
       .where('active', isEqualTo: true)
+      .limit(QueryLimits.bins)
       .snapshots()
       .map((snap) => snap.docs.map(_fromDoc).toList());
 
   /// Every bin including inactive ones, for administration.
-  Stream<List<BinModel>> watchAllBins() =>
-      _bins.snapshots().map((snap) => snap.docs.map(_fromDoc).toList());
+  Stream<List<BinModel>> watchAllBins() => _bins
+      .limit(QueryLimits.bins)
+      .snapshots()
+      .map((snap) => snap.docs.map(_fromDoc).toList());
 
   BinModel _fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = Map<String, dynamic>.from(doc.data() ?? <String, dynamic>{});

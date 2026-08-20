@@ -60,9 +60,16 @@ async function setSellerListingsVisible({ sellerUid, visible }) {
 
   const targets = snapshot.docs.filter((doc) => {
     const data = doc.data();
-    return visible
-      ? data.hiddenBySuspension === true
-      : data.active === true && data.hiddenBySuspension !== true;
+    // Hiding selects on `active` ALONE.
+    //
+    // It used to also require `hiddenBySuspension !== true`, treating the flag
+    // as proof the listing was already hidden. It is not: the rules let a seller
+    // set `active` back to true while the flag is still set — which is reachable
+    // as soon as a timed suspension lapses. That listing is publicly visible and
+    // flagged, so every subsequent suspension skipped it and it stayed in the
+    // catalogue permanently. An active listing is exactly the case that must not
+    // be skipped, whatever its flag says.
+    return visible ? data.hiddenBySuspension === true : data.active === true;
   });
 
   if (targets.length === 0) {

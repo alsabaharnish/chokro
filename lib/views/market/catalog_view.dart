@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -36,6 +38,20 @@ class CatalogView extends ConsumerStatefulWidget {
 class _CatalogViewState extends ConsumerState<CatalogView> {
   late final TextEditingController _search;
 
+  /// Debounce for the search field.
+  ///
+  /// Without one, every keystroke rewrote the filter, which tore down and
+  /// re-established the catalogue's snapshot listener: typing "bottle" issued
+  /// six billable Firestore queries in about 600 ms and flickered the list
+  /// through six loading states. `CatalogFilter` already reasons carefully about
+  /// avoiding a single extra rebuild, so leaving the per-character one
+  /// unaddressed was inconsistent as well as expensive.
+  ///
+  /// 300 ms is the usual floor for still feeling immediate while covering a
+  /// normal typing cadence.
+  Timer? _debounce;
+  static const Duration _debounceDelay = Duration(milliseconds: 300);
+
   @override
   void initState() {
     super.initState();
@@ -48,8 +64,33 @@ class _CatalogViewState extends ConsumerState<CatalogView> {
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _search.dispose();
     super.dispose();
+  }
+
+  /// Applies [value] once the user stops typing.
+  ///
+  /// `setState` runs immediately so the clear button appears without waiting;
+  /// only the query that costs a network round trip is deferred.
+  void _onQueryChanged(String value) {
+    setState(() {});
+    _debounce?.cancel();
+    _debounce = Timer(_debounceDelay, () {
+      if (!mounted) return;
+      ref.read(catalogFilterProvider.notifier).setQuery(value);
+    });
+  }
+
+  /// Applies a query immediately, cancelling any pending debounce.
+  ///
+  /// Used by the clear button, where waiting 300 ms to empty a field the user
+  /// has just emptied would read as lag.
+  void _setQueryNow(String value) {
+    _debounce?.cancel();
+    _search.text = value;
+    setState(() {});
+    ref.read(catalogFilterProvider.notifier).setQuery(value);
   }
 
   @override
@@ -66,8 +107,8 @@ class _CatalogViewState extends ConsumerState<CatalogView> {
             controller: _search,
             filter: filter,
             cartCount: cartCount,
-            onQueryChanged: (value) =>
-                ref.read(catalogFilterProvider.notifier).setQuery(value),
+            onQueryChanged: _onQueryChanged,
+            onClearQuery: () => _setQueryNow(''),
             onCategoryChanged: (category) =>
                 ref.read(catalogFilterProvider.notifier).setCategory(category),
             onOpenCart: () => context.push('/cart'),
@@ -85,6 +126,7 @@ class _CatalogViewState extends ConsumerState<CatalogView> {
                 products: products,
                 filter: filter,
                 onClearFilters: () {
+                  _debounce?.cancel();
                   _search.clear();
                   ref.read(catalogFilterProvider.notifier).clear();
                 },
@@ -103,6 +145,7 @@ class _SearchAndFilters extends StatelessWidget {
     required this.filter,
     required this.cartCount,
     required this.onQueryChanged,
+    required this.onClearQuery,
     required this.onCategoryChanged,
     required this.onOpenCart,
   });
@@ -111,6 +154,7 @@ class _SearchAndFilters extends StatelessWidget {
   final CatalogFilter filter;
   final int cartCount;
   final ValueChanged<String> onQueryChanged;
+  final VoidCallback onClearQuery;
   final ValueChanged<ProductCategory?> onCategoryChanged;
   final VoidCallback onOpenCart;
 
@@ -150,10 +194,7 @@ class _SearchAndFilters extends StatelessWidget {
                             : IconButton(
                                 tooltip: 'Clear search',
                                 icon: const Icon(Icons.close),
-                                onPressed: () {
-                                  controller.clear();
-                                  onQueryChanged('');
-                                },
+                                onPressed: onClearQuery,
                               ),
                       ),
                     ),

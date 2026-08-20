@@ -599,7 +599,7 @@ purchase points. A seller cannot confirm their own delivery.
 
 ---
 
-## 7. Scope — 35 features
+## 7. Scope — 36 features
 
 ### FR-1 Identity and roles
 
@@ -1069,10 +1069,16 @@ presentation. **Warm the Render service before demonstrating.**
 - Tests should prove security properties, not just happy paths — no card data in
   any schema, no client-writable balance field, no auto-approval on any path the
   client controls.
-- Three kinds of test only: pure Dart unit tests, Firebase Emulator rules tests,
-  and pure Node unit tests for server logic. No widget tests, no integration
-  harness — the schedule does not justify them and the marking does not reward
-  them.
+- Four kinds of test: pure Dart unit tests, Firebase Emulator rules tests, pure
+  Node unit tests for server logic, and a small number of **widget tests** where
+  a rendering decision is the thing worth pinning — the responsive admin table,
+  the auth frame, the startup error screen. No integration harness: the schedule
+  does not justify one and the marking does not reward it.
+
+  This originally read "no widget tests", which the repository has not matched
+  for some time — there are roughly two dozen `testWidgets` cases. The convention
+  is restated to describe what is actually there, because a stated convention the
+  code contradicts is worse than either one alone.
 - **Each Jest suite uses its own `projectId`.** Suites sharing one project ID run
   in parallel against the same emulator namespace and clear each other's seed
   data mid-test.

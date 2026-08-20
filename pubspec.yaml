@@ -31,14 +31,20 @@ dependencies:
   flutter:
     sdk: flutter
 
-  # The following adds the Cupertino Icons font to your application.
-  # Use with the CupertinoIcons class for iOS style icons.
+  # Kept, despite carrying no direct `CupertinoIcons` reference.
+  #
+  # `core/theme.dart` imports `package:flutter/cupertino.dart` for
+  # `CupertinoPageTransitionsBuilder`, which brings the `CupertinoIcons` IconData
+  # class with it — and Flutter's asset resolution then expects the font family
+  # to be present. Removing this package builds, but every build prints
+  # "Expected to find fonts for (MaterialIcons, packages/cupertino_icons/...)".
   cupertino_icons: ^1.0.8
   firebase_core: ^4.13.0
   firebase_auth: ^6.5.7
   cloud_firestore: ^6.8.0
   flutter_riverpod: ^3.4.1
-  riverpod_annotation: ^4.0.5
+  # `riverpod_annotation` was removed: zero imports, and no code generation is
+  # configured anywhere, so it was shipping in the build for nothing.
   go_router: ^17.3.0
   cached_network_image: ^3.4.1
   intl: ^0.20.3

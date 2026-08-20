@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../core/api_config.dart';
+import '../core/constants.dart';
 import '../core/network_errors.dart';
 import '../models/order_model.dart';
 
@@ -29,7 +30,8 @@ class OrderService {
   CollectionReference<Map<String, dynamic>> get _orders =>
       _db.collection('orders');
 
-  static const int pageSize = 40;
+  // Caps live in `QueryLimits` (§ lib/core/constants.dart), which documents
+  // why they are caps and not page sizes — there is no `startAfter` anywhere.
 
   // ---------------------------------------------------------------------------
   // Reads
@@ -38,14 +40,14 @@ class OrderService {
   Stream<List<OrderModel>> watchBuyerOrders(String uid) => _orders
       .where('buyerId', isEqualTo: uid)
       .orderBy('createdAt', descending: true)
-      .limit(pageSize)
+      .limit(QueryLimits.orders)
       .snapshots()
       .map((snap) => snap.docs.map(_fromDoc).toList());
 
   Stream<List<OrderModel>> watchSellerOrders(String uid) => _orders
       .where('sellerId', isEqualTo: uid)
       .orderBy('createdAt', descending: true)
-      .limit(pageSize)
+      .limit(QueryLimits.orders)
       .snapshots()
       .map((snap) => snap.docs.map(_fromDoc).toList());
 

@@ -165,6 +165,39 @@ final checkoutPointsProvider = NotifierProvider<CheckoutPointsController, int>(
   CheckoutPointsController.new,
 );
 
+/// The cart's subtotal, independent of the wallet.
+///
+/// Separate from the quote because the cart screen must keep showing a total
+/// when the balance is unavailable: a wallet read failing is no reason to stop
+/// telling a buyer what their basket costs.
+final cartSubtotalProvider = Provider.autoDispose<int>((ref) {
+  return ref
+      .watch(cartLinesProvider)
+      .fold<int>(0, (sum, line) => sum + line.lineTotal);
+});
+
+/// The buyer's spendable balance, with loading and error kept distinct.
+///
+/// `asData?.value` returns null on error exactly as it does while loading, so
+/// the previous `?? 0` chain turned a failed wallet read into **a confident zero
+/// balance** — the points slider capped at nothing, no error shown, and a buyer
+/// told they had nothing to spend when they might have had hundreds.
+///
+/// The ledger's `balanceAfter` is preferred because NFR-4 makes the balance
+/// reconstructable from history, and showing the figure that comes out of the
+/// history is that property made visible. The wallet document is the fallback
+/// for an account with no ledger entries yet.
+final spendableBalanceProvider = Provider.autoDispose<AsyncValue<int>>((ref) {
+  final wallet = ref.watch(walletProvider);
+  final fromLedger = ref.watch(ledgerBalanceProvider);
+
+  return wallet.when(
+    data: (value) => AsyncValue.data(fromLedger ?? value?.balance ?? 0),
+    loading: () => const AsyncValue.loading(),
+    error: AsyncValue.error,
+  );
+});
+
 /// The buyer's current total, as they see it before committing.
 ///
 /// **Display only.** `server/src/checkout.js` recomputes every figure here from
@@ -179,14 +212,11 @@ final checkoutQuoteProvider = Provider.autoDispose<CheckoutQuote?>((ref) {
 
   final lines = ref.watch(cartLinesProvider);
 
-  // The ledger's `balanceAfter` is the same figure the wallet document holds,
-  // and NFR-4 makes it reconstructable from history. The wallet document is the
-  // fallback for an account with no ledger entries yet — a new user with a zero
-  // balance, who can still browse.
-  final balance =
-      ref.watch(ledgerBalanceProvider) ??
-      ref.watch(walletProvider).asData?.value?.balance ??
-      0;
+  // Null while the balance is loading or in error, so this yields no quote at
+  // all rather than one drawn on an assumed zero. The checkout screen branches
+  // on `spendableBalanceProvider` and says which of the two it is.
+  final balance = ref.watch(spendableBalanceProvider).asData?.value;
+  if (balance == null) return null;
 
   return quoteCheckout(
     lines: lines,
@@ -208,33 +238,60 @@ class CartActions {
 
   final Ref _ref;
 
-  CartModel? get _cart => _ref.read(cartProvider).asData?.value;
+  /// The current cart, or a thrown explanation of why there isn't one.
+  ///
+  /// Every mutation used to begin `if (cart == null) return;` — no exception, no
+  /// state change, no feedback. The button appeared to work and did nothing,
+  /// which is the worst of the three possible behaviours: a buyer taps "Add to
+  /// cart", sees no error, and finds an empty cart at checkout.
+  ///
+  /// The causes are genuinely different and read differently to a user: the
+  /// stream has not resolved yet, it failed, or nobody is signed in.
+  CartModel _requireCart() {
+    final async = _ref.read(cartProvider);
+
+    if (async.hasError) {
+      throw const CartUnavailableException(
+        'Your cart could not be loaded. Check your connection and try again.',
+      );
+    }
+
+    final cart = async.asData?.value;
+    if (cart == null) {
+      throw const CartUnavailableException(
+        'Your cart is still loading. Try again in a moment.',
+      );
+    }
+    if (cart.userId.isEmpty) {
+      throw const CartUnavailableException('Sign in to use a cart.');
+    }
+    return cart;
+  }
 
   Future<void> add(String productId, {int qty = 1}) async {
-    final cart = _cart;
-    if (cart == null || cart.userId.isEmpty) return;
+    final cart = _requireCart();
     await _ref
         .read(cartServiceProvider)
         .save(cart.withItem(productId, qty: qty));
   }
 
   Future<void> setQuantity(String productId, int qty) async {
-    final cart = _cart;
-    if (cart == null || cart.userId.isEmpty) return;
+    final cart = _requireCart();
     await _ref
         .read(cartServiceProvider)
         .save(cart.withQuantity(productId, qty));
   }
 
   Future<void> remove(String productId) async {
-    final cart = _cart;
-    if (cart == null || cart.userId.isEmpty) return;
+    final cart = _requireCart();
     await _ref.read(cartServiceProvider).save(cart.withoutItem(productId));
   }
 
   Future<void> clear() async {
     final uid = _ref.read(currentUidProvider);
-    if (uid == null) return;
+    if (uid == null) {
+      throw const CartUnavailableException('Sign in to use a cart.');
+    }
     await _ref.read(cartServiceProvider).clear(uid);
   }
 
@@ -248,3 +305,13 @@ class CartActions {
 }
 
 final cartActionsProvider = Provider<CartActions>((ref) => CartActions(ref));
+
+/// A cart operation that could not run, with a sentence fit to show a buyer.
+class CartUnavailableException implements Exception {
+  const CartUnavailableException(this.message);
+
+  final String message;
+
+  @override
+  String toString() => message;
+}

@@ -217,6 +217,40 @@ function lockoutExpiry(policy, from) {
   return new Date(from.getTime() + policy.lockoutHours * 60 * 60 * 1000);
 }
 
+/**
+ * Calendar-day key, e.g. `2026-08-20`, used as the document id for
+ * `dailyCaps/{userId}_{dayKey}`.
+ *
+ * ## Why a counter document rather than a query
+ *
+ * The daily cap used to be enforced by querying disposals with
+ * `createdAt >= today's UTC midnight` and counting the approved ones. That
+ * counts submissions **created** today, not approvals **performed** today — and
+ * the client chooses when to call `/verify`. Nothing opens the per-bin lockout
+ * until an approval, so a user could bank ten pending submissions on Monday and
+ * verify all ten on Tuesday: every call looked at Tuesday's window, found zero
+ * approvals in it, and passed. The cap was defeated by waiting.
+ *
+ * Keying on the day the *decision* is made removes the choice from the client
+ * entirely. This is the shape `claimQuotas` has always used, and that route was
+ * never vulnerable for exactly this reason.
+ *
+ * ## Why UTC
+ *
+ * Anchored to UTC, like `isoWeekKey` above, so the two rate-limit windows agree
+ * with each other. In Dhaka (UTC+6, no DST) that means the daily cap resets at
+ * 06:00 local rather than at midnight — a real consequence, stated rather than
+ * accidental. Moving it to local time is a one-line offset here, but it would
+ * leave the daily cap and the weekly quota anchored to different boundaries,
+ * which is a worse thing to have to explain than a documented 06:00 reset.
+ */
+function dayKey(date) {
+  const year = date.getUTCFullYear();
+  const month = String(date.getUTCMonth() + 1).padStart(2, '0');
+  const day = String(date.getUTCDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 /** ISO week key, e.g. `2026-W31`. Mirrors IsoWeek in the Dart implementation. */
 function isoWeekKey(date) {
   const utc = new Date(
@@ -248,4 +282,5 @@ module.exports = {
   purchaseAward,
   lockoutExpiry,
   isoWeekKey,
+  dayKey,
 };

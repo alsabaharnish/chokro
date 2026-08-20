@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../core/api_config.dart';
+import '../core/constants.dart';
 import '../core/network_errors.dart';
 import '../core/product_taxonomy.dart';
 import '../models/product_model.dart';
@@ -34,8 +35,9 @@ class ProductService {
   CollectionReference<Map<String, dynamic>> get _products =>
       _db.collection('products');
 
-  /// How many listings one catalogue page holds (NFR-2).
-  static const int pageSize = 30;
+  // Caps live in `QueryLimits` (§ lib/core/constants.dart). The catalogue's is
+  // applied BEFORE the client-side multi-token narrowing in `watchCatalog`, which
+  // is a real limitation and is documented there.
 
   // ---------------------------------------------------------------------------
   // Catalogue reads (F4.2)
@@ -51,6 +53,13 @@ class ProductService {
   /// applied client-side by [matchesAllTokens], which is honest at this scale —
   /// the catalogue holds tens of products — and is stated as a limitation rather
   /// than presented as a search engine.
+  ///
+  /// **The cap applies before the narrowing, and that is a real limitation.**
+  /// Firestore applies `.limit()` server-side, so a two-word search sees only
+  /// the first [QueryLimits.catalog] listings matching token one, and a product
+  /// matching both words but sitting outside that window is not found. At the
+  /// catalogue size this project targets (§6.3, tens of products) the window
+  /// covers everything; it is stated here rather than discovered later.
   ///
   /// Composite indexes for every combination below are committed in
   /// `firestore.indexes.json`.
@@ -71,7 +80,7 @@ class ProductService {
 
     return q
         .orderBy('createdAt', descending: true)
-        .limit(pageSize)
+        .limit(QueryLimits.catalog)
         .snapshots()
         .map((snap) {
           final products = snap.docs.map(_fromDoc).toList();
@@ -118,6 +127,7 @@ class ProductService {
   Stream<List<ProductModel>> watchSellerProducts(String sellerId) => _products
       .where('sellerId', isEqualTo: sellerId)
       .orderBy('createdAt', descending: true)
+      .limit(QueryLimits.sellerListings)
       .snapshots()
       .map((snap) => snap.docs.map(_fromDoc).toList());
 

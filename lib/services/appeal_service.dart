@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../core/constants.dart';
 import '../models/appeal_model.dart';
 
 /// Appeals against a rejection (F5.4).
@@ -36,6 +37,7 @@ class AppealService {
   Stream<List<AppealModel>> watchUserAppeals(String uid) => _appeals
       .where('userId', isEqualTo: uid)
       .orderBy('createdAt', descending: true)
+      .limit(QueryLimits.ownHistory)
       .snapshots()
       .map((snap) => snap.docs.map(_fromDoc).toList());
 
@@ -45,6 +47,7 @@ class AppealService {
   Stream<List<AppealModel>> watchPendingAppeals() => _appeals
       .where('status', isEqualTo: 'pending')
       .orderBy('createdAt')
+      .limit(QueryLimits.reviewQueue)
       .snapshots()
       .map((snap) => snap.docs.map(_fromDoc).toList());
 

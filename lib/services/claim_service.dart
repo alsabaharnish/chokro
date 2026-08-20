@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../core/api_config.dart';
+import '../core/constants.dart';
 import '../models/claim_model.dart';
 
 import '../core/network_errors.dart';
@@ -21,8 +22,8 @@ import '../core/network_errors.dart';
 /// auto-approve lane exists only where mechanical checks can pass.
 class ClaimService {
   ClaimService({http.Client? client, FirebaseFirestore? firestore})
-      : _client = client ?? http.Client(),
-        _db = firestore ?? FirebaseFirestore.instance;
+    : _client = client ?? http.Client(),
+      _db = firestore ?? FirebaseFirestore.instance;
 
   final http.Client _client;
   final FirebaseFirestore _db;
@@ -52,6 +53,7 @@ class ClaimService {
   Stream<List<ClaimModel>> watchUserClaims(String uid) => _claims
       .where('userId', isEqualTo: uid)
       .orderBy('createdAt', descending: true)
+      .limit(QueryLimits.ownHistory)
       .snapshots()
       .map((snap) => snap.docs.map(_fromDoc).toList());
 
@@ -62,6 +64,7 @@ class ClaimService {
   Stream<List<ClaimModel>> watchPendingClaims() => _claims
       .where('status', isEqualTo: 'pending')
       .orderBy('createdAt')
+      .limit(QueryLimits.reviewQueue)
       .snapshots()
       .map((snap) => snap.docs.map(_fromDoc).toList());
 

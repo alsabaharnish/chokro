@@ -21,7 +21,7 @@ const { db } = require('./firebase');
 const { haversineDistance, isPlausibleCoordinate } = require('./geo');
 const policyModule = require('./pointsPolicy');
 const { findDuplicate, hashImage } = require('./phash');
-const { decide } = require('./decide');
+const { decide, hasCompletedVerification } = require('./decide');
 const { screenImage, isValidItemType } = require('./screen');
 const { isTrustedImageReference } = require('./cloudinary');
 const { approveDisposal } = require('./award');
@@ -50,21 +50,26 @@ async function previousHashes(uid, excludeId) {
     .filter((hash) => typeof hash === 'string' && hash.length > 0);
 }
 
-/** Approved disposals for this user since UTC midnight. */
+/**
+ * Approvals credited to this user today, read from the server-written counter.
+ *
+ * Reads the same `dailyCaps/{uid}_{dayKey}` document that `approveDisposal`
+ * increments, rather than re-querying `disposals`. The query it replaces counted
+ * submissions *created* today instead of approvals *performed* today, which the
+ * client could sidestep by deferring verification to the next day — see the note
+ * in `award.js`.
+ *
+ * This read is advisory: it only decides whether to raise the `dailyCapReached`
+ * flag before the decision. The authoritative check runs inside the approval
+ * transaction, where the same counter is read again under contention control.
+ */
 async function approvedTodayCount(uid) {
-  const startOfDay = new Date();
-  startOfDay.setUTCHours(0, 0, 0, 0);
-
   const snap = await db()
-    .collection('disposals')
-    .where('userId', '==', uid)
-    .where('createdAt', '>=', startOfDay)
+    .collection('dailyCaps')
+    .doc(`${uid}_${policyModule.dayKey(new Date())}`)
     .get();
 
-  return snap.docs.filter((doc) => {
-    const status = doc.data().status;
-    return status === 'autoApproved' || status === 'manualApproved';
-  }).length;
+  return snap.exists ? snap.data().count || 0 : 0;
 }
 
 /**
@@ -98,6 +103,31 @@ async function verifyDisposal({ disposalId, callerUid }) {
       alreadyDecided: true,
       pointsAwarded: disposal.pointsAwarded ?? 0,
       flags: disposal.flags ?? [],
+    };
+  }
+
+  // A submission that has ALREADY been verified and routed to review is done
+  // with this function, even though it is still `pending`.
+  //
+  // The status check above only catches a *decided* submission. Anything flagged
+  // for review stays pending until an administrator acts, which can be hours —
+  // and every repeat call in that window re-ran the entire pipeline: a Cloudinary
+  // fetch, a fifty-document history query, and a **billed Groq vision call**. One
+  // authenticated account could drive that at request rate against a single
+  // pending document. Nothing was credited twice, so this was a cost and
+  // availability hole rather than a payout hole, but on a free tier those are the
+  // same thing.
+  //
+  // Returning the stored evidence rather than recomputing it is also the more
+  // honest answer: the flags on the document are what the reviewer is looking at.
+  if (hasCompletedVerification(disposal)) {
+    return {
+      disposalId,
+      status: disposal.status,
+      alreadyVerified: true,
+      pointsAwarded: disposal.pointsAwarded ?? 0,
+      flags: disposal.flags ?? [],
+      distanceMeters: disposal.distanceMeters ?? null,
     };
   }
 

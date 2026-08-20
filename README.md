@@ -52,8 +52,24 @@ Create `server/.env` with:
 - `FIREBASE_SERVICE_ACCOUNT` — raw or base64 service-account JSON
 - `CLOUDINARY_CLOUD_NAME`, `CLOUDINARY_API_KEY`, `CLOUDINARY_API_SECRET`
 - `GROQ_API_KEY` — optional; without it disposals safely route to human review
-- `ALLOWED_ORIGINS` — comma-separated Flutter web origins
+- `ALLOWED_ORIGINS` — comma-separated Flutter web origins, for deployment
 - `PORT` — optional, defaults to `8787`
+
+### CORS in local development
+
+Use `npm run dev`, not `npm start`. It sets `ALLOW_LOOPBACK_ORIGINS=true`, which
+accepts **any** `localhost` or `127.0.0.1` port on top of `ALLOWED_ORIGINS`.
+
+This matters more than it sounds. `flutter run -d chrome` picks a fresh port on
+every launch, so an exact origin pinned in `ALLOWED_ORIGINS` cannot keep up — and
+when it does not match, the failure is lopsided and confusing: **Firestore reads
+keep working** because they do not pass through this service, so the app looks
+mostly healthy while precisely the screens that call the server break. Checkout,
+bin registration and the points policy editor are the ones to watch, because they
+are the screens that talk to the server.
+
+The flag is opt-in rather than inferred from `NODE_ENV`, so a missing variable on
+a deploy cannot silently open the allowlist. Never set it in production.
 
 Never commit `server/.env` or a service-account file.
 

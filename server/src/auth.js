@@ -33,7 +33,20 @@ async function requireAuth(req, res, next) {
 
   let decoded;
   try {
-    decoded = await auth().verifyIdToken(match[1]);
+    // `checkRevoked: true`.
+    //
+    // The comment at the top of this file claims the per-request Firestore read
+    // makes a suspension take effect immediately. That is true of the `status`
+    // field and of nothing else. Revocation at the *Firebase* level —
+    // `disabled: true`, `deleteUser`, `revokeRefreshTokens`, a password change
+    // after a compromise — is invisible to `verifyIdToken` without this flag, so
+    // an administrator deleting a fraudulent account in the console would watch
+    // it keep uploading for up to an hour until the ID token expired.
+    //
+    // It costs one extra lookup per request against Firebase's revocation state.
+    // That is the right price for the account-deletion path meaning what an
+    // administrator thinks it means.
+    decoded = await auth().verifyIdToken(match[1], true);
   } catch (err) {
     return res.status(401).json({
       error: 'invalid_token',

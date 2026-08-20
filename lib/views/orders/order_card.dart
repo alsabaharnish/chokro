@@ -107,8 +107,8 @@ class OrderCard extends StatelessWidget {
               ),
             _Row(
               label: order.paymentStatus == PaymentStatus.paid
-                  ? 'Paid in cash'
-                  : 'Due on delivery',
+                  ? 'Paid — ${order.settlementMethod.label.toLowerCase()}'
+                  : 'Due on ${order.settlementMethod.label.toLowerCase()}',
               value: formatTaka(order.payable),
               strong: true,
             ),

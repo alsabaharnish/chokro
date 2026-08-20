@@ -45,6 +45,17 @@ class UserModel {
   /// interpret this field.
   final DateTime? suspendedUntil;
 
+  /// When the account was last suspended, and last reinstated.
+  ///
+  /// The server-side rule set has always permitted an administrator to write
+  /// these, and `UserService` has always written them — but the model did not
+  /// parse them, so the audit trail existed in Firestore and could not be shown
+  /// to anybody. An administrator looking at a suspended account could see that
+  /// it was suspended and not when, which is most of what an audit field is
+  /// for.
+  final DateTime? suspendedAt;
+  final DateTime? reinstatedAt;
+
   const UserModel({
     required this.uid,
     required this.name,
@@ -53,6 +64,8 @@ class UserModel {
     required this.status,
     this.createdAt,
     this.suspendedUntil,
+    this.suspendedAt,
+    this.reinstatedAt,
   });
 
   bool get isAdmin => role == AppConstants.roleAdmin;
@@ -135,6 +148,8 @@ class UserModel {
       status: _string(data['status'], fallback: AppConstants.statusSuspended),
       createdAt: _date(data['createdAt']),
       suspendedUntil: _date(data['suspendedUntil']),
+      suspendedAt: _date(data['suspendedAt']),
+      reinstatedAt: _date(data['reinstatedAt']),
     );
   }
 
@@ -152,13 +167,13 @@ class UserModel {
   /// server never agreed to. The service layer supplies it; the rules require
   /// the key to be present on create, and a server timestamp satisfies that.
   Map<String, dynamic> toFirestore() => {
-        'name': name,
-        'email': email,
-        'role': role,
-        'status': status,
-        if (suspendedUntil != null)
-          'suspendedUntil': Timestamp.fromDate(suspendedUntil!),
-      };
+    'name': name,
+    'email': email,
+    'role': role,
+    'status': status,
+    if (suspendedUntil != null)
+      'suspendedUntil': Timestamp.fromDate(suspendedUntil!),
+  };
 
   /// [clearSuspendedUntil] exists because passing null to [suspendedUntil]
   /// cannot be distinguished from omitting it.
@@ -168,17 +183,19 @@ class UserModel {
     String? status,
     DateTime? suspendedUntil,
     bool clearSuspendedUntil = false,
-  }) =>
-      UserModel(
-        uid: uid,
-        name: name ?? this.name,
-        email: email,
-        role: role ?? this.role,
-        status: status ?? this.status,
-        createdAt: createdAt,
-        suspendedUntil:
-            clearSuspendedUntil ? null : (suspendedUntil ?? this.suspendedUntil),
-      );
+  }) => UserModel(
+    uid: uid,
+    name: name ?? this.name,
+    email: email,
+    role: role ?? this.role,
+    status: status ?? this.status,
+    createdAt: createdAt,
+    suspendedUntil: clearSuspendedUntil
+        ? null
+        : (suspendedUntil ?? this.suspendedUntil),
+    suspendedAt: suspendedAt,
+    reinstatedAt: reinstatedAt,
+  );
 }
 
 /// A string field, whatever Firestore actually returned.

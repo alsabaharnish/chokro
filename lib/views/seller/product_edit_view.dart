@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
@@ -8,6 +9,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../controllers/auth_controller.dart';
 import '../../controllers/catalog_controller.dart';
 import '../../controllers/seller_products_controller.dart';
+import '../../core/network_errors.dart';
 import '../../core/product_taxonomy.dart';
 import '../../core/theme.dart';
 import '../../models/product_model.dart';
@@ -343,20 +345,47 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
 
     // `image_picker` returns bytes on web as well as on mobile, so nothing here
     // touches `dart:io` and the seller console works on both targets (§5.5).
-    // The resizing arguments do the compression: `flutter_image_compress`, which
-    // the disposal flow uses, has no web implementation.
     final picked = await ImagePicker().pickImage(
       source: ImageSource.gallery,
-      maxWidth: 1280,
-      maxHeight: 1280,
-      imageQuality: 80,
+      maxWidth: 1600,
+      maxHeight: 1600,
+      imageQuality: 90,
     );
     if (picked == null) return;
 
-    final bytes = await picked.readAsBytes();
+    final original = await picked.readAsBytes();
 
     setState(() => _uploading = true);
     try {
+      // Compressed on the same path the disposal and claim flows use.
+      //
+      // This used to rely on ImagePicker's resize alone, on the stated grounds
+      // that `flutter_image_compress` has no web implementation. It does —
+      // `flutter_image_compress_web` resolves in `pubspec.lock` and the plugin
+      // registers for web — so the premise was simply wrong and a listing
+      // photograph went up two to three times larger than it needed to be,
+      // carrying whatever EXIF the seller's camera stamped into it.
+      //
+      // The EXIF half matters more than the bytes: a seller photographing stock
+      // at home would otherwise publish their home coordinates to every buyer.
+      // Re-encoding strips it (§7.4).
+      final bytes = await FlutterImageCompress.compressWithList(
+        original,
+        quality: 70,
+        minWidth: 1080,
+        minHeight: 1080,
+        keepExif: false,
+      );
+
+      if (bytes.isEmpty) {
+        messenger.showSnackBar(
+          const SnackBar(
+            content: Text('That photo could not be processed. Try another.'),
+          ),
+        );
+        return;
+      }
+
       final url = await ref
           .read(sellerProductActionsProvider)
           .uploadPhoto(bytes);
@@ -366,7 +395,11 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
       messenger.showSnackBar(SnackBar(content: Text(error.message)));
     } catch (error) {
       messenger.showSnackBar(
-        SnackBar(content: Text('The photo could not be uploaded. $error')),
+        SnackBar(
+          content: Text(
+            'The photo could not be uploaded. ${friendlyErrorMessage(error)}',
+          ),
+        ),
       );
     } finally {
       if (mounted) setState(() => _uploading = false);
@@ -437,7 +470,7 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
       return 'The listing was refused. Check that your seller account is '
           'active — a suspended account cannot publish.';
     }
-    return 'That did not save. $error';
+    return 'That did not save. ${friendlyErrorMessage(error)}';
   }
 }
 
@@ -530,6 +563,12 @@ class _PhotoStrip extends StatelessWidget {
               color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
+        Text(
+          'Photos are resized and their location metadata removed before upload.',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
       ],
     );
   }

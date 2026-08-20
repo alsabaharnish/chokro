@@ -101,7 +101,20 @@ class ClaimDraft {
 
 class ClaimDraftController extends Notifier<ClaimDraft> {
   @override
-  ClaimDraft build() => const ClaimDraft();
+  ClaimDraft build() {
+    // Riverpod 3 auto-disposes by default, and this draft outlives the
+    // widget that creates it: the flow spans four screens, and the draft is
+    // seeded with `ref.read` (which takes no subscription) immediately before
+    // the route is pushed. Between those two statements nothing watches it, so
+    // without this its survival depends on frame timing rather than on a
+    // guarantee — and losing it drops the captured photograph and the chosen
+    // action type, sending the user back to an empty form.
+    //
+    // The same trap already cost this codebase its auth gate; see the note on
+    // `_authGateProvider` in routing/router.dart.
+    ref.keepAlive();
+    return const ClaimDraft();
+  }
 
   void reset() => state = const ClaimDraft();
 

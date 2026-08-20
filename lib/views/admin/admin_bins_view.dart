@@ -14,6 +14,7 @@ import '../../core/theme.dart';
 import '../../models/bin_model.dart';
 import '../../services/bin_admin_service.dart';
 import '../../services/location_service.dart';
+import '../shared/content_state.dart';
 import '../shared/app_shell.dart';
 
 /// Bin registration and printable QR generation (F2.1).
@@ -384,6 +385,11 @@ class _AdminBinsViewState extends ConsumerState<AdminBinsView> {
                     : const Icon(Icons.add_location_alt_outlined),
                 label: Text(_saving ? 'Registering…' : 'Register bin'),
               ),
+              // A bin registration is a server call, so it inherits the
+              // ninety-second cold-start allowance. Without this the button says
+              // "Registering…" for a minute and a half and the administrator
+              // reasonably concludes the page is broken.
+              if (_saving) const SlowServerNote(),
 
               const SizedBox(height: AppTheme.gapXl),
               Row(

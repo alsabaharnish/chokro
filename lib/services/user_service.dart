@@ -73,17 +73,19 @@ class UserService {
     return UserModel.fromFirestore(doc);
   }
 
-  Stream<UserModel?> watchUser(String uid) =>
-      _db.collection('users').doc(uid).snapshots().map(
-            (doc) => doc.exists ? UserModel.fromFirestore(doc) : null,
-          );
+  Stream<UserModel?> watchUser(String uid) => _db
+      .collection('users')
+      .doc(uid)
+      .snapshots()
+      .map((doc) => doc.exists ? UserModel.fromFirestore(doc) : null);
 
   // ── admin: user list ──────────────────────────────────────────────────────
 
-  Stream<List<UserModel>> watchAllUsers() =>
-      _db.collection('users').snapshots().map(
-            (snap) => snap.docs.map(UserModel.fromFirestore).toList(),
-          );
+  Stream<List<UserModel>> watchAllUsers() => _db
+      .collection('users')
+      .limit(QueryLimits.accounts)
+      .snapshots()
+      .map((snap) => snap.docs.map(UserModel.fromFirestore).toList());
 
   Future<void> updateUserRole(String uid, String role) =>
       _db.collection('users').doc(uid).update({'role': role});
@@ -103,8 +105,9 @@ class UserService {
       _db.collection('users').doc(uid).update({
         'status': AppConstants.statusSuspended,
         'suspendedAt': FieldValue.serverTimestamp(),
-        'suspendedUntil':
-            until == null ? FieldValue.delete() : Timestamp.fromDate(until),
+        'suspendedUntil': until == null
+            ? FieldValue.delete()
+            : Timestamp.fromDate(until),
       });
 
   /// Lifts a suspension and clears any expiry, so a later indefinite
@@ -124,27 +127,27 @@ class UserService {
   /// used to stamp `Timestamp.fromDate(DateTime.now())` from the device — it was
   /// the last model still doing so — which let a phone with a skewed clock date
   /// its own application, and an administrator sorts the queue by that field.
-  Future<void> submitSellerApplication(SellerApplicationModel app) =>
-      _db.collection('sellerApplications').add({
-        ...app.toFirestore(),
-        'createdAt': FieldValue.serverTimestamp(),
-      });
+  Future<void> submitSellerApplication(SellerApplicationModel app) => _db
+      .collection('sellerApplications')
+      .add({...app.toFirestore(), 'createdAt': FieldValue.serverTimestamp()});
 
-  Stream<List<SellerApplicationModel>> watchPendingApplications() =>
-      _db
-          .collection('sellerApplications')
-          .where('status', isEqualTo: AppConstants.statusPending)
-          .snapshots()
-          .map((snap) =>
-              snap.docs.map(SellerApplicationModel.fromFirestore).toList());
+  Stream<List<SellerApplicationModel>> watchPendingApplications() => _db
+      .collection('sellerApplications')
+      .where('status', isEqualTo: AppConstants.statusPending)
+      .limit(QueryLimits.reviewQueue)
+      .snapshots()
+      .map(
+        (snap) => snap.docs.map(SellerApplicationModel.fromFirestore).toList(),
+      );
 
-  Stream<List<SellerApplicationModel>> watchUserApplications(String uid) =>
-      _db
-          .collection('sellerApplications')
-          .where('userId', isEqualTo: uid)
-          .snapshots()
-          .map((snap) =>
-              snap.docs.map(SellerApplicationModel.fromFirestore).toList());
+  Stream<List<SellerApplicationModel>> watchUserApplications(String uid) => _db
+      .collection('sellerApplications')
+      .where('userId', isEqualTo: uid)
+      .limit(QueryLimits.ownHistory)
+      .snapshots()
+      .map(
+        (snap) => snap.docs.map(SellerApplicationModel.fromFirestore).toList(),
+      );
 
   Future<void> reviewApplication({
     required String appId,
@@ -154,20 +157,19 @@ class UserService {
   }) async {
     final batch = _db.batch();
 
-    batch.update(
-      _db.collection('sellerApplications').doc(appId),
-      {
-        'status': status,
-        'reviewedBy': reviewedBy,
-        'reviewedAt': FieldValue.serverTimestamp(),
-        'reason': ?reason,
-      },
-    );
+    batch.update(_db.collection('sellerApplications').doc(appId), {
+      'status': status,
+      'reviewedBy': reviewedBy,
+      'reviewedAt': FieldValue.serverTimestamp(),
+      'reason': ?reason,
+    });
 
     if (status == AppConstants.statusApproved) {
       // find the userId from the application first
-      final appDoc =
-          await _db.collection('sellerApplications').doc(appId).get();
+      final appDoc = await _db
+          .collection('sellerApplications')
+          .doc(appId)
+          .get();
 
       // Checked rather than force-unwrapped. `appDoc.data()!['userId'] as String`
       // threw a raw type error on a deleted application or a document missing the
@@ -181,10 +183,9 @@ class UserService {
         );
       }
 
-      batch.update(
-        _db.collection('users').doc(userId),
-        {'role': AppConstants.roleSeller},
-      );
+      batch.update(_db.collection('users').doc(userId), {
+        'role': AppConstants.roleSeller,
+      });
     }
 
     await batch.commit();
@@ -192,8 +193,9 @@ class UserService {
 
   // ── wallet ────────────────────────────────────────────────────────────────
 
-  Stream<WalletModel?> watchWallet(String uid) =>
-      _db.collection('wallets').doc(uid).snapshots().map(
-            (doc) => doc.exists ? WalletModel.fromFirestore(doc) : null,
-          );
+  Stream<WalletModel?> watchWallet(String uid) => _db
+      .collection('wallets')
+      .doc(uid)
+      .snapshots()
+      .map((doc) => doc.exists ? WalletModel.fromFirestore(doc) : null);
 }

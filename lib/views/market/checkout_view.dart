@@ -3,12 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../controllers/cart_controller.dart';
-import '../../controllers/ledger_controller.dart';
 import '../../controllers/orders_controller.dart';
 import '../../controllers/points_policy_controller.dart';
-import '../../controllers/wallet_controller.dart';
 import '../../core/checkout_math.dart';
 import '../../core/label_format.dart';
+import '../../core/network_errors.dart';
 import '../../core/theme.dart';
 import '../../models/order_model.dart';
 import '../../services/order_service.dart';
@@ -46,6 +45,7 @@ class _CheckoutViewState extends ConsumerState<CheckoutView> {
   Widget build(BuildContext context) {
     final quote = ref.watch(checkoutQuoteProvider);
     final policyAsync = ref.watch(pointsPolicyProvider);
+    final balanceAsync = ref.watch(spendableBalanceProvider);
 
     final receipt = _receipt;
 
@@ -57,8 +57,10 @@ class _CheckoutViewState extends ConsumerState<CheckoutView> {
       body: receipt != null
           ? _Receipt(outcome: receipt)
           : policyAsync.when(
-              loading: () =>
-                  const ContentLoading(label: 'Reading the points policy…'),
+              loading: () => const ContentLoading(
+                label: 'Reading the points policy…',
+                slowHint: ContentLoading.serverWakingHint,
+              ),
               error: (error, _) => ContentEmpty(
                 icon: Icons.cloud_off_outlined,
                 title: 'The points policy did not load',
@@ -69,7 +71,28 @@ class _CheckoutViewState extends ConsumerState<CheckoutView> {
                 onAction: () => context.pop(),
               ),
               data: (_) {
-                if (quote == null || quote.isEmpty) {
+                // The balance is checked before the quote, because a failed
+                // wallet read used to reach here as a confident zero — slider
+                // capped at nothing, no error, and a buyer told they had no
+                // points to spend. `checkoutQuoteProvider` now yields null
+                // rather than assuming, so this branch has to say which.
+                if (balanceAsync.hasError) {
+                  return ContentEmpty(
+                    icon: Icons.account_balance_wallet_outlined,
+                    title: 'Your balance did not load',
+                    message:
+                        'Checkout needs it before it can show what your points '
+                        'are worth on this order. Nothing has been ordered or '
+                        'charged.',
+                    actionLabel: 'Back to cart',
+                    onAction: () => context.pop(),
+                  );
+                }
+                if (balanceAsync.isLoading || quote == null) {
+                  return const ContentLoading(label: 'Reading your balance…');
+                }
+
+                if (quote.isEmpty) {
                   return ContentEmpty(
                     icon: Icons.shopping_cart_outlined,
                     title: 'Nothing to check out',
@@ -104,8 +127,15 @@ class _CheckoutViewState extends ConsumerState<CheckoutView> {
       ).showSnackBar(SnackBar(content: Text(error.message)));
     } catch (error) {
       if (!mounted) return;
+      // Anything that is not an OrderException reaching here is a Firestore or
+      // platform error, and its `toString()` names a vendor and a code rather
+      // than anything the buyer can act on.
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Your order could not be placed. $error')),
+        SnackBar(
+          content: Text(
+            'Your order could not be placed. ${friendlyErrorMessage(error)}',
+          ),
+        ),
       );
     } finally {
       if (mounted) setState(() => _placing = false);
@@ -128,10 +158,9 @@ class _CheckoutBody extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
     final policy = ref.watch(pointsPolicyProvider).asData?.value;
-    final balance =
-        ref.watch(ledgerBalanceProvider) ??
-        ref.watch(walletProvider).asData?.value?.balance ??
-        0;
+    // Resolved by the parent before this widget is built, so `?? 0` here is a
+    // type formality rather than the silent assumption it used to be.
+    final balance = ref.watch(spendableBalanceProvider).asData?.value ?? 0;
 
     return Column(
       children: [

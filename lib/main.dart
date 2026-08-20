@@ -1,9 +1,11 @@
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'controllers/push_controller.dart';
 import 'core/theme.dart';
+import 'services/server_warmup.dart';
 import 'firebase_options.dart';
 import 'routing/router.dart';
 import 'services/push_service.dart';
@@ -35,12 +37,43 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
+  // Offline persistence, set explicitly rather than left to the platform
+  // default (NFR-7).
+  //
+  // Mobile enables it by default and **web does not**, so the two targets were
+  // silently behaving differently: on web every read went to the network and a
+  // dropped connection emptied every screen. Stating it here makes the
+  // behaviour one decision rather than two platform accidents.
+  //
+  // WHAT THIS DOES AND DOES NOT BUY.
+  // It gives cached reads and queued *writes* — a cart change or a profile edit
+  // made offline syncs on reconnection. It does **not** make the disposal flow
+  // work offline, and NFR-7's roadside-bin scenario is still unmet: a submission
+  // uploads its photograph to the trusted service over HTTP *before* the
+  // Firestore document is created, so with no connection the upload throws and
+  // no document is ever written for the queue to hold.
+  //
+  // Fixing that properly means writing the pending document first and attaching
+  // the photograph afterwards — which the rules currently forbid, since
+  // `validDisposalCreate` requires a trusted photo reference at creation and
+  // that requirement is load-bearing. It is recorded as a known limitation
+  // rather than worked around here.
+  FirebaseFirestore.instance.settings = const Settings(
+    persistenceEnabled: true,
+    cacheSizeBytes: Settings.CACHE_SIZE_UNLIMITED,
+  );
+
   // Must be registered before `runApp`, and before any message can arrive.
   // Guarded by `isSupported` because the web build has no background isolate and
   // the call throws there.
   if (PushService.isSupported) {
     FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
   }
+
+  // Starts Render's instance waking while the user is still signing in, so the
+  // first screen that needs the service is not the one paying for the cold
+  // start. Fire-and-forget: it never blocks startup and never surfaces an error.
+  ServerWarmup.ping();
 
   runApp(const ProviderScope(child: ChokroApp()));
 }
