@@ -827,6 +827,8 @@ class _QrDialogState extends State<_QrDialog> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final bin = widget.bin;
+    const qrSize = 200.0;
+    const qrPlateSize = qrSize + (AppTheme.gapMd * 2);
 
     return AlertDialog(
       title: Text(bin.label),
@@ -837,17 +839,29 @@ class _QrDialogState extends State<_QrDialog> {
             // White plate regardless of theme. An inverted QR photographs badly
             // and some scanners refuse it outright, so the on-screen code keeps
             // the same polarity as the printed one.
-            Container(
-              padding: const EdgeInsets.all(AppTheme.gapMd),
-              decoration: BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: QrImageView(
-                data: bin.qrPayload,
-                version: QrVersions.auto,
-                size: 200,
-                backgroundColor: Colors.white,
+            // AlertDialog measures its content with IntrinsicWidth. QrImageView
+            // internally uses LayoutBuilder, which deliberately cannot answer
+            // intrinsic-size queries. A tight box stops that query at this
+            // boundary and gives the QR its real painted size immediately.
+            // Without it the first layout failure cascades into the
+            // parentDataDirty semantics and no-size hit-test errors.
+            SizedBox.square(
+              dimension: qrPlateSize,
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(AppTheme.gapMd),
+                  child: QrImageView(
+                    data: bin.qrPayload,
+                    version: QrVersions.auto,
+                    size: qrSize,
+                    backgroundColor: Colors.white,
+                    semanticsLabel: 'QR code for ${bin.label}',
+                  ),
+                ),
               ),
             ),
             const SizedBox(height: AppTheme.gapMd),

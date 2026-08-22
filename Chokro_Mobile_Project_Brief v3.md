@@ -933,7 +933,7 @@ endpoint's immediate response; Admin reporting uses aggregate counters.
 | NFR-8 | Interface language is English; structured for localisation |
 | NFR-9 | **No credential appears in the repository.** Verified by `.gitignore` and checked before each commit |
 | NFR-10 | **The server never logs credential content.** Parse failures report length and first character only |
-| NFR-11 | Profile and donation selectors remain keyboard-, screen-reader-, and touch-usable without mutating semantics during a render pass |
+| NFR-11 | Profile and donation selectors and the bin QR dialog remain keyboard-, screen-reader-, and touch-usable without layout failures or semantics mutation during a render pass |
 | NFR-12 | User-facing copy uses 3ZERO Admin, 3ZERO Greenpreneur, and 3ZERO Champion; legacy role words remain only in technical wire names or historical context |
 
 ---
@@ -1168,11 +1168,14 @@ initiatives with earned points.
   outstanding points calculated as issued minus redeemed minus donated
 - Accessibility-safe profile and donation selectors. Their semantics tree stays
   stable during interaction, preventing the Flutter `parentDataDirty` assertion
+- An intrinsically measurable boundary around the bin QR renderer, preventing
+  `QrImageView`'s internal `LayoutBuilder` from breaking `AlertDialog` layout and
+  cascading into no-size, hit-test, and semantics assertions
 
-**Verification snapshot:** `flutter analyze` is clean; 465 Flutter tests, 274
+**Verification snapshot:** `flutter analyze` is clean; 466 Flutter tests, 274
 trusted-service tests, and 222 Firestore rules tests pass; focused Chrome widget
-tests cover six profile/donation accessibility scenarios; and the release web
-build succeeds.
+tests cover the profile, donation, and registered-bin QR accessibility paths;
+and the release web build succeeds.
 
 **Deployment constraint:** deploy the trusted service and Flutter client as one
 release. A new client calling `/donations` against the old service would fail,

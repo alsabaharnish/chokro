@@ -261,4 +261,41 @@ void main() {
       findsOneWidget,
     );
   });
+
+  testWidgets('a registered bin QR opens without layout or semantics errors', (
+    tester,
+  ) async {
+    // Narrow enough to exercise the mobile dialog constraints while leaving
+    // the registered-bin card on screen for this interaction-focused test.
+    tester.view.physicalSize = const Size(320, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final semantics = tester.ensureSemantics();
+
+    final bin = _bin(active: true);
+    await _pump(
+      tester,
+      const LocationResult(outcome: LocationOutcome.idle),
+      bins: [bin],
+    );
+
+    final showQr = find.byTooltip('Show and print QR code');
+    final binList = find
+        .descendant(
+          of: find.byType(ListView),
+          matching: find.byType(Scrollable),
+        )
+        .first;
+    await tester.scrollUntilVisible(showQr, 200, scrollable: binList);
+    await tester.tap(showQr);
+    await tester.pumpAndSettle();
+
+    expect(find.text(bin.label), findsWidgets);
+    expect(find.text(bin.qrPayload), findsOneWidget);
+    expect(find.bySemanticsLabel('QR code for ${bin.label}'), findsOneWidget);
+    expect(find.text('Copy payload'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+    semantics.dispose();
+  });
 }
