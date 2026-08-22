@@ -51,7 +51,7 @@ function isValidActionType(value) {
  * Counting at approval means the quota limits what actually pays out.
  */
 async function approveClaim({ claimId, adminUid }) {
-  if (!adminUid) throw new Error('A claim approval must record an administrator.');
+  if (!adminUid) throw new Error('A claim approval must record a 3ZERO Admin.');
 
   const firestore = db();
   const claimRef = firestore.collection('claims').doc(claimId);

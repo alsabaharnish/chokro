@@ -150,12 +150,12 @@ class OrderCard extends StatelessWidget {
       case OrderStatus.pending:
         return 'Waiting for you to send it.';
       case OrderStatus.shipped:
-        return 'On its way. Mark it delivered once the buyer has it and has '
+        return 'On its way. Mark it delivered once the Champion has it and has '
             'paid.';
       case OrderStatus.delivered:
-        return 'Waiting for the buyer to confirm. Only they can close it.';
+        return 'Waiting for the Champion to confirm. Only they can close it.';
       case OrderStatus.confirmed:
-        return 'The buyer confirmed receipt. This order is complete.';
+        return 'The Champion confirmed receipt. This order is complete.';
     }
   }
 }

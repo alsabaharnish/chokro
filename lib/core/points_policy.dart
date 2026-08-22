@@ -479,7 +479,7 @@ class PolicyProvenance {
   bool get isUntouched => updatedAt == null;
 
   /// Whoever made the last change, as well as it can be named.
-  String get editor => updatedByName ?? updatedBy ?? 'an administrator';
+  String get editor => updatedByName ?? updatedBy ?? 'a 3ZERO Admin';
 }
 
 /// A policy read together with the provenance of its last change.

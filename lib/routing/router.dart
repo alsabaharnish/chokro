@@ -24,6 +24,7 @@ import '../views/disposal/scan_view.dart';
 import '../views/disposal/photo_view.dart';
 import '../views/disposal/location_view.dart';
 import '../views/disposal/declare_view.dart';
+import '../views/donations/donation_view.dart';
 import '../views/admin/admin_disposals_view.dart';
 import '../views/admin/admin_appeals_view.dart';
 import '../views/admin/admin_dashboard_view.dart';
@@ -448,6 +449,11 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/wallet',
         builder: (context, state) => const WalletLedgerView(),
         redirect: requireSignedIn,
+      ),
+      GoRoute(
+        path: '/donate',
+        builder: (context, state) => const DonationView(),
+        redirect: requireActive,
       ),
       GoRoute(
         path: '/dispose/scan',

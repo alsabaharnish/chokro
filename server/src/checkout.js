@@ -276,16 +276,16 @@ async function checkout({
     for (let i = 0; i < groups.length; i += 1) {
       const snap = sellerSnaps[i];
       if (!snap.exists) {
-        throw new Error('A seller in your cart no longer has an account.');
+        throw new Error('A Greenpreneur in your cart no longer has an account.');
       }
       const seller = snap.data();
       if (!isTradingProfile(seller)) {
         throw new Error(
-          `${seller.name || 'A seller'} is not currently trading. Remove their ` +
+          `${seller.name || 'A Greenpreneur'} is not currently trading. Remove their ` +
             'items to continue.',
         );
       }
-      sellerNames.set(groups[i].sellerId, seller.name || 'A seller');
+      sellerNames.set(groups[i].sellerId, seller.name || 'A Greenpreneur');
     }
 
     // ---- arithmetic, recomputed from stored values ----
@@ -307,7 +307,7 @@ async function checkout({
     const discounts = allocateDiscount(subtotals, redemption.discount);
 
     // ---- writes ----
-    const buyerName = buyerSnap.data().name || 'A buyer';
+    const buyerName = buyerSnap.data().name || 'A 3ZERO Champion';
     const orders = [];
 
     for (let i = 0; i < groups.length; i += 1) {

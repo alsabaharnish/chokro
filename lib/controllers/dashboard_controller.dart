@@ -56,13 +56,12 @@ final accountTotalsProvider = Provider.autoDispose<AccountTotals>((ref) {
   var suspended = 0;
 
   for (final user in users) {
-    if (user.isAdmin) {
-      admins += 1;
-    } else if (user.role == 'seller') {
-      sellers += 1;
-    } else {
-      buyers += 1;
-    }
+    // Profile totals are inclusive. Every account is a Champion, a
+    // Greenpreneur retains the Champion profile, and a 3ZERO Admin holds all
+    // three. Exclusive security tiers would understate those profile counts.
+    buyers += 1;
+    if (user.isGreenpreneur) sellers += 1;
+    if (user.isAdmin) admins += 1;
     if (!user.isActiveAt(now)) suspended += 1;
   }
 

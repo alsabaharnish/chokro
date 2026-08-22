@@ -3,12 +3,15 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../controllers/auth_controller.dart';
+import '../../controllers/account_profile_controller.dart';
 import '../../controllers/profile_controller.dart';
+import '../../core/account_profile.dart';
 import '../../core/constants.dart';
 import '../../core/label_format.dart';
 import '../../core/theme.dart';
 import '../../core/validators.dart';
 import '../../models/user_model.dart';
+import '../shared/account_profile_switcher.dart';
 import '../shared/app_shell.dart';
 import '../shared/content_state.dart';
 
@@ -127,6 +130,8 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
                 children: [
                   _Avatar(name: user.name),
                   const SizedBox(height: AppTheme.gapMd),
+                  const AccountProfileSwitcher(),
+                  const SizedBox(height: AppTheme.gapMd),
 
                   if (!user.isActive) ...[
                     _SuspensionNotice(user: user),
@@ -199,15 +204,12 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
                   ),
                   _Fact(
                     icon: Icons.badge_outlined,
-                    label: 'Role',
-                    value: _roleLabel(user.role),
-                    note: switch (user.role) {
-                      AppConstants.roleAdmin =>
-                        'You can review submissions and manage accounts.',
-                      AppConstants.roleSeller =>
-                        'You can list products in the marketplace.',
-                      _ => null,
-                    },
+                    label: 'Profiles on this account',
+                    value: accountProfilesForRole(
+                      user.role,
+                    ).map((profile) => profile.label).join('\n'),
+                    note:
+                        'Switching profiles changes your workspace, not your sign-in.',
                   ),
                   _Fact(
                     icon: Icons.event_outlined,
@@ -225,9 +227,22 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
                     OutlinedButton.icon(
                       onPressed: () => context.push('/apply-seller'),
                       icon: const Icon(Icons.storefront_outlined),
-                      label: const Text('Apply to become a seller'),
+                      label: const Text('Become a 3ZERO Greenpreneur'),
                     ),
                   ],
+                  const SizedBox(height: AppTheme.gapSm),
+                  OutlinedButton.icon(
+                    onPressed: user.isActive
+                        ? () {
+                            ref
+                                .read(accountProfileControllerProvider.notifier)
+                                .select(AccountProfile.champion);
+                            context.push('/donate');
+                          }
+                        : null,
+                    icon: const Icon(Icons.volunteer_activism_outlined),
+                    label: const Text('Support green initiatives'),
+                  ),
                 ],
               ),
             ),
@@ -236,13 +251,6 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
       ),
     );
   }
-
-  static String _roleLabel(String role) => switch (role) {
-    AppConstants.roleAdmin => 'Administrator',
-    AppConstants.roleSeller => 'Seller',
-    AppConstants.roleBuyer => 'Buyer',
-    _ => role,
-  };
 }
 
 /// Initials on a coloured disc. No photo upload exists, and inventing one would
@@ -392,8 +400,8 @@ class _SuspensionNotice extends StatelessWidget {
                 const SizedBox(height: AppTheme.gapXs),
                 Text(
                   until == null
-                      ? 'Most actions are unavailable. Contact an '
-                            'administrator to have this reviewed.'
+                      ? 'Most actions are unavailable. Contact a 3ZERO Admin '
+                            'to have this reviewed.'
                       : 'Most actions are unavailable until '
                             '${formatDate(until)}.',
                   style: theme.textTheme.bodySmall?.copyWith(

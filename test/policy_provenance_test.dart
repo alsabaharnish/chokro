@@ -66,7 +66,7 @@ void main() {
         'updatedAt': '2026-08-18T09:30:00.000Z',
       });
 
-      expect(provenance.editor, 'an administrator');
+      expect(provenance.editor, 'a 3ZERO Admin');
     });
 
     test('an unparseable date reads as untouched rather than throwing', () {
@@ -90,7 +90,7 @@ void main() {
 
       expect(provenance.updatedBy, isNull);
       expect(provenance.updatedByName, isNull);
-      expect(provenance.editor, 'an administrator');
+      expect(provenance.editor, 'a 3ZERO Admin');
     });
   });
 

@@ -202,7 +202,7 @@ class _CheckoutBody extends ConsumerWidget {
                       const SizedBox(height: AppTheme.gapMd),
                       Text(
                         'Totals are recalculated by the server from the '
-                        'sellers’ stored prices when you place the order. '
+                        'Greenpreneurs’ stored prices when you place the order. '
                         'If anything has changed in the meantime you will be '
                         'told rather than charged the old figure.',
                         style: theme.textTheme.bodySmall?.copyWith(
@@ -278,7 +278,9 @@ class _SellerGroupCard extends StatelessWidget {
                 const SizedBox(width: AppTheme.gapSm),
                 Expanded(
                   child: Text(
-                    group.shopName.isEmpty ? 'A seller' : group.shopName,
+                    group.shopName.isEmpty
+                        ? 'A 3ZERO Greenpreneur'
+                        : group.shopName,
                     style: theme.textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w700,
                     ),
@@ -335,7 +337,7 @@ class _SellerGroupCard extends StatelessWidget {
               children: [
                 Expanded(
                   child: Text(
-                    'Payable to this seller',
+                    'Payable to this Greenpreneur',
                     style: theme.textTheme.labelLarge,
                   ),
                 ),
@@ -486,7 +488,7 @@ class _SettlementCard extends StatelessWidget {
           ),
         ),
         subtitle: const Text(
-          'You pay the seller when the order arrives. Chokro stores no card '
+          'You pay the Greenpreneur when the order arrives. Chokro stores no card '
           'details.',
         ),
         trailing: const Icon(Icons.check_circle, size: 20),
@@ -587,8 +589,8 @@ class _Receipt extends ConsumerWidget {
                 const SizedBox(height: AppTheme.gapSm),
                 Text(
                   outcome.orderCount == 1
-                      ? 'The seller has it and will send it to you.'
-                      : 'One for each seller in your cart, under a shared '
+                      ? 'The Greenpreneur has it and will send it to you.'
+                      : 'One for each Greenpreneur in your cart, under a shared '
                             'reference.',
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodyMedium?.copyWith(

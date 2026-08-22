@@ -94,7 +94,7 @@ class PointsPolicyService {
 
     if (response.statusCode == 401 || response.statusCode == 403) {
       throw const PolicyException(
-        'Only an administrator can change the points policy.',
+        'Only a 3ZERO Admin can change the points policy.',
       );
     }
 

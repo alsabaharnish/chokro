@@ -72,11 +72,11 @@ enum OrderStatus {
   String get buyerDescription {
     switch (this) {
       case OrderStatus.pending:
-        return 'The seller has your order and is preparing it.';
+        return 'The Greenpreneur has your order and is preparing it.';
       case OrderStatus.shipped:
         return 'On its way to you.';
       case OrderStatus.delivered:
-        return 'The seller has marked this delivered. Confirm to close it and '
+        return 'The Greenpreneur marked this delivered. Confirm to close it and '
             'collect your points.';
       case OrderStatus.confirmed:
         return 'You confirmed this order. Points have been credited.';
@@ -273,9 +273,9 @@ class OrderModel {
     return OrderModel(
       id: id,
       buyerId: _string(data['buyerId']),
-      buyerName: _string(data['buyerName'], fallback: 'A buyer'),
+      buyerName: _string(data['buyerName'], fallback: 'A 3ZERO Champion'),
       sellerId: _string(data['sellerId']),
-      sellerName: _string(data['sellerName'], fallback: 'A seller'),
+      sellerName: _string(data['sellerName'], fallback: 'A 3ZERO Greenpreneur'),
       shopName: _string(data['shopName']),
       checkoutId: _string(data['checkoutId']),
       items: rawItems is List

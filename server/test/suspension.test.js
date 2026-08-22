@@ -190,10 +190,10 @@ describe('suspensionMessage', () => {
     expect(message).toContain('2026-08-18T17:00:00');
   });
 
-  test('an indefinite suspension points at an administrator', () => {
+  test('an indefinite suspension points at a 3ZERO Admin', () => {
     // No date to wait for, so the only route is a person.
     const message = suspensionMessage({ status: 'suspended' }, NOW);
-    expect(message).toContain('administrator');
+    expect(message).toContain('3ZERO Admin');
     expect(message).not.toContain('until');
   });
 });

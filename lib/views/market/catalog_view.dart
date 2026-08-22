@@ -285,7 +285,7 @@ class _CatalogBody extends StatelessWidget {
               icon: Icons.storefront_outlined,
               title: 'The shop is empty',
               message:
-                  'Nothing is listed yet. Sellers add products from their own '
+                  'Nothing is listed yet. Greenpreneurs add products from their own '
                   'console.',
             );
     }

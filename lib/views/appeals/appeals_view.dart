@@ -158,7 +158,7 @@ class AppealCard extends StatelessWidget {
             if (appeal.response != null && appeal.response!.isNotEmpty) ...[
               const Divider(height: AppTheme.gapLg),
               Text(
-                'The administrator answered',
+                'The 3ZERO Admin answered',
                 style: theme.textTheme.labelMedium?.copyWith(
                   fontWeight: FontWeight.w700,
                   color: scheme.onSurfaceVariant,

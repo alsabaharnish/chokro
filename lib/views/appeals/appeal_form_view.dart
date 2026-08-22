@@ -58,7 +58,7 @@ class _AppealFormViewState extends ConsumerState<AppealFormView> {
         appBar: AppBar(title: const Text('Appeal sent')),
         body: ContentEmpty(
           icon: Icons.mark_email_read_outlined,
-          title: 'An administrator will read this',
+          title: 'A 3ZERO Admin will read this',
           message:
               'You will see their answer on your appeals screen. Points are not '
               'awarded by an appeal — if the rejection was wrong, submit again '
@@ -105,7 +105,7 @@ class _AppealFormViewState extends ConsumerState<AppealFormView> {
                             ),
                             const SizedBox(height: AppTheme.gapXs),
                             Text(
-                              'An administrator reads what you write and answers '
+                              'A 3ZERO Admin reads what you write and answers '
                               'in writing. An appeal does not award points on its '
                               'own — where a rejection was wrong, the fix is to '
                               'submit again so the checks can run.',

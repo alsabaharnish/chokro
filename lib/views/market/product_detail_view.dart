@@ -42,7 +42,7 @@ class ProductDetailView extends ConsumerWidget {
               icon: Icons.remove_shopping_cart_outlined,
               title: 'No longer listed',
               message:
-                  'The seller has withdrawn this product. Nothing has been '
+                  'The Greenpreneur has withdrawn this product. Nothing has been '
                   'charged.',
               actionLabel: 'Back to the shop',
               onAction: () => context.go('/market'),
@@ -247,7 +247,7 @@ class _BuyRowState extends ConsumerState<_BuyRow> {
     if (product.isOutOfStock) {
       return _Notice(
         icon: Icons.remove_shopping_cart_outlined,
-        message: 'This is out of stock. The seller may restock it.',
+        message: 'This is out of stock. The Greenpreneur may restock it.',
       );
     }
 

@@ -69,7 +69,14 @@ class UserModel {
   });
 
   bool get isAdmin => role == AppConstants.roleAdmin;
-  bool get isSeller => role == AppConstants.roleSeller || isAdmin;
+
+  /// Higher tiers retain the profiles below them: every account is a Champion,
+  /// and a 3ZERO Admin can also work as a Greenpreneur.
+  bool get isChampion => true;
+  bool get isGreenpreneur => role == AppConstants.roleSeller || isAdmin;
+
+  /// Internal compatibility name for marketplace permission checks.
+  bool get isSeller => isGreenpreneur;
 
   /// Whether this account may act, evaluated at [now].
   ///

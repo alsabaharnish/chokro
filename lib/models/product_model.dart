@@ -271,7 +271,7 @@ class ProductModel {
       );
     }
     if (shopName.trim().length < 2) {
-      problems.add('Enter the shop name buyers will see.');
+      problems.add('Enter the shop name Champions will see.');
     }
     if (description.trim().length < ProductLimits.descriptionMin) {
       problems.add(

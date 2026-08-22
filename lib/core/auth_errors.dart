@@ -52,7 +52,7 @@ String authErrorMessage(String? code) {
       return 'That does not look like an email address.';
 
     case 'user-disabled':
-      return 'This account has been disabled. Contact an administrator.';
+      return 'This account has been disabled. Contact a 3ZERO Admin.';
 
     case 'email-already-in-use':
       return 'An account already exists with that email. Sign in instead.';
@@ -61,8 +61,7 @@ String authErrorMessage(String? code) {
       return 'Choose a longer password — at least six characters.';
 
     case 'operation-not-allowed':
-      return 'Email sign-in is not enabled for this app. Contact an '
-          'administrator.';
+      return 'Email sign-in is not enabled for this app. Contact a 3ZERO Admin.';
 
     case 'too-many-requests':
       return 'Too many attempts. Wait a few minutes before trying again.';

@@ -44,7 +44,7 @@ const BATCH_LIMIT = 400;
  */
 async function setSellerListingsVisible({ sellerUid, visible }) {
   if (typeof sellerUid !== 'string' || sellerUid.length === 0) {
-    throw new Error('A seller must be named.');
+    throw new Error('A Greenpreneur must be named.');
   }
 
   const firestore = db();

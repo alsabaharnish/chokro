@@ -114,7 +114,7 @@ final unavailableCartItemsProvider =
             UnavailableCartItem(
               productId: item.productId,
               title: product.title,
-              reason: 'The seller has withdrawn this listing.',
+              reason: 'The Greenpreneur has withdrawn this listing.',
             ),
           );
         } else if (product.stock < item.qty) {

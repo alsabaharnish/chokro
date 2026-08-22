@@ -117,7 +117,7 @@ class BinModel {
       problems.add('QR payload is required.');
     }
     if (createdBy.trim().isEmpty) {
-      problems.add('Creating administrator is required.');
+      problems.add('Creating 3ZERO Admin is required.');
     }
     if (lat.isNaN || lat < -90 || lat > 90) {
       problems.add('Latitude is out of range.');

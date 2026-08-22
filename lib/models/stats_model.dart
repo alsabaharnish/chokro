@@ -36,6 +36,8 @@ class PlatformStats {
     this.claimsRejected = 0,
     this.pointsIssued = 0,
     this.pointsRedeemed = 0,
+    this.pointsDonated = 0,
+    this.donationsReceived = 0,
     this.ordersCreated = 0,
     this.ordersConfirmed = 0,
     this.salesPayable = 0,
@@ -54,6 +56,10 @@ class PlatformStats {
   /// Every point ever spent at checkout (`source=redemption`).
   final int pointsRedeemed;
 
+  /// Champion contributions removed from spendable wallets, plus receipt count.
+  final int pointsDonated;
+  final int donationsReceived;
+
   final int ordersCreated;
   final int ordersConfirmed;
 
@@ -65,8 +71,12 @@ class PlatformStats {
   /// Points still held in wallets across the platform, as the ledger sees it.
   ///
   /// A derived figure, not a stored one, and it is the number worth looking at:
-  /// issued minus redeemed is the outstanding liability of the points economy.
-  int get pointsOutstanding => pointsIssued - pointsRedeemed;
+  /// issued minus checkout redemptions and donations is the outstanding
+  /// liability of the points economy.
+  int get pointsOutstanding {
+    final outstanding = pointsIssued - pointsRedeemed - pointsDonated;
+    return outstanding < 0 ? 0 : outstanding;
+  }
 
   int get disposalsDecided => disposalsApproved + disposalsRejected;
   int get claimsDecided => claimsApproved + claimsRejected;
@@ -105,6 +115,8 @@ class PlatformStats {
       claimsRejected: read('claimsRejected'),
       pointsIssued: read('pointsIssued'),
       pointsRedeemed: read('pointsRedeemed'),
+      pointsDonated: read('pointsDonated'),
+      donationsReceived: read('donationsReceived'),
       ordersCreated: read('ordersCreated'),
       ordersConfirmed: read('ordersConfirmed'),
       salesPayable: read('salesPayable'),

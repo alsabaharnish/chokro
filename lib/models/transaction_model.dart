@@ -13,7 +13,14 @@ library;
 /// `unknown` exists so that a source value this build does not recognise
 /// renders as "Other" instead of crashing the ledger. Reads are forgiving;
 /// writes are strict and happen server-side.
-enum TransactionSource { disposal, purchase, claim, redemption, unknown }
+enum TransactionSource {
+  disposal,
+  purchase,
+  claim,
+  redemption,
+  donation,
+  unknown,
+}
 
 TransactionSource parseTransactionSource(Object? raw) {
   final name = raw is String ? raw : raw?.toString().split('.').last;
@@ -26,6 +33,8 @@ TransactionSource parseTransactionSource(Object? raw) {
       return TransactionSource.claim;
     case 'redemption':
       return TransactionSource.redemption;
+    case 'donation':
+      return TransactionSource.donation;
     default:
       return TransactionSource.unknown;
   }
@@ -46,6 +55,8 @@ extension TransactionSourceDisplay on TransactionSource {
         return 'Eco-action claim';
       case TransactionSource.redemption:
         return 'Points redeemed';
+      case TransactionSource.donation:
+        return 'Green initiative donation';
       case TransactionSource.unknown:
         return 'Other';
     }
@@ -62,6 +73,8 @@ extension TransactionSourceDisplay on TransactionSource {
         return 'Approved self-reported action';
       case TransactionSource.redemption:
         return 'Spent at checkout';
+      case TransactionSource.donation:
+        return 'Contributed to a 3ZERO green initiative';
       case TransactionSource.unknown:
         return '';
     }

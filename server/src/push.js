@@ -93,7 +93,7 @@ function disposalApprovedMessage({ pointsAwarded, status }) {
   return {
     title: manual ? 'Verified — points added' : 'Points added',
     body: manual
-      ? `An administrator verified your disposal. ${pointsAwarded} points added.`
+      ? `A 3ZERO Admin verified your disposal. ${pointsAwarded} points added.`
       : `Your disposal was approved automatically. ${pointsAwarded} points added.`,
     data: {
       kind: 'disposalDecision',
@@ -131,7 +131,7 @@ function disposalRejectedMessage({ reason }) {
 function claimApprovedMessage({ pointsAwarded }) {
   return {
     title: 'Eco-action approved',
-    body: `An administrator approved your eco-action. ${pointsAwarded} points added.`,
+    body: `A 3ZERO Admin approved your eco-action. ${pointsAwarded} points added.`,
     data: {
       kind: 'claimDecision',
       status: 'approved',

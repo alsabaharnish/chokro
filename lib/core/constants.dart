@@ -7,6 +7,19 @@ class AppConstants {
   static const String roleSeller = 'seller';
   static const String roleBuyer = 'buyer';
 
+  // User-facing role names. The values above are stable database/API wire
+  // values and must not be renamed in stored documents.
+  static const String roleAdminLabel = '3ZERO Admin';
+  static const String roleSellerLabel = '3ZERO Greenpreneur';
+  static const String roleBuyerLabel = '3ZERO Champion';
+
+  static String roleLabel(String role) => switch (role) {
+    roleAdmin => roleAdminLabel,
+    roleSeller => roleSellerLabel,
+    roleBuyer => roleBuyerLabel,
+    _ => role,
+  };
+
   // user status
   static const String statusActive = 'active';
   static const String statusSuspended = 'suspended';

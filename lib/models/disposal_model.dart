@@ -521,9 +521,7 @@ class DisposalModel {
     }
     if (status == DisposalStatus.manualApproved &&
         (reviewedBy == null || reviewedBy!.trim().isEmpty)) {
-      problems.add(
-        'A manual approval must record the reviewing administrator.',
-      );
+      problems.add('A manual approval must record the reviewing 3ZERO Admin.');
     }
     return problems;
   }

@@ -181,7 +181,7 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
                     textCapitalization: TextCapitalization.sentences,
                     decoration: const InputDecoration(
                       labelText: 'Title',
-                      helperText: 'What a buyer searches for',
+                      helperText: 'What a Champion searches for',
                     ),
                     maxLength: ProductLimits.titleMax,
                     validator: (value) =>
@@ -199,7 +199,7 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
                     ),
                     maxLength: 80,
                     validator: (value) => (value ?? '').trim().length < 2
-                        ? 'Enter the name buyers will see'
+                        ? 'Enter the name Champions will see'
                         : null,
                   ),
 
@@ -289,7 +289,7 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
                   Text(
                     'Search matches whole words from the title, the tags and '
                     'the category. There is no full-text search behind this, so '
-                    'name the product the way a buyer would look for it.',
+                    'name the product the way a Champion would look for it.',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,
                       height: 1.45,
@@ -467,7 +467,7 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
   String _saveFailureMessage(Object error) {
     final text = error.toString();
     if (text.contains('permission-denied')) {
-      return 'The listing was refused. Check that your seller account is '
+      return 'The listing was refused. Check that your Greenpreneur profile is '
           'active — a suspended account cannot publish.';
     }
     return 'That did not save. ${friendlyErrorMessage(error)}';

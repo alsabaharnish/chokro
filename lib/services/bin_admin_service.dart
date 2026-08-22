@@ -73,9 +73,7 @@ class BinAdminService {
     }
 
     if (response.statusCode == 401 || response.statusCode == 403) {
-      throw const BinAdminException(
-        'Only an administrator can register a bin.',
-      );
+      throw const BinAdminException('Only a 3ZERO Admin can register a bin.');
     }
 
     throw BinAdminException(

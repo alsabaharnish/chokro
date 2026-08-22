@@ -338,6 +338,35 @@ describe('sellerApplications', () => {
 // ── catch-all ───────────────────────────────────────────────────────────────
 
 describe('unmatched collections', () => {
+  test('a Champion cannot write a donation receipt or debit', async () => {
+    const db = testEnv.authenticatedContext(ALICE).firestore();
+    await assertFails(
+      setDoc(doc(db, 'donations', 'alice_request'), {
+        userId: ALICE,
+        initiative: 'treePlanting',
+        points: 100,
+        balanceAfter: 200,
+        status: 'received',
+        createdAt: serverTimestamp(),
+      }),
+    );
+  });
+
+  test('a donation receipt stays server-only', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'donations', 'alice_request'), {
+        userId: ALICE,
+        initiative: 'treePlanting',
+        points: 100,
+        balanceAfter: 200,
+        status: 'received',
+        createdAt: new Date(),
+      });
+    });
+    const db = testEnv.authenticatedContext(ALICE).firestore();
+    await assertFails(getDoc(doc(db, 'donations', 'alice_request')));
+  });
+
   test('a collection with no rule is denied', async () => {
     const db = testEnv.authenticatedContext(ALICE).firestore();
     await assertFails(

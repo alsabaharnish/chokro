@@ -11,7 +11,10 @@ class AdminApplicationsView extends ConsumerWidget {
   const AdminApplicationsView({super.key});
 
   Future<void> _approve(
-      BuildContext context, WidgetRef ref, SellerApplicationModel app) async {
+    BuildContext context,
+    WidgetRef ref,
+    SellerApplicationModel app,
+  ) async {
     await ref
         .read(sellerApplicationControllerProvider.notifier)
         .approve(app.id);
@@ -19,12 +22,16 @@ class AdminApplicationsView extends ConsumerWidget {
     _report(
       context,
       ref,
-      success: '${app.businessName} approved — applicant is now a seller',
+      success:
+          '${app.businessName} approved — applicant is now a 3ZERO Greenpreneur',
     );
   }
 
   Future<void> _reject(
-      BuildContext context, WidgetRef ref, SellerApplicationModel app) async {
+    BuildContext context,
+    WidgetRef ref,
+    SellerApplicationModel app,
+  ) async {
     final reason = await showRejectionReasonDialog(
       context,
       title: 'Reject ${app.businessName}',
@@ -72,7 +79,7 @@ class AdminApplicationsView extends ConsumerWidget {
     final dateFormat = DateFormat('d MMM y, h:mm a');
 
     return AppShell(
-      title: 'Seller applications',
+      title: 'Greenpreneur applications',
       child: pendingAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (e, _) => ErrorRetry(
@@ -86,8 +93,11 @@ class AdminApplicationsView extends ConsumerWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.inbox_outlined,
-                      size: 48, color: theme.colorScheme.outline),
+                  Icon(
+                    Icons.inbox_outlined,
+                    size: 48,
+                    color: theme.colorScheme.outline,
+                  ),
                   const SizedBox(height: 12),
                   const Text('Nothing pending review'),
                 ],
@@ -110,8 +120,10 @@ class AdminApplicationsView extends ConsumerWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text(app.businessName,
-                              style: theme.textTheme.titleLarge),
+                          Text(
+                            app.businessName,
+                            style: theme.textTheme.titleLarge,
+                          ),
                           const SizedBox(height: 4),
                           Text(
                             // Null for one round trip after the write, now that

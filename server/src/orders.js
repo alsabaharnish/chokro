@@ -72,7 +72,7 @@ async function advanceOrder({ orderId, actorUid, status }) {
     const order = snap.data();
 
     if (order.sellerId !== actorUid) {
-      throw new Error('Only the seller can update this order.');
+      throw new Error('Only the Greenpreneur can update this order.');
     }
 
     const expected = nextStatusFor(order.status, { isSeller: true });
@@ -135,19 +135,19 @@ async function confirmOrder({ orderId, buyerUid }) {
     const order = orderSnap.data();
 
     if (order.buyerId !== buyerUid) {
-      throw new Error('Only the buyer can confirm this order.');
+      throw new Error('Only the Champion can confirm this order.');
     }
     // Belt and braces against a document written before self-dealing was
     // refused at checkout. One party on both sides of a two-party confirmation
     // is exactly the shape the purchase award must not reward.
     if (order.sellerId === buyerUid) {
-      throw new Error('An order cannot be confirmed by its own seller.');
+      throw new Error('An order cannot be confirmed by its own Greenpreneur.');
     }
     if (nextStatusFor(order.status, { isSeller: false }) !== 'confirmed') {
       throw new Error(
         order.status === 'confirmed'
           ? 'You have already confirmed this order.'
-          : 'Confirm this once the seller has marked it delivered.',
+          : 'Confirm this once the Greenpreneur has marked it delivered.',
       );
     }
     if (!walletSnap.exists) throw new Error('No wallet exists for this account.');

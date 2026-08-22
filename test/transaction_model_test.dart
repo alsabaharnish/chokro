@@ -3,7 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 
 void main() {
   group('parseTransactionSource', () {
-    test('parses each of the four wire values', () {
+    test('parses each supported wire value', () {
       expect(parseTransactionSource('disposal'), TransactionSource.disposal);
       expect(parseTransactionSource('purchase'), TransactionSource.purchase);
       expect(parseTransactionSource('claim'), TransactionSource.claim);
@@ -11,6 +11,7 @@ void main() {
         parseTransactionSource('redemption'),
         TransactionSource.redemption,
       );
+      expect(parseTransactionSource('donation'), TransactionSource.donation);
     });
 
     test('an unrecognised source falls back to unknown, it does not throw', () {

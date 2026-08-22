@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../controllers/account_profile_controller.dart';
 import '../../controllers/auth_controller.dart';
 import '../../controllers/wallet_controller.dart';
 import '../../controllers/orders_controller.dart';
 import '../../controllers/submission_history_controller.dart';
+import '../../core/account_profile.dart';
 import '../../core/label_format.dart';
 import '../../core/theme.dart';
 import '../../models/wallet_model.dart';
+import '../shared/account_profile_switcher.dart';
 import '../shared/action_card.dart';
 import '../shared/app_shell.dart';
 import '../shared/content_state.dart';
@@ -30,6 +33,7 @@ class HomeView extends ConsumerWidget {
         .watch(ordersAwaitingConfirmationProvider)
         .length;
     final openSellerOrders = ref.watch(sellerOpenOrdersProvider).length;
+    final activeProfile = ref.watch(activeAccountProfileProvider);
 
     return AppShell(
       title: 'Chokro',
@@ -71,7 +75,7 @@ class HomeView extends ConsumerWidget {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        _Greeting(name: user.name, role: user.role),
+                        _Greeting(name: user.name, role: activeProfile.label),
 
                         if (suspended) ...[
                           const SizedBox(height: AppTheme.gapMd),
@@ -82,238 +86,291 @@ class HomeView extends ConsumerWidget {
                         ],
 
                         const SizedBox(height: AppTheme.gapMd),
-                        _BalanceCard(
-                          walletAsync: walletAsync,
-                          onViewWallet: () => context.push('/wallet'),
-                        ),
+                        const AccountProfileSwitcher(),
 
-                        const SizedBox(height: AppTheme.gapXl),
-                        const SectionHeading('Quick actions'),
-
-                        _ActionGrid(
-                          children: [
-                            ActionCard(
-                              icon: Icons.qr_code_scanner,
-                              title: 'Dispose waste',
-                              subtitle: 'Scan the code on a bin to start.',
-                              disabledSubtitle: 'Unavailable while suspended.',
-                              tone: ActionTone.primary,
-                              // Disabled for a suspended account. The Firestore
-                              // rules refuse the submission anyway (`isActive()`
-                              // on disposal create), so this is courtesy rather
-                              // than enforcement.
-                              onTap: suspended
-                                  ? null
-                                  : () => context.push('/dispose/scan'),
+                        ...switch (activeProfile) {
+                          AccountProfile.admin => <Widget>[
+                            const SizedBox(height: AppTheme.gapXl),
+                            const SectionHeading(
+                              '3ZERO administration',
+                              icon: Icons.shield_outlined,
                             ),
-                            ActionCard(
-                              icon: Icons.eco_outlined,
-                              title: 'Log an eco-action',
-                              subtitle:
-                                  'Record composting, planting and other '
-                                  'positive actions.',
-                              disabledSubtitle: 'Unavailable while suspended.',
-                              onTap: suspended
-                                  ? null
-                                  : () => context.push('/claims/new'),
+                            _ActionGrid(
+                              children: [
+                                ActionCard(
+                                  icon: Icons.insights_outlined,
+                                  title: 'Platform dashboard',
+                                  subtitle:
+                                      'See points, activity and account totals.',
+                                  disabledSubtitle:
+                                      'Unavailable while suspended.',
+                                  tone: ActionTone.admin,
+                                  onTap: suspended
+                                      ? null
+                                      : () => context.push('/admin/dashboard'),
+                                ),
+                                ActionCard(
+                                  icon: Icons.fact_check_outlined,
+                                  title: 'Disposal reviews',
+                                  subtitle:
+                                      'Approve or reject pending disposals.',
+                                  disabledSubtitle:
+                                      'Unavailable while suspended.',
+                                  tone: ActionTone.admin,
+                                  onTap: suspended
+                                      ? null
+                                      : () => context.push('/admin/disposals'),
+                                ),
+                                ActionCard(
+                                  icon: Icons.eco_outlined,
+                                  title: 'Eco-action reviews',
+                                  subtitle:
+                                      'Decide self-reported green actions.',
+                                  disabledSubtitle:
+                                      'Unavailable while suspended.',
+                                  tone: ActionTone.admin,
+                                  onTap: suspended
+                                      ? null
+                                      : () => context.push('/admin/claims'),
+                                ),
+                                ActionCard(
+                                  icon: Icons.gavel_outlined,
+                                  title: 'Appeals',
+                                  subtitle:
+                                      'Answer Champions who dispute a decision.',
+                                  disabledSubtitle:
+                                      'Unavailable while suspended.',
+                                  tone: ActionTone.admin,
+                                  onTap: suspended
+                                      ? null
+                                      : () => context.push('/admin/appeals'),
+                                ),
+                                ActionCard(
+                                  icon: Icons.storefront_outlined,
+                                  title: 'Greenpreneur applications',
+                                  subtitle:
+                                      'Review Champion requests to start selling.',
+                                  disabledSubtitle:
+                                      'Unavailable while suspended.',
+                                  tone: ActionTone.admin,
+                                  onTap: suspended
+                                      ? null
+                                      : () =>
+                                            context.push('/admin/applications'),
+                                ),
+                                ActionCard(
+                                  icon: Icons.qr_code_2,
+                                  title: 'Collection bins',
+                                  subtitle:
+                                      'Register bins and print their codes.',
+                                  disabledSubtitle:
+                                      'Unavailable while suspended.',
+                                  tone: ActionTone.admin,
+                                  onTap: suspended
+                                      ? null
+                                      : () => context.push('/admin/bins'),
+                                ),
+                                ActionCard(
+                                  icon: Icons.people_outline,
+                                  title: 'Accounts',
+                                  subtitle:
+                                      'View, suspend or reinstate an account.',
+                                  disabledSubtitle:
+                                      'Unavailable while suspended.',
+                                  tone: ActionTone.admin,
+                                  onTap: suspended
+                                      ? null
+                                      : () => context.push('/admin/users'),
+                                ),
+                                ActionCard(
+                                  icon: Icons.tune,
+                                  title: 'Points policy',
+                                  subtitle:
+                                      'Tune rewards and anti-farming limits.',
+                                  disabledSubtitle:
+                                      'Unavailable while suspended.',
+                                  tone: ActionTone.admin,
+                                  onTap: suspended
+                                      ? null
+                                      : () => context.push('/admin/points'),
+                                ),
+                              ],
                             ),
                           ],
-                        ),
-
-                        const SizedBox(height: AppTheme.gapLg),
-                        const SectionHeading('Your records'),
-
-                        // Shown to every account, including a suspended one: a
-                        // user who cannot submit can still need to read why an
-                        // earlier submission was rejected.
-                        _ActionGrid(
-                          children: [
-                            ActionCard(
-                              icon: Icons.receipt_long_outlined,
-                              title: 'My submissions',
-                              subtitle: switch (pendingCount) {
-                                0 =>
-                                  'Status, reasons and points for everything '
-                                      'you have sent.',
-                                1 => '1 submission is waiting for review.',
-                                _ =>
-                                  '$pendingCount submissions are waiting for '
-                                      'review.',
-                              },
-                              badgeCount: pendingCount,
-                              onTap: () => context.push('/history'),
-                            ),
-
-                            // Kept separate from disposal submissions so the
-                            // status of each workflow is easy to scan.
-                            ActionCard(
-                              icon: Icons.eco_outlined,
-                              title: 'My eco-actions',
-                              subtitle:
-                                  'Review every action, its status and '
-                                  'the decision reason.',
-                              onTap: () => context.push('/claims'),
-                            ),
-                            ActionCard(
-                              icon: Icons.local_mall_outlined,
-                              title: 'My orders',
-                              subtitle: switch (awaitingConfirmation) {
-                                0 =>
-                                  'What you have bought, and where it has got '
-                                      'to.',
-                                1 =>
-                                  '1 delivery is waiting for you to confirm — '
-                                      'that is what credits your points.',
-                                _ =>
-                                  '$awaitingConfirmation deliveries are waiting '
-                                      'for you to confirm.',
-                              },
-                              badgeCount: awaitingConfirmation,
-                              onTap: () => context.push('/orders'),
-                            ),
-                            // Reachable from here as well as from the history
-                            // screen, because a user who has appealed something
-                            // comes back looking for the answer rather than for
-                            // the submission it was about.
-                            ActionCard(
-                              icon: Icons.gavel_outlined,
-                              title: 'My appeals',
-                              subtitle:
-                                  'Decisions you have disputed, and what an '
-                                  'administrator answered.',
-                              onTap: () => context.push('/appeals'),
+                          AccountProfile.greenpreneur => <Widget>[
+                            const SizedBox(height: AppTheme.gapXl),
+                            const SectionHeading('Greenpreneur workspace'),
+                            _ActionGrid(
+                              children: [
+                                ActionCard(
+                                  icon: Icons.inventory_2_outlined,
+                                  title: 'My sustainable listings',
+                                  subtitle:
+                                      'Add products, update stock and manage visibility.',
+                                  disabledSubtitle:
+                                      'Unavailable while suspended.',
+                                  tone: ActionTone.primary,
+                                  onTap: suspended
+                                      ? null
+                                      : () => context.push('/seller/products'),
+                                ),
+                                ActionCard(
+                                  icon: Icons.local_shipping_outlined,
+                                  title: 'Orders to fulfil',
+                                  subtitle: switch (openSellerOrders) {
+                                    0 =>
+                                      'Ship and deliver what Champions have ordered.',
+                                    1 => '1 order needs something from you.',
+                                    _ =>
+                                      '$openSellerOrders orders need something from you.',
+                                  },
+                                  badgeCount: openSellerOrders,
+                                  disabledSubtitle:
+                                      'Unavailable while suspended.',
+                                  onTap: suspended
+                                      ? null
+                                      : () => context.push('/seller/orders'),
+                                ),
+                                ActionCard(
+                                  icon: Icons.eco_outlined,
+                                  title: 'Use my Champion profile',
+                                  subtitle:
+                                      'Shop, take green actions and manage your points.',
+                                  onTap: () => ref
+                                      .read(
+                                        accountProfileControllerProvider
+                                            .notifier,
+                                      )
+                                      .select(AccountProfile.champion),
+                                ),
+                              ],
                             ),
                           ],
-                        ),
-
-                        if (user.isAdmin && !suspended) ...[
-                          const SizedBox(height: AppTheme.gapLg),
-                          const SectionHeading(
-                            'Administration',
-                            icon: Icons.shield_outlined,
-                          ),
-                          _ActionGrid(
-                            children: [
-                              ActionCard(
-                                icon: Icons.insights_outlined,
-                                title: 'Dashboard',
-                                subtitle:
-                                    'Points issued, redeemed and outstanding, '
-                                    'and how the platform is being used.',
-                                tone: ActionTone.admin,
-                                onTap: () => context.push('/admin/dashboard'),
-                              ),
-                              ActionCard(
-                                icon: Icons.fact_check_outlined,
-                                title: 'Disposal reviews',
-                                subtitle:
-                                    'Approve or reject pending disposals.',
-                                tone: ActionTone.admin,
-                                onTap: () => context.push('/admin/disposals'),
-                              ),
-                              ActionCard(
-                                icon: Icons.eco_outlined,
-                                title: 'Claim reviews',
-                                subtitle: 'Decide self-reported eco-actions.',
-                                tone: ActionTone.admin,
-                                onTap: () => context.push('/admin/claims'),
-                              ),
-                              ActionCard(
-                                icon: Icons.gavel_outlined,
-                                title: 'Appeals',
-                                subtitle:
-                                    'Answer users who dispute a rejection.',
-                                tone: ActionTone.admin,
-                                onTap: () => context.push('/admin/appeals'),
-                              ),
-                              ActionCard(
-                                icon: Icons.storefront_outlined,
-                                title: 'Seller applications',
-                                subtitle: 'Review requests to become a seller.',
-                                tone: ActionTone.admin,
-                                onTap: () =>
-                                    context.push('/admin/applications'),
-                              ),
-                              ActionCard(
-                                icon: Icons.qr_code_2,
-                                title: 'Bins',
-                                subtitle:
-                                    'Register bins and print their codes.',
-                                tone: ActionTone.admin,
-                                onTap: () => context.push('/admin/bins'),
-                              ),
-                              ActionCard(
-                                icon: Icons.people_outline,
-                                title: 'Accounts',
-                                subtitle: 'Suspend or reinstate an account.',
-                                tone: ActionTone.admin,
-                                onTap: () => context.push('/admin/users'),
-                              ),
-                              ActionCard(
-                                icon: Icons.tune,
-                                title: 'Points policy',
-                                subtitle:
-                                    'Tune rewards and anti-farming limits.',
-                                tone: ActionTone.admin,
-                                onTap: () => context.push('/admin/points'),
-                              ),
-                            ],
-                          ),
-                        ],
-
-                        // The seller route was only ever reachable from the
-                        // bottom navigation bar, which meant a user who never
-                        // looked there did not know it existed.
-                        const SizedBox(height: AppTheme.gapLg),
-                        const SectionHeading('Selling'),
-                        _ActionGrid(
-                          children: [
-                            if (user.isSeller) ...[
-                              ActionCard(
-                                icon: Icons.inventory_2_outlined,
-                                title: 'My listings',
-                                subtitle:
-                                    'Add, edit and take products off the shop.',
-                                disabledSubtitle:
-                                    'Unavailable while suspended.',
-                                onTap: suspended
-                                    ? null
-                                    : () => context.push('/seller/products'),
-                              ),
-                              ActionCard(
-                                icon: Icons.local_shipping_outlined,
-                                title: 'Orders to fulfil',
-                                subtitle: switch (openSellerOrders) {
-                                  0 =>
-                                    'Ship and deliver what buyers have '
-                                        'ordered.',
-                                  1 => '1 order needs something from you.',
-                                  _ =>
-                                    '$openSellerOrders orders need something '
-                                        'from you.',
-                                },
-                                badgeCount: openSellerOrders,
-                                disabledSubtitle:
-                                    'Unavailable while suspended.',
-                                onTap: suspended
-                                    ? null
-                                    : () => context.push('/seller/orders'),
-                              ),
-                            ] else
-                              ActionCard(
-                                icon: Icons.storefront_outlined,
-                                title: 'Become a seller',
-                                subtitle:
-                                    'Apply to list what you make. Every '
-                                    'request is reviewed.',
-                                disabledSubtitle:
-                                    'Unavailable while suspended.',
-                                onTap: suspended
-                                    ? null
-                                    : () => context.push('/apply-seller'),
-                              ),
+                          AccountProfile.champion => <Widget>[
+                            const SizedBox(height: AppTheme.gapMd),
+                            _BalanceCard(
+                              walletAsync: walletAsync,
+                              onViewWallet: () => context.push('/wallet'),
+                            ),
+                            const SizedBox(height: AppTheme.gapXl),
+                            const SectionHeading('Make an impact'),
+                            _ActionGrid(
+                              children: [
+                                ActionCard(
+                                  icon: Icons.qr_code_scanner,
+                                  title: 'Dispose waste',
+                                  subtitle: 'Scan the code on a bin to start.',
+                                  disabledSubtitle:
+                                      'Unavailable while suspended.',
+                                  tone: ActionTone.primary,
+                                  onTap: suspended
+                                      ? null
+                                      : () => context.push('/dispose/scan'),
+                                ),
+                                ActionCard(
+                                  icon: Icons.eco_outlined,
+                                  title: 'Log an eco-action',
+                                  subtitle:
+                                      'Record composting, planting and other positive actions.',
+                                  disabledSubtitle:
+                                      'Unavailable while suspended.',
+                                  onTap: suspended
+                                      ? null
+                                      : () => context.push('/claims/new'),
+                                ),
+                                ActionCard(
+                                  icon: Icons.volunteer_activism_outlined,
+                                  title: 'Support green initiatives',
+                                  subtitle:
+                                      'Donate reward points to a 3ZERO initiative.',
+                                  disabledSubtitle:
+                                      'Unavailable while suspended.',
+                                  onTap: suspended
+                                      ? null
+                                      : () => context.push('/donate'),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: AppTheme.gapLg),
+                            const SectionHeading('Your records'),
+                            _ActionGrid(
+                              children: [
+                                ActionCard(
+                                  icon: Icons.receipt_long_outlined,
+                                  title: 'My submissions',
+                                  subtitle: switch (pendingCount) {
+                                    0 =>
+                                      'Status, reasons and points for everything you sent.',
+                                    1 => '1 submission is waiting for review.',
+                                    _ =>
+                                      '$pendingCount submissions are waiting for review.',
+                                  },
+                                  badgeCount: pendingCount,
+                                  onTap: () => context.push('/history'),
+                                ),
+                                ActionCard(
+                                  icon: Icons.eco_outlined,
+                                  title: 'My eco-actions',
+                                  subtitle:
+                                      'Review actions, decisions and reasons.',
+                                  onTap: () => context.push('/claims'),
+                                ),
+                                ActionCard(
+                                  icon: Icons.local_mall_outlined,
+                                  title: 'My orders',
+                                  subtitle: switch (awaitingConfirmation) {
+                                    0 =>
+                                      'Track what you bought and where it has got to.',
+                                    1 =>
+                                      '1 delivery is waiting for your confirmation.',
+                                    _ =>
+                                      '$awaitingConfirmation deliveries await confirmation.',
+                                  },
+                                  badgeCount: awaitingConfirmation,
+                                  onTap: () => context.push('/orders'),
+                                ),
+                                ActionCard(
+                                  icon: Icons.gavel_outlined,
+                                  title: 'My appeals',
+                                  subtitle:
+                                      'See disputed decisions and 3ZERO Admin responses.',
+                                  onTap: () => context.push('/appeals'),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: AppTheme.gapLg),
+                            const SectionHeading('Greenpreneur journey'),
+                            _ActionGrid(
+                              children: [
+                                if (user.isSeller)
+                                  ActionCard(
+                                    icon: Icons.storefront_outlined,
+                                    title: 'Use my Greenpreneur profile',
+                                    subtitle:
+                                        'Manage sustainable products and fulfil orders.',
+                                    onTap: () => ref
+                                        .read(
+                                          accountProfileControllerProvider
+                                              .notifier,
+                                        )
+                                        .select(AccountProfile.greenpreneur),
+                                  )
+                                else
+                                  ActionCard(
+                                    icon: Icons.storefront_outlined,
+                                    title: 'Become a 3ZERO Greenpreneur',
+                                    subtitle:
+                                        'Learn what Greenpreneurs do and apply when you are ready.',
+                                    disabledSubtitle:
+                                        'Unavailable while suspended.',
+                                    onTap: suspended
+                                        ? null
+                                        : () => context.push('/apply-seller'),
+                                  ),
+                              ],
+                            ),
                           ],
-                        ),
+                        },
                       ],
                     ),
                   ),
@@ -357,7 +414,7 @@ class _Greeting extends StatelessWidget {
             const SizedBox(width: AppTheme.gapSm),
             Chip(
               avatar: const Icon(Icons.verified_user_outlined, size: 16),
-              label: Text(role.toUpperCase()),
+              label: Text(role),
               labelStyle: theme.textTheme.labelSmall?.copyWith(
                 fontWeight: FontWeight.w700,
                 letterSpacing: 0.5,
@@ -596,7 +653,7 @@ class _SuspendedNotice extends StatelessWidget {
     final scheme = theme.colorScheme;
 
     final detail = indefinite || until == null
-        ? 'Submitting and claiming are unavailable. Contact an administrator.'
+        ? 'Submitting and claiming are unavailable. Contact a 3ZERO Admin.'
         : 'Submitting and claiming are unavailable until '
               '${formatDate(until)}. You can still read your history.';
 

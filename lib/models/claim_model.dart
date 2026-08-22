@@ -240,7 +240,7 @@ class ClaimModel {
     if (status.isTerminal &&
         (reviewedBy == null || reviewedBy!.trim().isEmpty)) {
       // Unlike a disposal, every decided claim has a human behind it.
-      problems.add('A decided claim must record the reviewing administrator.');
+      problems.add('A decided claim must record the reviewing 3ZERO Admin.');
     }
     return problems;
   }

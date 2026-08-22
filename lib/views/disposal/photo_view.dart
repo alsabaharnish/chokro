@@ -78,8 +78,8 @@ class DisposalPhotoView extends ConsumerWidget {
                 Text('Your photo', style: theme.textTheme.titleMedium),
                 const SizedBox(height: 4),
                 Text(
-                  'Show the items and the bin in one frame. This is what an '
-                  'administrator sees if your submission needs review.',
+                  'Show the items and the bin in one frame. This is what a '
+                  '3ZERO Admin sees if your submission needs review.',
                   style: theme.textTheme.bodySmall,
                 ),
                 const SizedBox(height: 12),

@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../controllers/account_profile_controller.dart';
 import '../../controllers/orders_controller.dart';
+import '../../core/account_profile.dart';
 import '../../core/theme.dart';
 import '../../models/order_model.dart';
 import '../../services/order_service.dart';
@@ -26,7 +29,21 @@ class SellerOrdersView extends ConsumerWidget {
     final open = ref.watch(sellerOpenOrdersProvider);
 
     return Scaffold(
-      appBar: AppBar(title: const Text('Orders to fulfil')),
+      appBar: AppBar(
+        title: const Text('Greenpreneur orders'),
+        actions: [
+          IconButton(
+            tooltip: 'Switch to 3ZERO Champion',
+            onPressed: () {
+              ref
+                  .read(accountProfileControllerProvider.notifier)
+                  .select(AccountProfile.champion);
+              context.go('/home');
+            },
+            icon: const Icon(Icons.swap_horiz),
+          ),
+        ],
+      ),
       body: ordersAsync.when(
         loading: () => const ContentLoading(label: 'Loading your orders…'),
         error: (error, _) => ErrorRetry(
@@ -40,7 +57,7 @@ class SellerOrdersView extends ConsumerWidget {
               icon: Icons.local_shipping_outlined,
               title: 'No orders yet',
               message:
-                  'When a buyer checks out with one of your products, their '
+                  'When a Champion checks out with one of your products, their '
                   'order appears here.',
             );
           }
@@ -176,7 +193,7 @@ class _AdvanceButtonState extends ConsumerState<_AdvanceButton> {
         builder: (context) => AlertDialog(
           title: const Text('Delivered and paid?'),
           content: Text(
-            'This records that the buyer has the order and has paid '
+            'This records that the Champion has the order and has paid '
             '${widget.order.payable} taka in cash. They then confirm receipt '
             'themselves, which is what closes the order.',
           ),

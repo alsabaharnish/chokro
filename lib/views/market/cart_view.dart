@@ -354,7 +354,7 @@ class _SplitNotice extends StatelessWidget {
         const SizedBox(width: AppTheme.gapSm),
         Expanded(
           child: Text(
-            'Your cart holds items from $sellerCount sellers, so checkout '
+            'Your cart holds items from $sellerCount Greenpreneurs, so checkout '
             'creates ${orderCount(sellerCount)} — one for each of them, under '
             'a shared reference.',
             style: theme.textTheme.bodySmall?.copyWith(

@@ -29,6 +29,7 @@ const SOURCES = Object.freeze({
   CLAIM: 'claim',
   PURCHASE: 'purchase',
   REDEMPTION: 'redemption',
+  DONATION: 'donation',
 });
 
 /** Read a persisted usage counter without allowing coercion or overflow. */

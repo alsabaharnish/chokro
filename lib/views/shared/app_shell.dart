@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../controllers/account_profile_controller.dart';
 import '../../controllers/auth_controller.dart';
 import '../../controllers/cart_controller.dart';
+import '../../core/account_profile.dart';
 import '../../core/constants.dart';
 import '../../core/theme.dart';
+import 'account_profile_switcher.dart';
 import 'brand_mark.dart';
 
-enum _AccountAction { profile, signOut }
+enum _AccountAction { switchProfile, profile, signOut }
 
 class ShellDestination {
   const ShellDestination(this.path, this.icon, this.selectedIcon, this.label);
@@ -33,43 +36,82 @@ class AppShell extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final user = ref.watch(currentUserProvider).value;
+    final activeProfile = ref.watch(activeAccountProfileProvider);
     final scheme = Theme.of(context).colorScheme;
     // Watched at the shell rather than on the shop screen, so a buyer who adds
     // something and navigates away can still see they have a cart open.
     final cartCount = ref.watch(cartCountProvider);
 
-    final destinations = <ShellDestination>[
-      const ShellDestination('/home', Icons.home_outlined, Icons.home, 'Home'),
-      // The marketplace is a top-level destination rather than a card on the
-      // home screen, because the spend path is half of what makes the points
-      // economy a cycle (§7.1) — burying it behind a tap would make earning look
-      // like the whole product.
-      const ShellDestination(
-        '/market',
-        Icons.storefront_outlined,
-        Icons.storefront,
-        'Shop',
-      ),
-      const ShellDestination(
-        '/wallet',
-        Icons.account_balance_wallet_outlined,
-        Icons.account_balance_wallet,
-        'Wallet',
-      ),
-      const ShellDestination(
-        '/history',
-        Icons.receipt_long_outlined,
-        Icons.receipt_long,
-        'History',
-      ),
-      if (user != null && user.isAdmin)
-        const ShellDestination(
+    // One account can have multiple profiles, but each profile gets a focused
+    // workspace. Permissions still come from [user]; this only controls which
+    // destinations are presented as the current person's primary tools.
+    final destinations = switch (activeProfile) {
+      AccountProfile.admin => const <ShellDestination>[
+        ShellDestination('/home', Icons.home_outlined, Icons.home, 'Home'),
+        ShellDestination(
+          '/admin/dashboard',
+          Icons.insights_outlined,
+          Icons.insights,
+          'Dashboard',
+        ),
+        ShellDestination(
           '/admin/disposals',
           Icons.fact_check_outlined,
           Icons.fact_check,
           'Review',
         ),
-    ];
+        ShellDestination(
+          '/admin/users',
+          Icons.people_outline,
+          Icons.people,
+          'Accounts',
+        ),
+      ],
+      AccountProfile.greenpreneur => const <ShellDestination>[
+        ShellDestination('/home', Icons.home_outlined, Icons.home, 'Home'),
+        ShellDestination(
+          '/seller/products',
+          Icons.inventory_2_outlined,
+          Icons.inventory_2,
+          'Listings',
+        ),
+        ShellDestination(
+          '/seller/orders',
+          Icons.local_shipping_outlined,
+          Icons.local_shipping,
+          'Orders',
+        ),
+        ShellDestination(
+          '/profile',
+          Icons.person_outline,
+          Icons.person,
+          'Profile',
+        ),
+      ],
+      AccountProfile.champion => const <ShellDestination>[
+        ShellDestination('/home', Icons.home_outlined, Icons.home, 'Home'),
+        // Shopping is a top-level Champion destination because the spend path
+        // completes the points economy (§7.1).
+        ShellDestination(
+          '/market',
+          Icons.storefront_outlined,
+          Icons.storefront,
+          'Shop',
+        ),
+        ShellDestination(
+          '/wallet',
+          Icons.account_balance_wallet_outlined,
+          Icons.account_balance_wallet,
+          'Wallet',
+        ),
+        ShellDestination(
+          '/history',
+          Icons.receipt_long_outlined,
+          Icons.receipt_long,
+          'History',
+        ),
+      ],
+    };
 
     final location = GoRouterState.of(context).matchedLocation;
     final index = destinations.indexWhere((d) => d.path == location);
@@ -107,6 +149,8 @@ class AppShell extends ConsumerWidget {
                 tooltip: 'Account menu',
                 onSelected: (action) {
                   switch (action) {
+                    case _AccountAction.switchProfile:
+                      showAccountProfilePicker(context, ref, returnHome: true);
                     case _AccountAction.profile:
                       context.push('/profile');
                     case _AccountAction.signOut:
@@ -114,6 +158,17 @@ class AppShell extends ConsumerWidget {
                   }
                 },
                 itemBuilder: (context) => [
+                  if (user != null &&
+                      accountProfilesForRole(user.role).length > 1)
+                    PopupMenuItem(
+                      value: _AccountAction.switchProfile,
+                      child: ListTile(
+                        leading: Icon(accountProfileIcon(activeProfile)),
+                        title: const Text('Switch profile'),
+                        subtitle: Text(activeProfile.label),
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                    ),
                   if (location != '/profile')
                     const PopupMenuItem(
                       value: _AccountAction.profile,
@@ -132,6 +187,11 @@ class AppShell extends ConsumerWidget {
                     ),
                   ),
                 ],
+                // PopupMenuButton already wraps its icon in an IconButton with
+                // this tooltip and its own expanded-state semantics. Nesting a
+                // second Tooltip here makes two semantics owners re-parent the
+                // avatar while the menu route animates, which can trip
+                // RenderObject's parentDataDirty assertion on web.
                 icon: _AccountAvatar(name: user?.name),
                 padding: const EdgeInsets.symmetric(horizontal: AppTheme.gapSm),
                 offset: const Offset(0, 8),

@@ -5,26 +5,39 @@ scan a registered bin, photograph a disposal, prove their location, and submit
 evidence for verification. A trusted Node service performs screening and all
 wallet writes; Firestore clients can never award points directly.
 
+The user-facing profiles are **3ZERO Admin**, **3ZERO Greenpreneur**, and
+**3ZERO Champion**. The stable Firestore/API role values remain `admin`, `seller`,
+and `buyer`; profile selection changes the workspace, never authorization. See
+the [v3 project brief](Chokro_Mobile_Project_Brief%20v3.md) for the complete
+requirements and role hierarchy.
+
 ## Main flows
 
-- Email/password registration, profile management, and seller applications
+- Email/password registration and inclusive profiles: Admin holds all three,
+  Greenpreneur also holds Champion, and Champion is the base profile
+- Fast switching between held profiles, with correct defaults and
+  profile-specific home/navigation content
+- Champion education and application to become a 3ZERO Greenpreneur
 - Four-step disposal flow: scan → photo → location → confirmation
 - Server-side distance, photo-provenance, duplicate-hash, AI-screen, and cap checks
 - Human review queues for flagged disposals and self-reported eco-actions
 - Immutable points ledger, configurable policy, suspension, and push decisions
 - Bin registration with printable high-error-correction QR labels
-- Marketplace: seller listings, catalogue search and category filter, cart,
-  and checkout that splits into one order per seller
-- Points spent at checkout and credited back when the buyer confirms receipt,
+- Marketplace: Greenpreneur listings, catalogue search and category filter,
+  cart, and checkout that splits into one order per Greenpreneur
+- Points spent at checkout and credited back when the Champion confirms receipt,
   which is what makes earning and spending a cycle rather than a pipeline
-- Appeals against a rejection, and an admin dashboard over server-held counters
+- Champion point donations to waste recovery, tree planting, or green
+  entrepreneurship, committed by the trusted service with idempotent retries
+- Appeals against a rejection, and a 3ZERO Admin dashboard over server-held
+  counters, including donated points and donation count
 
 ## Architecture
 
 | Area | Location | Responsibility |
 | --- | --- | --- |
 | Flutter client | `lib/` | UI, Riverpod state, camera/location capture, Firebase reads and pending creates |
-| Trusted service | `server/src/` | Auth/role enforcement, verification, reviews, policy, and every wallet mutation |
+| Trusted service | `server/src/` | Live-role enforcement, verification, reviews, policy, checkout, donations, and every wallet mutation |
 | Security boundary | `firestore.rules` | Exact client schemas, ownership, active-account checks, and server-only payout fields |
 | Rules tests | `rules_test/` | Emulator tests for ownership, privilege, schema, timestamps, and immutable balances |
 | App/server tests | `test/`, `server/test/` | Dart models/widgets and pure backend decision logic |
@@ -65,8 +78,8 @@ every launch, so an exact origin pinned in `ALLOWED_ORIGINS` cannot keep up — 
 when it does not match, the failure is lopsided and confusing: **Firestore reads
 keep working** because they do not pass through this service, so the app looks
 mostly healthy while precisely the screens that call the server break. Checkout,
-bin registration and the points policy editor are the ones to watch, because they
-are the screens that talk to the server.
+donations, bin registration, and the points policy editor are the ones to watch,
+because they are the screens that talk to the server.
 
 The flag is opt-in rather than inferred from `NODE_ENV`, so a missing variable on
 a deploy cannot silently open the allowlist. Never set it in production.
@@ -102,7 +115,7 @@ them, so the seeded data satisfies NFR-4 the same way the running app does.
 
 ## Security invariants
 
-1. No Flutter client—including an administrator—can update a wallet balance,
+1. No Flutter client—including a 3ZERO Admin—can update a wallet balance,
    transaction, disposal decision, claim decision, bin geofence, or points policy.
 2. A disposal auto-approves only after every required check runs and passes;
    unavailable or malformed evidence routes to review.
@@ -111,7 +124,12 @@ them, so the seeded data satisfies NFR-4 the same way the running app does.
 4. Wallet credits and their ledger entries are committed together by the trusted
    service, with idempotent decision checks preventing duplicate payouts.
 5. Checkout is one transaction: stock decremented, points debited with a matching
-   ledger entry, one order written per seller, and the cart consumed — or none of
-   it happens.
-6. Only a buyer can confirm an order, and only confirmation credits purchase
-   points. No client writes an order at all, an administrator included.
+   ledger entry, one order written per Greenpreneur, and the cart consumed — or
+   none of it happens.
+6. Only the purchasing Champion can confirm an order, and only confirmation
+   credits purchase points. No client writes an order at all, a 3ZERO Admin
+   included.
+7. Selecting a profile never grants a role. Rules and trusted-service middleware
+   authorize against the live stored `users.role` value.
+8. A point donation commits its wallet debit, `donation` ledger entry, receipt,
+   and counters together. Its UID-scoped request ID makes retries idempotent.

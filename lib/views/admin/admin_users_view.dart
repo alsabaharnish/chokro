@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../controllers/admin_users_controller.dart';
 import '../../controllers/current_user_provider.dart';
+import '../../core/constants.dart';
 import '../../core/label_format.dart';
 import '../../models/user_model.dart';
 import '../shared/app_shell.dart';
@@ -387,7 +388,7 @@ class _UserCard extends StatelessWidget {
                     runSpacing: 6,
                     children: [
                       _Pill(
-                        label: humanise(user.role),
+                        label: AppConstants.roleLabel(user.role),
                         background: theme.colorScheme.surfaceContainerHighest,
                         foreground: theme.colorScheme.onSurfaceVariant,
                       ),

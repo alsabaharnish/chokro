@@ -48,6 +48,11 @@ Future<_RecordingUserService> _pump(
   WidgetTester tester, {
   required UserModel user,
 }) async {
+  tester.view.physicalSize = const Size(800, 1400);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
+
   final service = _RecordingUserService();
 
   final router = GoRouter(
@@ -71,10 +76,7 @@ Future<_RecordingUserService> _pump(
         userServiceProvider.overrideWithValue(service),
         currentUserProvider.overrideWith((ref) => Stream.value(user)),
       ],
-      child: MaterialApp.router(
-        theme: AppTheme.light(),
-        routerConfig: router,
-      ),
+      child: MaterialApp.router(theme: AppTheme.light(), routerConfig: router),
     ),
   );
   await tester.pumpAndSettle();
@@ -94,17 +96,15 @@ void main() {
       ),
     );
 
-    expect(
-      tester.widget<TextFormField>(_nameField).controller?.text,
-      'Nabil',
-    );
+    expect(tester.widget<TextFormField>(_nameField).controller?.text, 'Nabil');
     expect(find.text('nabil@example.com'), findsOneWidget);
-    expect(find.text('Seller'), findsOneWidget);
+    expect(find.text('Using 3ZERO Greenpreneur'), findsOneWidget);
     expect(find.text('4 Mar 2026'), findsOneWidget);
   });
 
-  testWidgets('save is withheld until the name actually changes',
-      (tester) async {
+  testWidgets('save is withheld until the name actually changes', (
+    tester,
+  ) async {
     await _pump(tester, user: _user());
 
     // Nothing to write yet: the field holds exactly what is stored.
@@ -135,8 +135,9 @@ void main() {
     expect(find.text('Name updated.'), findsOneWidget);
   });
 
-  testWidgets('a surrounding space is trimmed before it is stored',
-      (tester) async {
+  testWidgets('a surrounding space is trimmed before it is stored', (
+    tester,
+  ) async {
     final service = await _pump(tester, user: _user());
 
     // Invisible in the field, and it would greet the user as "Hello, Nabil "
@@ -161,8 +162,9 @@ void main() {
     expect(service.writes, isEmpty);
   });
 
-  testWidgets('a refused write explains itself and keeps the typed name',
-      (tester) async {
+  testWidgets('a refused write explains itself and keeps the typed name', (
+    tester,
+  ) async {
     final service = await _pump(tester, user: _user());
     service.throwThis = _permissionDenied();
 
@@ -196,31 +198,31 @@ void main() {
   });
 
   testWidgets('an indefinite suspension names no date', (tester) async {
-    await _pump(
-      tester,
-      user: _user(status: AppConstants.statusSuspended),
-    );
+    await _pump(tester, user: _user(status: AppConstants.statusSuspended));
 
     expect(find.text('Account suspended'), findsOneWidget);
-    expect(find.textContaining('Contact an administrator'), findsOneWidget);
+    expect(find.textContaining('Contact a 3ZERO Admin'), findsOneWidget);
   });
 
-  testWidgets('a pending join date reads as just now, not as an error',
-      (tester) async {
+  testWidgets('a pending join date reads as just now, not as an error', (
+    tester,
+  ) async {
     // createdAt is null for one server round trip after registration.
     await _pump(tester, user: _user(createdAt: null));
 
     expect(find.text('Just now'), findsOneWidget);
   });
 
-  testWidgets('a buyer is offered the seller application', (tester) async {
+  testWidgets('a Champion is offered the Greenpreneur application', (
+    tester,
+  ) async {
     await _pump(tester, user: _user(role: AppConstants.roleBuyer));
-    expect(find.text('Apply to become a seller'), findsOneWidget);
+    expect(find.text('Become a 3ZERO Greenpreneur'), findsOneWidget);
   });
 
-  testWidgets('a seller is not offered it again', (tester) async {
+  testWidgets('a Greenpreneur is not offered it again', (tester) async {
     await _pump(tester, user: _user(role: AppConstants.roleSeller));
-    expect(find.text('Apply to become a seller'), findsNothing);
+    expect(find.text('Become a 3ZERO Greenpreneur'), findsNothing);
   });
 }
 

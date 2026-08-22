@@ -5,11 +5,12 @@ import 'auth_controller.dart';
 
 final pendingApplicationsProvider =
     StreamProvider<List<SellerApplicationModel>>((ref) {
-  return ref.watch(userServiceProvider).watchPendingApplications();
-});
+      return ref.watch(userServiceProvider).watchPendingApplications();
+    });
 
-final userApplicationsProvider =
-    StreamProvider<List<SellerApplicationModel>>((ref) {
+final userApplicationsProvider = StreamProvider<List<SellerApplicationModel>>((
+  ref,
+) {
   final user = ref.watch(currentUserProvider).value;
   if (user == null) return Stream.value([]);
   return ref.watch(userServiceProvider).watchUserApplications(user.uid);
@@ -27,6 +28,15 @@ class SellerApplicationController extends AsyncNotifier<void> {
     state = await AsyncValue.guard(() async {
       final user = ref.read(currentUserProvider).value;
       if (user == null) throw Exception('Not signed in');
+
+      // A second pending request adds noise to the Admin queue and makes it
+      // unclear which business description should be reviewed. The screen also
+      // disables the form, but the controller repeats the check so another UI
+      // entry point cannot accidentally bypass it.
+      final existing = await ref.read(userApplicationsProvider.future);
+      if (existing.any((application) => application.isPending)) {
+        throw StateError('A Greenpreneur application is already pending.');
+      }
 
       final app = SellerApplicationModel(
         id: '',
@@ -47,7 +57,9 @@ class SellerApplicationController extends AsyncNotifier<void> {
       final user = ref.read(currentUserProvider).value;
       if (user == null) throw Exception('Not signed in');
 
-      await ref.read(userServiceProvider).reviewApplication(
+      await ref
+          .read(userServiceProvider)
+          .reviewApplication(
             appId: appId,
             status: AppConstants.statusApproved,
             reviewedBy: user.uid,
@@ -61,7 +73,9 @@ class SellerApplicationController extends AsyncNotifier<void> {
       final user = ref.read(currentUserProvider).value;
       if (user == null) throw Exception('Not signed in');
 
-      await ref.read(userServiceProvider).reviewApplication(
+      await ref
+          .read(userServiceProvider)
+          .reviewApplication(
             appId: appId,
             status: AppConstants.statusRejected,
             reviewedBy: user.uid,
@@ -73,4 +87,5 @@ class SellerApplicationController extends AsyncNotifier<void> {
 
 final sellerApplicationControllerProvider =
     AsyncNotifierProvider<SellerApplicationController, void>(
-        SellerApplicationController.new);
+      SellerApplicationController.new,
+    );

@@ -112,7 +112,7 @@ function suspensionMessage(profile, now = new Date()) {
 
   const until = toDate(profile.suspendedUntil);
   if (until === null) {
-    return 'This account is suspended. Contact an administrator.';
+    return 'This account is suspended. Contact a 3ZERO Admin.';
   }
 
   return `This account is suspended until ${until.toISOString()}.`;

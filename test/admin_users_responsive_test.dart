@@ -84,8 +84,13 @@ void main() {
 
     expect(find.text('Active'), findsWidgets);
     expect(find.text('Suspended'), findsOneWidget);
-    expect(find.text('Suspend'), findsOneWidget);
     expect(find.text('Reinstate'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Suspend'),
+      120,
+      scrollable: find.byType(Scrollable).last,
+    );
+    expect(find.text('Suspend'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 }

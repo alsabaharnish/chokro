@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../controllers/account_profile_controller.dart';
 import '../../controllers/seller_products_controller.dart';
+import '../../core/account_profile.dart';
 import '../../core/theme.dart';
 import '../../models/product_model.dart';
 import '../market/product_card.dart';
@@ -24,8 +26,18 @@ class SellerProductsView extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('My listings'),
+        title: const Text('Greenpreneur listings'),
         actions: [
+          IconButton(
+            tooltip: 'Switch to 3ZERO Champion',
+            onPressed: () {
+              ref
+                  .read(accountProfileControllerProvider.notifier)
+                  .select(AccountProfile.champion);
+              context.go('/home');
+            },
+            icon: const Icon(Icons.swap_horiz),
+          ),
           IconButton(
             tooltip: 'Orders to fulfil',
             onPressed: () => context.push('/seller/orders'),
@@ -52,7 +64,7 @@ class SellerProductsView extends ConsumerWidget {
               title: 'Nothing listed yet',
               message:
                   'Add a product and it appears in the shop straight away. '
-                  'Buyers can pay for part of it with points.',
+                  '3ZERO Champions can pay for part of it with points.',
               actionLabel: 'Add your first listing',
               onAction: () => context.push('/seller/products/new'),
             );
@@ -133,10 +145,10 @@ class _SuspensionNotice extends StatelessWidget {
               child: Text(
                 count == 1
                     ? 'One listing was hidden from the shop while your account '
-                          'was suspended. An administrator restores it when the '
+                          'was suspended. A 3ZERO Admin restores it when the '
                           'suspension is lifted — nothing has been deleted.'
                     : '$count listings were hidden from the shop while your '
-                          'account was suspended. An administrator restores them '
+                          'account was suspended. A 3ZERO Admin restores them '
                           'when the suspension is lifted — nothing has been '
                           'deleted.',
                 style: theme.textTheme.bodySmall?.copyWith(

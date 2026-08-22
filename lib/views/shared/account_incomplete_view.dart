@@ -32,8 +32,9 @@ class AccountIncompleteView extends ConsumerWidget {
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(AppTheme.gapXl),
             child: ConstrainedBox(
-              constraints:
-                  const BoxConstraints(maxWidth: AppTheme.maxFormWidth),
+              constraints: const BoxConstraints(
+                maxWidth: AppTheme.maxFormWidth,
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -45,8 +46,9 @@ class AccountIncompleteView extends ConsumerWidget {
                   const SizedBox(height: AppTheme.gapMd),
                   Text(
                     'Your profile is missing',
-                    style: theme.textTheme.titleLarge
-                        ?.copyWith(fontWeight: FontWeight.bold),
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
                     textAlign: TextAlign.center,
                   ),
                   const SizedBox(height: AppTheme.gapSm),
@@ -75,15 +77,15 @@ class AccountIncompleteView extends ConsumerWidget {
                     onPressed: isSigningOut
                         ? null
                         : () => ref
-                            .read(authControllerProvider.notifier)
-                            .signOut(),
+                              .read(authControllerProvider.notifier)
+                              .signOut(),
                     icon: const Icon(Icons.logout),
                     label: const Text('Sign out'),
                   ),
                   const SizedBox(height: AppTheme.gapMd),
                   Text(
                     'If this keeps happening, register again with a different '
-                    'email or ask an administrator to check the account.',
+                    'email or ask a 3ZERO Admin to check the account.',
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: theme.colorScheme.onSurfaceVariant,

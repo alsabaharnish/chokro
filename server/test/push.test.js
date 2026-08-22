@@ -67,7 +67,7 @@ describe('disposal approval messages', () => {
       status: 'manualApproved',
     });
 
-    expect(message.body).toMatch(/administrator|verified/i);
+    expect(message.body).toMatch(/3ZERO Admin|verified/i);
     expect(message.body).not.toContain('automatically');
     expect(message.data.status).toBe('manualApproved');
   });

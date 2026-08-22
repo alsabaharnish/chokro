@@ -112,7 +112,7 @@ function requireAdmin(req, res, next) {
   if (!req.user || req.user.role !== 'admin') {
     return res.status(403).json({
       error: 'forbidden',
-      message: 'This action requires an administrator.',
+      message: 'This action requires a 3ZERO Admin.',
     });
   }
   return next();
@@ -131,7 +131,7 @@ function requireSeller(req, res, next) {
   if (!req.user || !['seller', 'admin'].includes(req.user.role)) {
     return res.status(403).json({
       error: 'forbidden',
-      message: 'This action requires a seller account.',
+      message: 'This action requires a 3ZERO Greenpreneur profile.',
     });
   }
   return next();

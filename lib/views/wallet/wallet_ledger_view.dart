@@ -151,6 +151,8 @@ class _LedgerRow extends StatelessWidget {
         return Icons.eco_outlined;
       case TransactionSource.redemption:
         return Icons.shopping_bag_outlined;
+      case TransactionSource.donation:
+        return Icons.volunteer_activism_outlined;
       case TransactionSource.unknown:
         return Icons.receipt_long_outlined;
     }

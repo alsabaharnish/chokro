@@ -1,12 +1,13 @@
 # Chokro trusted service
 
 This Express service owns operations that a Flutter client must not be trusted
-to perform: evidence verification, administrator decisions, policy changes, bin
-registration, push decisions, and every wallet/ledger mutation.
+to perform: evidence verification, 3ZERO Admin decisions, policy changes, bin
+registration, push decisions, and every wallet/ledger mutation, including
+Champion point donations.
 
 ## Run
 
-Node 20 or newer is required.
+Node 22 is required, as pinned by `package.json`.
 
 ```bash
 npm install
@@ -27,23 +28,51 @@ Keep it out of source control and logs.
 ## API
 
 Except for health/upload limits, endpoints require a Firebase ID token in
-`Authorization: Bearer <token>`. Administrator routes additionally read the live
-role from `users/{uid}`.
+`Authorization: Bearer <token>`. Protected routes read the live stored role from
+`users/{uid}`. The user-facing names are 3ZERO Admin, 3ZERO Greenpreneur, and
+3ZERO Champion; the stable authorization values remain `admin`, `seller`, and
+`buyer`. A client-selected profile is never accepted as authorization.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/health` | Liveness and service version |
-| GET | `/whoami` | Verify token, profile, and active-account state |
+| GET | `/whoami` | Verify token, stored account record, and active-account state |
+| GET | `/admin/ping` | Verify the caller's live 3ZERO Admin authority |
+| GET | `/photos/limits` | Public upload constraints used by the client |
 | POST | `/photos/disposal` | Store disposal evidence under the caller's folder |
 | POST | `/photos/claim` | Store claim evidence under the caller's folder |
+| POST | `/photos/product` | Store product media for a Greenpreneur |
 | POST | `/disposals/:id/verify` | Recompute and run the two-lane verification decision |
-| POST | `/disposals/:id/review` | Administrator approve/reject |
+| POST | `/disposals/:id/review` | 3ZERO Admin approve/reject |
+| GET | `/claims/quota` | Current Champion's approved weekly-claim allowance |
+| POST | `/claims/:id/review` | 3ZERO Admin approve/reject a claim |
+| POST | `/checkout` | Atomically redeem points, decrement stock, consume cart, and create orders |
+| POST | `/donations` | Atomically donate Champion points to a fixed green initiative |
+| POST | `/orders/:id/status` | Greenpreneur advances an owned order |
+| POST | `/orders/:id/confirm` | Purchasing Champion confirms receipt and releases points |
+| POST | `/sellers/:uid/listings` | Admin updates listing visibility after account action; path keeps the wire-role name |
 | GET/POST | `/config/points` | Read or validate/update reward policy |
 | POST | `/bins` | Register a bin |
 | POST | `/bins/:id/active` | Close or reopen a bin |
-| GET | `/claims/quota` | Current user's approved weekly-claim allowance |
-| POST | `/claims/:id/review` | Administrator approve/reject a claim |
+
 See `src/index.js` for exact request bodies and response shapes.
+
+## Donation guarantees
+
+`POST /donations` accepts a client-generated `donationId`, one of
+`wasteRecovery`, `treePlanting`, or `greenEntrepreneurship`, and a whole-point
+amount from 10 through 1,000,000. `donations.js` scopes the idempotency key to the
+authenticated UID and uses one Firestore transaction to:
+
+1. validate the existing receipt, account wallet, and available balance;
+2. debit the wallet;
+3. append a `transactions` entry with `source=donation`;
+4. write a server-only donation receipt; and
+5. increment `stats.pointsDonated` and `stats.donationsReceived`.
+
+Retrying the same request returns the original result without another debit.
+Reusing its ID with different content is rejected. A failure before commit takes
+no points, and Firestore rules deny all client reads and writes on receipts.
 
 ## Verification flow
 
@@ -66,4 +95,5 @@ npm test -- --runInBand
 ```
 
 The suite is offline: it exercises decision, hashing, photo-reference, policy,
-push, bin, and suspension logic without real Firebase, Cloudinary, or Groq calls.
+push, bin, suspension, checkout, orders, listings, and donation logic without
+real Firebase, Cloudinary, or Groq calls.

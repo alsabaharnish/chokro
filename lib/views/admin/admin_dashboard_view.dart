@@ -77,10 +77,17 @@ class AdminDashboardView extends ConsumerWidget {
                           icon: Icons.trending_down,
                         ),
                         _Stat(
+                          label: 'Points donated',
+                          value: '${stats.pointsDonated}',
+                          detail:
+                              '${stats.donationsReceived} Champion contributions',
+                          icon: Icons.volunteer_activism_outlined,
+                        ),
+                        _Stat(
                           label: 'Points outstanding',
                           value: '${stats.pointsOutstanding}',
-                          // The figure worth looking at: issued minus redeemed
-                          // is what the platform still owes its users.
+                          // Issued minus every debit is what the platform still
+                          // owes its users.
                           detail: 'Held in wallets — the standing liability',
                           icon: Icons.account_balance_wallet_outlined,
                           emphasise: true,
@@ -138,7 +145,7 @@ class AdminDashboardView extends ConsumerWidget {
                         _Stat(
                           label: 'Orders placed',
                           value: '${stats.ordersCreated}',
-                          detail: 'One per seller per checkout',
+                          detail: 'One per Greenpreneur per checkout',
                           icon: Icons.receipt_long_outlined,
                         ),
                         _Stat(
@@ -170,11 +177,11 @@ class AdminDashboardView extends ConsumerWidget {
                           icon: Icons.person_outline,
                         ),
                         _Stat(
-                          label: 'Sellers',
+                          label: '3ZERO Greenpreneurs',
                           value: '${accounts.sellers}',
                           detail:
-                              '${accounts.buyers} buyers, '
-                              '${accounts.admins} admins',
+                              '${accounts.buyers} Champions, '
+                              '${accounts.admins} 3ZERO Admins',
                           icon: Icons.storefront_outlined,
                         ),
                         _Stat(
@@ -383,12 +390,12 @@ class _ProvenanceNote extends StatelessWidget {
                           'rather than being unavailable. They are written by the '
                           'trusted service inside the same transactions that '
                           'award and spend points — no client can write them, an '
-                          'administrator included.'
+                          '3ZERO Admin included.'
                     : 'Platform counters are written by the trusted service '
                           'inside the same transactions that award and spend '
                           'points, so this screen is one document read. Account '
                           'totals are counted live from the accounts list. No '
-                          'client can write a counter, an administrator included.',
+                          'client can write a counter, a 3ZERO Admin included.',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: scheme.onSurfaceVariant,
                   height: 1.45,
