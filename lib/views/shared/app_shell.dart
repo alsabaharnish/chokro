@@ -137,11 +137,29 @@ class AppShell extends ConsumerWidget {
       builder: (context, constraints) {
         final isWide = constraints.maxWidth >= AppConstants.webBreakpoint;
         final expandedRail = constraints.maxWidth >= 1280;
+        final content = DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [scheme.surfaceContainerLow, scheme.surface],
+              stops: const [0, .72],
+            ),
+          ),
+          child: child,
+        );
 
         return Scaffold(
-          backgroundColor: scheme.surfaceContainerLow,
+          backgroundColor: scheme.surface,
           appBar: AppBar(
-            shape: Border(bottom: BorderSide(color: scheme.outlineVariant)),
+            backgroundColor: scheme.surfaceContainerLowest.withValues(
+              alpha: .97,
+            ),
+            shape: Border(
+              bottom: BorderSide(
+                color: scheme.outlineVariant.withValues(alpha: .82),
+              ),
+            ),
             leading: !isDestination && !canPop
                 ? IconButton(
                     tooltip: 'Back to home',
@@ -243,30 +261,37 @@ class AppShell extends ConsumerWidget {
                           .toList(),
                     ),
                     const VerticalDivider(width: 1),
-                    Expanded(child: child),
+                    Expanded(child: content),
                   ],
                 )
-              : child,
+              : content,
           bottomNavigationBar: isWide || !isDestination
               ? null
-              : NavigationBar(
-                  selectedIndex: index,
-                  onDestinationSelected: onSelect,
-                  destinations: destinations
-                      .map(
-                        (d) => NavigationDestination(
-                          icon: _DestinationIcon(
-                            icon: d.icon,
-                            badge: d.path == '/market' ? cartCount : 0,
+              : DecoratedBox(
+                  decoration: BoxDecoration(
+                    border: Border(
+                      top: BorderSide(color: scheme.outlineVariant),
+                    ),
+                  ),
+                  child: NavigationBar(
+                    selectedIndex: index,
+                    onDestinationSelected: onSelect,
+                    destinations: destinations
+                        .map(
+                          (d) => NavigationDestination(
+                            icon: _DestinationIcon(
+                              icon: d.icon,
+                              badge: d.path == '/market' ? cartCount : 0,
+                            ),
+                            selectedIcon: _DestinationIcon(
+                              icon: d.selectedIcon,
+                              badge: d.path == '/market' ? cartCount : 0,
+                            ),
+                            label: d.label,
                           ),
-                          selectedIcon: _DestinationIcon(
-                            icon: d.selectedIcon,
-                            badge: d.path == '/market' ? cartCount : 0,
-                          ),
-                          label: d.label,
-                        ),
-                      )
-                      .toList(),
+                        )
+                        .toList(),
+                  ),
                 ),
         );
       },
@@ -346,7 +371,11 @@ class _AccountAvatar extends StatelessWidget {
       height: 38,
       alignment: Alignment.center,
       decoration: BoxDecoration(
-        color: scheme.primaryContainer,
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [scheme.primaryContainer, scheme.tertiaryContainer],
+        ),
         shape: BoxShape.circle,
         border: Border.all(color: scheme.outlineVariant),
       ),

@@ -36,7 +36,7 @@ class HomeView extends ConsumerWidget {
     final activeProfile = ref.watch(activeAccountProfileProvider);
 
     return AppShell(
-      title: 'Chokro',
+      title: 'Overview',
       child: userAsync.when(
         loading: () => const ContentLoading(label: 'Preparing your dashboard…'),
         error: (error, _) =>
@@ -59,323 +59,350 @@ class HomeView extends ConsumerWidget {
                 // The providers retain the error and the screen renders it.
               }
             },
-            child: ListView(
-              padding: const EdgeInsets.fromLTRB(
-                AppTheme.gapMd,
-                AppTheme.gapMd,
-                AppTheme.gapMd,
-                AppTheme.gapXl,
-              ),
-              children: [
-                Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(
-                      maxWidth: AppTheme.maxDashboardWidth,
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _Greeting(name: user.name, role: activeProfile.label),
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final horizontal = constraints.maxWidth >= 800
+                    ? AppTheme.gapXl
+                    : AppTheme.gapMd;
 
-                        if (suspended) ...[
-                          const SizedBox(height: AppTheme.gapMd),
-                          _SuspendedNotice(
-                            until: user.suspendedUntil,
-                            indefinite: user.isSuspendedIndefinitely,
-                          ),
-                        ],
-
-                        const SizedBox(height: AppTheme.gapMd),
-                        const AccountProfileSwitcher(),
-
-                        ...switch (activeProfile) {
-                          AccountProfile.admin => <Widget>[
-                            const SizedBox(height: AppTheme.gapXl),
-                            const SectionHeading(
-                              '3ZERO administration',
-                              icon: Icons.shield_outlined,
-                            ),
-                            _ActionGrid(
-                              children: [
-                                ActionCard(
-                                  icon: Icons.insights_outlined,
-                                  title: 'Platform dashboard',
-                                  subtitle:
-                                      'See points, activity and account totals.',
-                                  disabledSubtitle:
-                                      'Unavailable while suspended.',
-                                  tone: ActionTone.admin,
-                                  onTap: suspended
-                                      ? null
-                                      : () => context.push('/admin/dashboard'),
-                                ),
-                                ActionCard(
-                                  icon: Icons.fact_check_outlined,
-                                  title: 'Disposal reviews',
-                                  subtitle:
-                                      'Approve or reject pending disposals.',
-                                  disabledSubtitle:
-                                      'Unavailable while suspended.',
-                                  tone: ActionTone.admin,
-                                  onTap: suspended
-                                      ? null
-                                      : () => context.push('/admin/disposals'),
-                                ),
-                                ActionCard(
-                                  icon: Icons.eco_outlined,
-                                  title: 'Eco-action reviews',
-                                  subtitle:
-                                      'Decide self-reported green actions.',
-                                  disabledSubtitle:
-                                      'Unavailable while suspended.',
-                                  tone: ActionTone.admin,
-                                  onTap: suspended
-                                      ? null
-                                      : () => context.push('/admin/claims'),
-                                ),
-                                ActionCard(
-                                  icon: Icons.gavel_outlined,
-                                  title: 'Appeals',
-                                  subtitle:
-                                      'Answer Champions who dispute a decision.',
-                                  disabledSubtitle:
-                                      'Unavailable while suspended.',
-                                  tone: ActionTone.admin,
-                                  onTap: suspended
-                                      ? null
-                                      : () => context.push('/admin/appeals'),
-                                ),
-                                ActionCard(
-                                  icon: Icons.storefront_outlined,
-                                  title: 'Greenpreneur applications',
-                                  subtitle:
-                                      'Review Champion requests to start selling.',
-                                  disabledSubtitle:
-                                      'Unavailable while suspended.',
-                                  tone: ActionTone.admin,
-                                  onTap: suspended
-                                      ? null
-                                      : () =>
-                                            context.push('/admin/applications'),
-                                ),
-                                ActionCard(
-                                  icon: Icons.qr_code_2,
-                                  title: 'Collection bins',
-                                  subtitle:
-                                      'Register bins and print their codes.',
-                                  disabledSubtitle:
-                                      'Unavailable while suspended.',
-                                  tone: ActionTone.admin,
-                                  onTap: suspended
-                                      ? null
-                                      : () => context.push('/admin/bins'),
-                                ),
-                                ActionCard(
-                                  icon: Icons.people_outline,
-                                  title: 'Accounts',
-                                  subtitle:
-                                      'View, suspend or reinstate an account.',
-                                  disabledSubtitle:
-                                      'Unavailable while suspended.',
-                                  tone: ActionTone.admin,
-                                  onTap: suspended
-                                      ? null
-                                      : () => context.push('/admin/users'),
-                                ),
-                                ActionCard(
-                                  icon: Icons.tune,
-                                  title: 'Points policy',
-                                  subtitle:
-                                      'Tune rewards and anti-farming limits.',
-                                  disabledSubtitle:
-                                      'Unavailable while suspended.',
-                                  tone: ActionTone.admin,
-                                  onTap: suspended
-                                      ? null
-                                      : () => context.push('/admin/points'),
-                                ),
-                              ],
-                            ),
-                          ],
-                          AccountProfile.greenpreneur => <Widget>[
-                            const SizedBox(height: AppTheme.gapXl),
-                            const SectionHeading('Greenpreneur workspace'),
-                            _ActionGrid(
-                              children: [
-                                ActionCard(
-                                  icon: Icons.inventory_2_outlined,
-                                  title: 'My sustainable listings',
-                                  subtitle:
-                                      'Add products, update stock and manage visibility.',
-                                  disabledSubtitle:
-                                      'Unavailable while suspended.',
-                                  tone: ActionTone.primary,
-                                  onTap: suspended
-                                      ? null
-                                      : () => context.push('/seller/products'),
-                                ),
-                                ActionCard(
-                                  icon: Icons.local_shipping_outlined,
-                                  title: 'Orders to fulfil',
-                                  subtitle: switch (openSellerOrders) {
-                                    0 =>
-                                      'Ship and deliver what Champions have ordered.',
-                                    1 => '1 order needs something from you.',
-                                    _ =>
-                                      '$openSellerOrders orders need something from you.',
-                                  },
-                                  badgeCount: openSellerOrders,
-                                  disabledSubtitle:
-                                      'Unavailable while suspended.',
-                                  onTap: suspended
-                                      ? null
-                                      : () => context.push('/seller/orders'),
-                                ),
-                                ActionCard(
-                                  icon: Icons.eco_outlined,
-                                  title: 'Use my Champion profile',
-                                  subtitle:
-                                      'Shop, take green actions and manage your points.',
-                                  onTap: () => ref
-                                      .read(
-                                        accountProfileControllerProvider
-                                            .notifier,
-                                      )
-                                      .select(AccountProfile.champion),
-                                ),
-                              ],
-                            ),
-                          ],
-                          AccountProfile.champion => <Widget>[
-                            const SizedBox(height: AppTheme.gapMd),
-                            _BalanceCard(
-                              walletAsync: walletAsync,
-                              onViewWallet: () => context.push('/wallet'),
-                            ),
-                            const SizedBox(height: AppTheme.gapXl),
-                            const SectionHeading('Make an impact'),
-                            _ActionGrid(
-                              children: [
-                                ActionCard(
-                                  icon: Icons.qr_code_scanner,
-                                  title: 'Dispose waste',
-                                  subtitle: 'Scan the code on a bin to start.',
-                                  disabledSubtitle:
-                                      'Unavailable while suspended.',
-                                  tone: ActionTone.primary,
-                                  onTap: suspended
-                                      ? null
-                                      : () => context.push('/dispose/scan'),
-                                ),
-                                ActionCard(
-                                  icon: Icons.eco_outlined,
-                                  title: 'Log an eco-action',
-                                  subtitle:
-                                      'Record composting, planting and other positive actions.',
-                                  disabledSubtitle:
-                                      'Unavailable while suspended.',
-                                  onTap: suspended
-                                      ? null
-                                      : () => context.push('/claims/new'),
-                                ),
-                                ActionCard(
-                                  icon: Icons.volunteer_activism_outlined,
-                                  title: 'Support green initiatives',
-                                  subtitle:
-                                      'Donate reward points to a 3ZERO initiative.',
-                                  disabledSubtitle:
-                                      'Unavailable while suspended.',
-                                  onTap: suspended
-                                      ? null
-                                      : () => context.push('/donate'),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: AppTheme.gapLg),
-                            const SectionHeading('Your records'),
-                            _ActionGrid(
-                              children: [
-                                ActionCard(
-                                  icon: Icons.receipt_long_outlined,
-                                  title: 'My submissions',
-                                  subtitle: switch (pendingCount) {
-                                    0 =>
-                                      'Status, reasons and points for everything you sent.',
-                                    1 => '1 submission is waiting for review.',
-                                    _ =>
-                                      '$pendingCount submissions are waiting for review.',
-                                  },
-                                  badgeCount: pendingCount,
-                                  onTap: () => context.push('/history'),
-                                ),
-                                ActionCard(
-                                  icon: Icons.eco_outlined,
-                                  title: 'My eco-actions',
-                                  subtitle:
-                                      'Review actions, decisions and reasons.',
-                                  onTap: () => context.push('/claims'),
-                                ),
-                                ActionCard(
-                                  icon: Icons.local_mall_outlined,
-                                  title: 'My orders',
-                                  subtitle: switch (awaitingConfirmation) {
-                                    0 =>
-                                      'Track what you bought and where it has got to.',
-                                    1 =>
-                                      '1 delivery is waiting for your confirmation.',
-                                    _ =>
-                                      '$awaitingConfirmation deliveries await confirmation.',
-                                  },
-                                  badgeCount: awaitingConfirmation,
-                                  onTap: () => context.push('/orders'),
-                                ),
-                                ActionCard(
-                                  icon: Icons.gavel_outlined,
-                                  title: 'My appeals',
-                                  subtitle:
-                                      'See disputed decisions and 3ZERO Admin responses.',
-                                  onTap: () => context.push('/appeals'),
-                                ),
-                              ],
-                            ),
-                            const SizedBox(height: AppTheme.gapLg),
-                            const SectionHeading('Greenpreneur journey'),
-                            _ActionGrid(
-                              children: [
-                                if (user.isSeller)
-                                  ActionCard(
-                                    icon: Icons.storefront_outlined,
-                                    title: 'Use my Greenpreneur profile',
-                                    subtitle:
-                                        'Manage sustainable products and fulfil orders.',
-                                    onTap: () => ref
-                                        .read(
-                                          accountProfileControllerProvider
-                                              .notifier,
-                                        )
-                                        .select(AccountProfile.greenpreneur),
-                                  )
-                                else
-                                  ActionCard(
-                                    icon: Icons.storefront_outlined,
-                                    title: 'Become a 3ZERO Greenpreneur',
-                                    subtitle:
-                                        'Learn what Greenpreneurs do and apply when you are ready.',
-                                    disabledSubtitle:
-                                        'Unavailable while suspended.',
-                                    onTap: suspended
-                                        ? null
-                                        : () => context.push('/apply-seller'),
-                                  ),
-                              ],
-                            ),
-                          ],
-                        },
-                      ],
-                    ),
+                return ListView(
+                  key: const PageStorageKey('home-dashboard'),
+                  padding: EdgeInsets.fromLTRB(
+                    horizontal,
+                    AppTheme.gapLg,
+                    horizontal,
+                    AppTheme.gap2Xl,
                   ),
-                ),
-              ],
+                  children: [
+                    Center(
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(
+                          maxWidth: AppTheme.maxDashboardWidth,
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _Greeting(
+                              name: user.name,
+                              role: activeProfile.label,
+                            ),
+
+                            if (suspended) ...[
+                              const SizedBox(height: AppTheme.gapMd),
+                              _SuspendedNotice(
+                                until: user.suspendedUntil,
+                                indefinite: user.isSuspendedIndefinitely,
+                              ),
+                            ],
+
+                            const SizedBox(height: AppTheme.gapMd),
+                            const AccountProfileSwitcher(),
+
+                            ...switch (activeProfile) {
+                              AccountProfile.admin => <Widget>[
+                                const SizedBox(height: AppTheme.gapXl),
+                                const SectionHeading(
+                                  '3ZERO administration',
+                                  icon: Icons.shield_outlined,
+                                ),
+                                _ActionGrid(
+                                  children: [
+                                    ActionCard(
+                                      icon: Icons.insights_outlined,
+                                      title: 'Platform dashboard',
+                                      subtitle:
+                                          'See points, activity and account totals.',
+                                      disabledSubtitle:
+                                          'Unavailable while suspended.',
+                                      tone: ActionTone.admin,
+                                      onTap: suspended
+                                          ? null
+                                          : () => context.push(
+                                              '/admin/dashboard',
+                                            ),
+                                    ),
+                                    ActionCard(
+                                      icon: Icons.fact_check_outlined,
+                                      title: 'Disposal reviews',
+                                      subtitle:
+                                          'Approve or reject pending disposals.',
+                                      disabledSubtitle:
+                                          'Unavailable while suspended.',
+                                      tone: ActionTone.admin,
+                                      onTap: suspended
+                                          ? null
+                                          : () => context.push(
+                                              '/admin/disposals',
+                                            ),
+                                    ),
+                                    ActionCard(
+                                      icon: Icons.eco_outlined,
+                                      title: 'Eco-action reviews',
+                                      subtitle:
+                                          'Decide self-reported green actions.',
+                                      disabledSubtitle:
+                                          'Unavailable while suspended.',
+                                      tone: ActionTone.admin,
+                                      onTap: suspended
+                                          ? null
+                                          : () => context.push('/admin/claims'),
+                                    ),
+                                    ActionCard(
+                                      icon: Icons.gavel_outlined,
+                                      title: 'Appeals',
+                                      subtitle:
+                                          'Answer Champions who dispute a decision.',
+                                      disabledSubtitle:
+                                          'Unavailable while suspended.',
+                                      tone: ActionTone.admin,
+                                      onTap: suspended
+                                          ? null
+                                          : () =>
+                                                context.push('/admin/appeals'),
+                                    ),
+                                    ActionCard(
+                                      icon: Icons.storefront_outlined,
+                                      title: 'Greenpreneur applications',
+                                      subtitle:
+                                          'Review Champion requests to start selling.',
+                                      disabledSubtitle:
+                                          'Unavailable while suspended.',
+                                      tone: ActionTone.admin,
+                                      onTap: suspended
+                                          ? null
+                                          : () => context.push(
+                                              '/admin/applications',
+                                            ),
+                                    ),
+                                    ActionCard(
+                                      icon: Icons.qr_code_2,
+                                      title: 'Collection bins',
+                                      subtitle:
+                                          'Register bins and print their codes.',
+                                      disabledSubtitle:
+                                          'Unavailable while suspended.',
+                                      tone: ActionTone.admin,
+                                      onTap: suspended
+                                          ? null
+                                          : () => context.push('/admin/bins'),
+                                    ),
+                                    ActionCard(
+                                      icon: Icons.people_outline,
+                                      title: 'Accounts',
+                                      subtitle:
+                                          'View, suspend or reinstate an account.',
+                                      disabledSubtitle:
+                                          'Unavailable while suspended.',
+                                      tone: ActionTone.admin,
+                                      onTap: suspended
+                                          ? null
+                                          : () => context.push('/admin/users'),
+                                    ),
+                                    ActionCard(
+                                      icon: Icons.tune,
+                                      title: 'Points policy',
+                                      subtitle:
+                                          'Tune rewards and anti-farming limits.',
+                                      disabledSubtitle:
+                                          'Unavailable while suspended.',
+                                      tone: ActionTone.admin,
+                                      onTap: suspended
+                                          ? null
+                                          : () => context.push('/admin/points'),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                              AccountProfile.greenpreneur => <Widget>[
+                                const SizedBox(height: AppTheme.gapXl),
+                                const SectionHeading('Greenpreneur workspace'),
+                                _ActionGrid(
+                                  children: [
+                                    ActionCard(
+                                      icon: Icons.eco_outlined,
+                                      title: 'Use my Champion profile',
+                                      subtitle:
+                                          'Shop, take green actions and manage your points.',
+                                      onTap: () => ref
+                                          .read(
+                                            accountProfileControllerProvider
+                                                .notifier,
+                                          )
+                                          .select(AccountProfile.champion),
+                                    ),
+                                    ActionCard(
+                                      icon: Icons.inventory_2_outlined,
+                                      title: 'My sustainable listings',
+                                      subtitle:
+                                          'Add products, update stock and manage visibility.',
+                                      disabledSubtitle:
+                                          'Unavailable while suspended.',
+                                      tone: ActionTone.primary,
+                                      onTap: suspended
+                                          ? null
+                                          : () => context.push(
+                                              '/seller/products',
+                                            ),
+                                    ),
+                                    ActionCard(
+                                      icon: Icons.local_shipping_outlined,
+                                      title: 'Orders to fulfil',
+                                      subtitle: switch (openSellerOrders) {
+                                        0 =>
+                                          'Ship and deliver what Champions have ordered.',
+                                        1 =>
+                                          '1 order needs something from you.',
+                                        _ =>
+                                          '$openSellerOrders orders need something from you.',
+                                      },
+                                      badgeCount: openSellerOrders,
+                                      disabledSubtitle:
+                                          'Unavailable while suspended.',
+                                      onTap: suspended
+                                          ? null
+                                          : () =>
+                                                context.push('/seller/orders'),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                              AccountProfile.champion => <Widget>[
+                                const SizedBox(height: AppTheme.gapMd),
+                                _BalanceCard(
+                                  walletAsync: walletAsync,
+                                  onViewWallet: () => context.push('/wallet'),
+                                ),
+                                const SizedBox(height: AppTheme.gapXl),
+                                const SectionHeading('Make an impact'),
+                                _ActionGrid(
+                                  children: [
+                                    ActionCard(
+                                      icon: Icons.qr_code_scanner,
+                                      title: 'Dispose waste',
+                                      subtitle:
+                                          'Scan the code on a bin to start.',
+                                      disabledSubtitle:
+                                          'Unavailable while suspended.',
+                                      tone: ActionTone.primary,
+                                      onTap: suspended
+                                          ? null
+                                          : () => context.push('/dispose/scan'),
+                                    ),
+                                    ActionCard(
+                                      icon: Icons.eco_outlined,
+                                      title: 'Log an eco-action',
+                                      subtitle:
+                                          'Record composting, planting and other positive actions.',
+                                      disabledSubtitle:
+                                          'Unavailable while suspended.',
+                                      onTap: suspended
+                                          ? null
+                                          : () => context.push('/claims/new'),
+                                    ),
+                                    ActionCard(
+                                      icon: Icons.volunteer_activism_outlined,
+                                      title: 'Support green initiatives',
+                                      subtitle:
+                                          'Donate reward points to a 3ZERO initiative.',
+                                      disabledSubtitle:
+                                          'Unavailable while suspended.',
+                                      onTap: suspended
+                                          ? null
+                                          : () => context.push('/donate'),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: AppTheme.gapLg),
+                                const SectionHeading('Your records'),
+                                _ActionGrid(
+                                  children: [
+                                    ActionCard(
+                                      icon: Icons.receipt_long_outlined,
+                                      title: 'My submissions',
+                                      subtitle: switch (pendingCount) {
+                                        0 =>
+                                          'Status, reasons and points for everything you sent.',
+                                        1 =>
+                                          '1 submission is waiting for review.',
+                                        _ =>
+                                          '$pendingCount submissions are waiting for review.',
+                                      },
+                                      badgeCount: pendingCount,
+                                      onTap: () => context.push('/history'),
+                                    ),
+                                    ActionCard(
+                                      icon: Icons.eco_outlined,
+                                      title: 'My eco-actions',
+                                      subtitle:
+                                          'Review actions, decisions and reasons.',
+                                      onTap: () => context.push('/claims'),
+                                    ),
+                                    ActionCard(
+                                      icon: Icons.local_mall_outlined,
+                                      title: 'My orders',
+                                      subtitle: switch (awaitingConfirmation) {
+                                        0 =>
+                                          'Track what you bought and where it has got to.',
+                                        1 =>
+                                          '1 delivery is waiting for your confirmation.',
+                                        _ =>
+                                          '$awaitingConfirmation deliveries await confirmation.',
+                                      },
+                                      badgeCount: awaitingConfirmation,
+                                      onTap: () => context.push('/orders'),
+                                    ),
+                                    ActionCard(
+                                      icon: Icons.gavel_outlined,
+                                      title: 'My appeals',
+                                      subtitle:
+                                          'See disputed decisions and 3ZERO Admin responses.',
+                                      onTap: () => context.push('/appeals'),
+                                    ),
+                                  ],
+                                ),
+                                const SizedBox(height: AppTheme.gapLg),
+                                const SectionHeading('Greenpreneur journey'),
+                                _ActionGrid(
+                                  children: [
+                                    if (user.isSeller)
+                                      ActionCard(
+                                        icon: Icons.storefront_outlined,
+                                        title: 'Use my Greenpreneur profile',
+                                        subtitle:
+                                            'Manage sustainable products and fulfil orders.',
+                                        onTap: () => ref
+                                            .read(
+                                              accountProfileControllerProvider
+                                                  .notifier,
+                                            )
+                                            .select(
+                                              AccountProfile.greenpreneur,
+                                            ),
+                                      )
+                                    else
+                                      ActionCard(
+                                        icon: Icons.storefront_outlined,
+                                        title: 'Become a 3ZERO Greenpreneur',
+                                        subtitle:
+                                            'Learn what Greenpreneurs do and apply when you are ready.',
+                                        disabledSubtitle:
+                                            'Unavailable while suspended.',
+                                        onTap: suspended
+                                            ? null
+                                            : () =>
+                                                  context.push('/apply-seller'),
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            },
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+              },
             ),
           );
         },
@@ -393,45 +420,102 @@ class _Greeting extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(AppTheme.radiusLg),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              scheme.primaryContainer.withValues(alpha: .78),
+              scheme.tertiaryContainer.withValues(alpha: .52),
+            ],
+          ),
+        ),
+        child: Stack(
           children: [
-            Expanded(
-              child: Text(
-                'Hello, $name',
-                style: theme.textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.w800,
-                  letterSpacing: -.65,
+            Positioned(
+              right: -42,
+              top: -54,
+              child: Container(
+                width: 168,
+                height: 168,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: scheme.onPrimaryContainer.withValues(alpha: .045),
+                  border: Border.all(
+                    color: scheme.onPrimaryContainer.withValues(alpha: .07),
+                    width: 26,
+                  ),
                 ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
               ),
             ),
-            const SizedBox(width: AppTheme.gapSm),
-            Chip(
-              avatar: const Icon(Icons.verified_user_outlined, size: 16),
-              label: Text(role),
-              labelStyle: theme.textTheme.labelSmall?.copyWith(
-                fontWeight: FontWeight.w700,
-                letterSpacing: 0.5,
+            Padding(
+              padding: const EdgeInsets.all(AppTheme.gapLg),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 6,
+                        ),
+                        decoration: BoxDecoration(
+                          color: scheme.surface.withValues(alpha: .72),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(
+                            color: scheme.outlineVariant.withValues(alpha: .8),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.verified_rounded,
+                              size: 15,
+                              color: scheme.primary,
+                            ),
+                            const SizedBox(width: 6),
+                            Text(
+                              role,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: scheme.onSurface,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: AppTheme.gapLg),
+                  Text(
+                    'Hello, $name',
+                    style: theme.textTheme.headlineLarge?.copyWith(
+                      color: scheme.onPrimaryContainer,
+                      fontWeight: FontWeight.w800,
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: AppTheme.gapSm),
+                  Text(
+                    'Your next positive action starts here.',
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      color: scheme.onPrimaryContainer.withValues(alpha: .76),
+                    ),
+                  ),
+                ],
               ),
-              visualDensity: VisualDensity.compact,
-              padding: EdgeInsets.zero,
             ),
           ],
         ),
-        const SizedBox(height: AppTheme.gapXs),
-        Text(
-          'Here is your impact at a glance.',
-          style: theme.textTheme.bodyLarge?.copyWith(
-            color: theme.colorScheme.onSurfaceVariant,
-          ),
-        ),
-      ],
+      ),
     );
   }
 }
@@ -543,13 +627,23 @@ class _BalanceValue extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text(
-          'POINTS BALANCE',
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: foreground.withValues(alpha: .8),
-            fontWeight: FontWeight.w800,
-            letterSpacing: 1.1,
-          ),
+        Row(
+          children: [
+            const Icon(
+              Icons.auto_awesome_rounded,
+              size: 16,
+              color: AppTheme.reward,
+            ),
+            const SizedBox(width: 7),
+            Text(
+              'POINTS BALANCE',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: foreground.withValues(alpha: .8),
+                fontWeight: FontWeight.w800,
+                letterSpacing: 1.1,
+              ),
+            ),
+          ],
         ),
         const SizedBox(height: AppTheme.gapSm),
         walletAsync.when(

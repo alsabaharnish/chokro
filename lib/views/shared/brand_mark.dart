@@ -2,8 +2,8 @@ import 'package:flutter/material.dart';
 
 /// Chokro's compact visual signature.
 ///
-/// This stays code-native so it is crisp at every density, adapts to dark mode,
-/// and does not add another network or asset dependency to startup.
+/// The same art is used for the installed app icon, web splash, and in-product
+/// navigation so Chokro has one recognisable signature everywhere.
 class BrandMark extends StatelessWidget {
   const BrandMark({
     super.key,
@@ -26,11 +26,6 @@ class BrandMark extends StatelessWidget {
       height: size,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(size * .3),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [scheme.primary, scheme.tertiary],
-        ),
         boxShadow: [
           BoxShadow(
             color: scheme.primary.withValues(alpha: .2),
@@ -39,8 +34,16 @@ class BrandMark extends StatelessWidget {
           ),
         ],
       ),
-      alignment: Alignment.center,
-      child: Icon(Icons.eco_rounded, size: size * .58, color: scheme.onPrimary),
+      child: ClipRRect(
+        borderRadius: BorderRadius.circular(size * .3),
+        child: Image.asset(
+          'assets/brand/chokro_app_icon.png',
+          width: size,
+          height: size,
+          fit: BoxFit.cover,
+          filterQuality: FilterQuality.medium,
+        ),
+      ),
     );
 
     if (!showWordmark) {

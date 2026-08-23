@@ -175,6 +175,29 @@ class _SearchAndFilters extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              Text(
+                'CIRCULAR MARKETPLACE',
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                  color: Theme.of(context).colorScheme.primary,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.1,
+                ),
+              ),
+              const SizedBox(height: AppTheme.gapXs),
+              Text(
+                'Shop with purpose',
+                style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: AppTheme.gapXs),
+              Text(
+                'Discover thoughtful products from 3ZERO Greenpreneurs.',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: AppTheme.gapLg),
               Row(
                 children: [
                   Expanded(
@@ -313,19 +336,56 @@ class _CatalogBody extends StatelessWidget {
                         ? inner.maxWidth
                         : (inner.maxWidth - AppTheme.gapMd) / 2;
 
-                    return Wrap(
-                      spacing: AppTheme.gapMd,
-                      runSpacing: AppTheme.gapMd,
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        for (final product in products)
-                          SizedBox(
-                            width: width,
-                            child: ProductCard(
-                              product: product,
-                              onTap: () =>
-                                  context.push('/market/${product.id}'),
+                        Row(
+                          children: [
+                            Text(
+                              products.length == 1
+                                  ? '1 product'
+                                  : '${products.length} products',
+                              style: Theme.of(context).textTheme.titleMedium
+                                  ?.copyWith(fontWeight: FontWeight.w800),
                             ),
-                          ),
+                            if (filter.isActive) ...[
+                              const SizedBox(width: AppTheme.gapSm),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 9,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.secondaryContainer,
+                                  borderRadius: BorderRadius.circular(999),
+                                ),
+                                child: Text(
+                                  'Filtered',
+                                  style: Theme.of(context).textTheme.labelSmall
+                                      ?.copyWith(fontWeight: FontWeight.w700),
+                                ),
+                              ),
+                            ],
+                          ],
+                        ),
+                        const SizedBox(height: 12),
+                        Wrap(
+                          spacing: AppTheme.gapMd,
+                          runSpacing: AppTheme.gapMd,
+                          children: [
+                            for (final product in products)
+                              SizedBox(
+                                width: width,
+                                child: ProductCard(
+                                  product: product,
+                                  onTap: () =>
+                                      context.push('/market/${product.id}'),
+                                ),
+                              ),
+                          ],
+                        ),
                       ],
                     );
                   },

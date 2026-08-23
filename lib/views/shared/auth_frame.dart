@@ -60,6 +60,7 @@ class AuthFrame extends StatelessWidget {
                           ),
                           child: Card(
                             color: scheme.surface.withValues(alpha: .94),
+                            shadowColor: scheme.shadow.withValues(alpha: .15),
                             child: Padding(
                               padding: EdgeInsets.all(
                                 constraints.maxWidth < 380
@@ -79,6 +80,18 @@ class AuthFrame extends StatelessWidget {
                                     ),
                                     const SizedBox(height: AppTheme.gapXl),
                                   ],
+                                  Text(
+                                    'YOUR IMPACT ACCOUNT',
+                                    style: Theme.of(context)
+                                        .textTheme
+                                        .labelSmall
+                                        ?.copyWith(
+                                          color: scheme.primary,
+                                          fontWeight: FontWeight.w800,
+                                          letterSpacing: 1.15,
+                                        ),
+                                  ),
+                                  const SizedBox(height: AppTheme.gapSm),
                                   Text(
                                     title,
                                     style: Theme.of(context)
@@ -102,6 +115,32 @@ class AuthFrame extends StatelessWidget {
                                   ),
                                   const SizedBox(height: AppTheme.gapXl),
                                   child,
+                                  const SizedBox(height: AppTheme.gapMd),
+                                  Divider(color: scheme.outlineVariant),
+                                  const SizedBox(height: AppTheme.gapMd),
+                                  Row(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Icon(
+                                        Icons.lock_outline_rounded,
+                                        size: 17,
+                                        color: scheme.onSurfaceVariant,
+                                      ),
+                                      const SizedBox(width: AppTheme.gapSm),
+                                      Expanded(
+                                        child: Text(
+                                          'Your account keeps rewards and activity securely connected to you.',
+                                          style: Theme.of(context)
+                                              .textTheme
+                                              .bodySmall
+                                              ?.copyWith(
+                                                color: scheme.onSurfaceVariant,
+                                              ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
                                 ],
                               ),
                             ),
@@ -190,6 +229,10 @@ class _BrandPanel extends StatelessWidget {
                         _TrustPill(
                           icon: Icons.account_balance_wallet_outlined,
                           label: 'Auditable rewards',
+                        ),
+                        _TrustPill(
+                          icon: Icons.storefront_outlined,
+                          label: 'Circular marketplace',
                         ),
                       ],
                     ),
