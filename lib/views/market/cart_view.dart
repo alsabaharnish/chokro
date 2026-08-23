@@ -5,8 +5,10 @@ import 'package:go_router/go_router.dart';
 import '../../controllers/cart_controller.dart';
 import '../../core/checkout_math.dart';
 import '../../core/label_format.dart';
+import '../../core/network_errors.dart';
 import '../../core/theme.dart';
 import '../shared/content_state.dart';
+import '../shared/error_retry.dart';
 import 'product_card.dart';
 
 /// The cart (F4.3).
@@ -22,6 +24,7 @@ class CartView extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final cartAsync = ref.watch(cartProvider);
+    final productsAsync = ref.watch(cartProductsProvider);
     final lines = ref.watch(cartLinesProvider);
     final problems = ref.watch(unavailableCartItemsProvider);
     final quote = ref.watch(checkoutQuoteProvider);
@@ -42,12 +45,10 @@ class CartView extends ConsumerWidget {
       ),
       body: cartAsync.when(
         loading: () => const ContentLoading(label: 'Loading your cart…'),
-        error: (error, _) => ContentEmpty(
-          icon: Icons.cloud_off_outlined,
-          title: 'Your cart did not load',
-          message: 'Check your connection and open it again.',
-          actionLabel: 'Back to the shop',
-          onAction: () => context.go('/market'),
+        error: (error, _) => ErrorRetry(
+          error: error,
+          title: 'Your cart',
+          onRetry: () => ref.invalidate(cartProvider),
         ),
         data: (cart) {
           if (cart.isEmpty) {
@@ -62,51 +63,61 @@ class CartView extends ConsumerWidget {
             );
           }
 
-          return Column(
-            children: [
-              Expanded(
-                child: ListView(
-                  padding: const EdgeInsets.fromLTRB(
-                    AppTheme.gapMd,
-                    AppTheme.gapMd,
-                    AppTheme.gapMd,
-                    AppTheme.gapXl,
-                  ),
-                  children: [
-                    Center(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(
-                          maxWidth: AppTheme.maxContentWidth,
-                        ),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.stretch,
-                          children: [
-                            if (problems.isNotEmpty) ...[
-                              _ProblemsCard(problems: problems),
-                              const SizedBox(height: AppTheme.gapLg),
+          return productsAsync.when(
+            loading: () => const ContentLoading(
+              label: 'Checking current prices and stock…',
+            ),
+            error: (error, _) => ErrorRetry(
+              error: error,
+              title: 'Cart prices and stock',
+              onRetry: () => ref.invalidate(cartProductsProvider),
+            ),
+            data: (_) => Column(
+              children: [
+                Expanded(
+                  child: ListView(
+                    padding: const EdgeInsets.fromLTRB(
+                      AppTheme.gapMd,
+                      AppTheme.gapMd,
+                      AppTheme.gapMd,
+                      AppTheme.gapXl,
+                    ),
+                    children: [
+                      Center(
+                        child: ConstrainedBox(
+                          constraints: const BoxConstraints(
+                            maxWidth: AppTheme.maxContentWidth,
+                          ),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.stretch,
+                            children: [
+                              if (problems.isNotEmpty) ...[
+                                _ProblemsCard(problems: problems),
+                                const SizedBox(height: AppTheme.gapLg),
+                              ],
+                              for (final line in lines) ...[
+                                _CartLineTile(line: line),
+                                const SizedBox(height: AppTheme.gapSm),
+                              ],
+                              if ((quote?.orderCount ?? 0) > 1) ...[
+                                const SizedBox(height: AppTheme.gapSm),
+                                _SplitNotice(sellerCount: quote!.orderCount),
+                              ],
                             ],
-                            for (final line in lines) ...[
-                              _CartLineTile(line: line),
-                              const SizedBox(height: AppTheme.gapSm),
-                            ],
-                            if ((quote?.orderCount ?? 0) > 1) ...[
-                              const SizedBox(height: AppTheme.gapSm),
-                              _SplitNotice(sellerCount: quote!.orderCount),
-                            ],
-                          ],
+                          ),
                         ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
-              ),
-              if (lines.isNotEmpty)
-                _CartFooter(
-                  subtotal: subtotal,
-                  sellerCount: quote?.orderCount,
-                  blocked: problems.isNotEmpty,
-                ),
-            ],
+                if (lines.isNotEmpty)
+                  _CartFooter(
+                    subtotal: subtotal,
+                    sellerCount: quote?.orderCount,
+                    blocked: problems.isNotEmpty,
+                  ),
+              ],
+            ),
           );
         },
       ),
@@ -134,8 +145,8 @@ class CartView extends ConsumerWidget {
       ),
     );
 
-    if (confirmed != true) return;
-    await ref.read(cartActionsProvider).clear();
+    if (confirmed != true || !context.mounted) return;
+    await _runCartAction(context, () => ref.read(cartActionsProvider).clear());
   }
 }
 
@@ -149,62 +160,85 @@ class _CartLineTile extends ConsumerWidget {
     final theme = Theme.of(context);
     final actions = ref.read(cartActionsProvider);
 
+    final total = Text(
+      formatTaka(line.lineTotal),
+      style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
+    );
+
     return Card(
       margin: EdgeInsets.zero,
       child: Padding(
         padding: const EdgeInsets.all(AppTheme.gapSm),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        child: Column(
           children: [
-            ProductThumbnail(url: line.imageUrl, size: 64),
-            const SizedBox(width: AppTheme.gapMd),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    line.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  Text(
-                    '${formatTaka(line.unitPrice)} each',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                  const SizedBox(height: AppTheme.gapSm),
-                  Row(
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                ProductThumbnail(url: line.imageUrl, size: 64),
+                const SizedBox(width: AppTheme.gapMd),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      _QuantityStepper(
-                        qty: line.qty,
-                        // The ceiling is the seller's stock, so a buyer cannot
-                        // build a cart that checkout will refuse. The
-                        // authoritative check is still the decrement inside the
-                        // checkout transaction (§7.4).
-                        max: line.stock ?? line.qty,
-                        onChanged: (qty) =>
-                            actions.setQuantity(line.productId, qty),
-                      ),
-                      const Spacer(),
                       Text(
-                        formatTaka(line.lineTotal),
+                        line.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
                         style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w800,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      Text(
+                        '${formatTaka(line.unitPrice)} each',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
                     ],
                   ),
-                ],
-              ),
+                ),
+                IconButton(
+                  tooltip: 'Remove',
+                  onPressed: () async {
+                    await _runCartAction(
+                      context,
+                      () => actions.remove(line.productId),
+                    );
+                  },
+                  icon: const Icon(Icons.delete_outline),
+                ),
+              ],
             ),
-            IconButton(
-              tooltip: 'Remove',
-              onPressed: () => actions.remove(line.productId),
-              icon: const Icon(Icons.delete_outline),
+            const SizedBox(height: AppTheme.gapSm),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final stackControls =
+                    constraints.maxWidth < 280 ||
+                    MediaQuery.textScalerOf(context).scale(1) > 1.3;
+                final stepper = _QuantityStepper(
+                  qty: line.qty,
+                  max: line.stock ?? line.qty,
+                  onChanged: (qty) async {
+                    await _runCartAction(
+                      context,
+                      () => actions.setQuantity(line.productId, qty),
+                    );
+                  },
+                );
+
+                if (stackControls) {
+                  return Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Align(alignment: Alignment.centerLeft, child: stepper),
+                      const SizedBox(height: AppTheme.gapSm),
+                      Align(alignment: Alignment.centerRight, child: total),
+                    ],
+                  );
+                }
+
+                return Row(children: [stepper, const Spacer(), total]);
+              },
             ),
           ],
         ),
@@ -315,9 +349,14 @@ class _ProblemsCard extends ConsumerWidget {
                       ),
                     ),
                     TextButton(
-                      onPressed: () => ref
-                          .read(cartActionsProvider)
-                          .remove(problem.productId),
+                      onPressed: () async {
+                        await _runCartAction(
+                          context,
+                          () => ref
+                              .read(cartActionsProvider)
+                              .remove(problem.productId),
+                        );
+                      },
                       child: const Text('Remove'),
                     ),
                   ],
@@ -327,6 +366,21 @@ class _ProblemsCard extends ConsumerWidget {
         ),
       ),
     );
+  }
+}
+
+Future<void> _runCartAction(
+  BuildContext context,
+  Future<void> Function() action,
+) async {
+  try {
+    await action();
+  } catch (error) {
+    if (!context.mounted) return;
+    final messenger = ScaffoldMessenger.of(context);
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(friendlyErrorMessage(error))));
   }
 }
 
@@ -394,37 +448,58 @@ class _CartFooter extends StatelessWidget {
         child: Padding(
           padding: const EdgeInsets.all(AppTheme.gapMd),
           child: Center(
+            heightFactor: 1,
             child: ConstrainedBox(
               constraints: const BoxConstraints(
                 maxWidth: AppTheme.maxContentWidth,
               ),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Subtotal',
-                          style: theme.textTheme.labelMedium?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
-                          ),
+              child: LayoutBuilder(
+                builder: (context, constraints) {
+                  final stack =
+                      constraints.maxWidth < 420 ||
+                      MediaQuery.textScalerOf(context).scale(1) > 1.3;
+                  final amount = Column(
+                    mainAxisSize: MainAxisSize.min,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Subtotal',
+                        style: theme.textTheme.labelMedium?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
                         ),
-                        Text(
-                          formatTaka(subtotal),
-                          style: theme.textTheme.headlineSmall?.copyWith(
-                            fontWeight: FontWeight.w800,
-                          ),
+                      ),
+                      Text(
+                        formatTaka(subtotal),
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
                         ),
-                      ],
-                    ),
-                  ),
-                  FilledButton.icon(
+                      ),
+                    ],
+                  );
+                  final checkout = FilledButton.icon(
                     onPressed: blocked ? null : () => context.push('/checkout'),
                     icon: const Icon(Icons.lock_outline),
                     label: Text(blocked ? 'Fix items first' : 'Checkout'),
-                  ),
-                ],
+                  );
+
+                  if (stack) {
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        amount,
+                        const SizedBox(height: AppTheme.gapMd),
+                        checkout,
+                      ],
+                    );
+                  }
+
+                  return Row(
+                    children: [
+                      Expanded(child: amount),
+                      checkout,
+                    ],
+                  );
+                },
               ),
             ),
           ),

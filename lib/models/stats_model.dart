@@ -38,6 +38,8 @@ class PlatformStats {
     this.pointsRedeemed = 0,
     this.pointsDonated = 0,
     this.donationsReceived = 0,
+    this.prototypeDonationTaka = 0,
+    this.prototypeDonationsReceived = 0,
     this.ordersCreated = 0,
     this.ordersConfirmed = 0,
     this.salesPayable = 0,
@@ -59,6 +61,10 @@ class PlatformStats {
   /// Champion contributions removed from spendable wallets, plus receipt count.
   final int pointsDonated;
   final int donationsReceived;
+
+  /// Simulation-only support totals. These are never presented as real funds.
+  final int prototypeDonationTaka;
+  final int prototypeDonationsReceived;
 
   final int ordersCreated;
   final int ordersConfirmed;
@@ -117,6 +123,8 @@ class PlatformStats {
       pointsRedeemed: read('pointsRedeemed'),
       pointsDonated: read('pointsDonated'),
       donationsReceived: read('donationsReceived'),
+      prototypeDonationTaka: read('prototypeDonationTaka'),
+      prototypeDonationsReceived: read('prototypeDonationsReceived'),
       ordersCreated: read('ordersCreated'),
       ordersConfirmed: read('ordersConfirmed'),
       salesPayable: read('salesPayable'),

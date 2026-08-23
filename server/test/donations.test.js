@@ -13,7 +13,9 @@ const firebase = require('../src/firebase');
 const {
   DonationError,
   donatePoints,
+  donatePrototypePayment,
   validateDonation,
+  validatePrototypeDonation,
 } = require('../src/donations');
 
 function fakeFirestore(seed = {}) {
@@ -54,6 +56,14 @@ const request = {
   donationId: 'dn_request_12345',
   initiative: 'treePlanting',
   points: 100,
+};
+
+const prototypeRequest = {
+  uid: 'champion_1',
+  donationId: 'pdn_request_12345',
+  initiative: 'wasteRecovery',
+  amountTaka: 500,
+  settlementMethod: 'prototypeBkash',
 };
 
 beforeEach(() => jest.clearAllMocks());
@@ -159,6 +169,95 @@ describe('donatePoints', () => {
     });
 
     await expect(donatePoints(request)).rejects.toMatchObject({
+      code: 'donation_id_conflict',
+      status: 409,
+    });
+    expect(fake.writes).toHaveLength(0);
+  });
+});
+
+describe('prototype online donations', () => {
+  it('accepts only bounded amounts and prototype methods', () => {
+    expect(() => validatePrototypeDonation(prototypeRequest)).not.toThrow();
+    expect(() =>
+      validatePrototypeDonation({
+        ...prototypeRequest,
+        settlementMethod: 'cashOnDelivery',
+      }),
+    ).toThrow(expect.objectContaining({ code: 'invalid_settlement_method' }));
+    expect(() =>
+      validatePrototypeDonation({ ...prototypeRequest, amountTaka: 10.5 }),
+    ).toThrow(expect.objectContaining({ code: 'invalid_amount' }));
+  });
+
+  it('writes a labelled receipt and prototype-only counters', async () => {
+    const fake = fakeFirestore();
+
+    const result = await donatePrototypePayment(prototypeRequest);
+
+    expect(result).toMatchObject({
+      donationId: prototypeRequest.donationId,
+      initiative: 'wasteRecovery',
+      amountTaka: 500,
+      settlementMethod: 'prototypeBkash',
+      paymentStatus: 'paid',
+      paymentPrototype: true,
+      repeated: false,
+    });
+    expect(result.paymentReference).toMatch(/^SIM-DON-BKASH-/);
+    expect(
+      fake.writesTo(
+        `donations/${prototypeRequest.uid}_${prototypeRequest.donationId}`,
+      )[0].data,
+    ).toMatchObject({
+      kind: 'prototypeOnline',
+      userId: 'champion_1',
+      amountTaka: 500,
+      paymentStatus: 'paid',
+      paymentPrototype: true,
+    });
+    expect(fake.writesTo('wallets/')).toHaveLength(0);
+    expect(fake.writesTo('transactions/')).toHaveLength(0);
+    expect(fake.writesTo('stats/platform')[0].data).toEqual({
+      prototypeDonationTaka: { __increment: 500 },
+      prototypeDonationsReceived: { __increment: 1 },
+    });
+  });
+
+  it('returns the same receipt on an identical retry', async () => {
+    const existing = {
+      kind: 'prototypeOnline',
+      userId: 'champion_1',
+      initiative: 'wasteRecovery',
+      amountTaka: 500,
+      settlementMethod: 'prototypeBkash',
+      paymentStatus: 'paid',
+      paymentPrototype: true,
+      paymentReference: 'SIM-DON-BKASH-EXISTING',
+    };
+    const fake = fakeFirestore({
+      [`donations/${prototypeRequest.uid}_${prototypeRequest.donationId}`]:
+        existing,
+    });
+
+    await expect(donatePrototypePayment(prototypeRequest)).resolves.toMatchObject({
+      repeated: true,
+      paymentReference: existing.paymentReference,
+    });
+    expect(fake.writes).toHaveLength(0);
+  });
+
+  it('rejects reuse of the key for a point donation or another amount', async () => {
+    const fake = fakeFirestore({
+      [`donations/${prototypeRequest.uid}_${prototypeRequest.donationId}`]: {
+        kind: 'points',
+        userId: 'champion_1',
+        initiative: 'wasteRecovery',
+        points: 500,
+      },
+    });
+
+    await expect(donatePrototypePayment(prototypeRequest)).rejects.toMatchObject({
       code: 'donation_id_conflict',
       status: 409,
     });

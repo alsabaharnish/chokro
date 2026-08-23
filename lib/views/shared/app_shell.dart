@@ -123,6 +123,7 @@ class AppShell extends ConsumerWidget {
     // whole bar is hidden instead: on those screens the app bar's back button is
     // the way out, and a nav bar highlighting the wrong tab is worse than none.
     final isDestination = index >= 0;
+    final canPop = Navigator.of(context).canPop();
 
     void onSelect(int i) {
       final target = destinations[i].path;
@@ -141,9 +142,16 @@ class AppShell extends ConsumerWidget {
           backgroundColor: scheme.surfaceContainerLow,
           appBar: AppBar(
             shape: Border(bottom: BorderSide(color: scheme.outlineVariant)),
+            leading: !isDestination && !canPop
+                ? IconButton(
+                    tooltip: 'Back to home',
+                    onPressed: () => context.go('/home'),
+                    icon: const Icon(Icons.arrow_back),
+                  )
+                : null,
             title: location == '/home' && !isWide
                 ? const BrandMark(size: 34, showWordmark: true)
-                : Text(title),
+                : Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
             actions: [
               PopupMenuButton<_AccountAction>(
                 tooltip: 'Account menu',

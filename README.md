@@ -25,10 +25,14 @@ requirements and role hierarchy.
 - Bin registration with printable high-error-correction QR labels
 - Marketplace: Greenpreneur listings, catalogue search and category filter,
   cart, and checkout that splits into one order per Greenpreneur
+- Cash-on-delivery plus bKash, Nagad, and card payment simulations for orders;
+  simulations collect no credentials and move no real money
 - Points spent at checkout and credited back when the Champion confirms receipt,
   which is what makes earning and spending a cycle rather than a pipeline
 - Champion point donations to waste recovery, tree planting, or green
   entrepreneurship, committed by the trusted service with idempotent retries
+- Prototype online donations to those initiatives, with idempotent `SIM-...`
+  receipts and counters kept separate from real point activity
 - Appeals against a rejection, and a 3ZERO Admin dashboard over server-held
   counters, including donated points and donation count
 
@@ -133,3 +137,6 @@ them, so the seeded data satisfies NFR-4 the same way the running app does.
    authorize against the live stored `users.role` value.
 8. A point donation commits its wallet debit, `donation` ledger entry, receipt,
    and counters together. Its UID-scoped request ID makes retries idempotent.
+9. Prototype payments never accept card/mobile-wallet credentials or processor
+   payloads. Every receipt is explicitly marked as a simulation; a production
+   release must verify provider callbacks server-side before recording payment.

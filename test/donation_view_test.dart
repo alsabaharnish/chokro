@@ -4,6 +4,7 @@ import 'package:chokro/controllers/wallet_controller.dart';
 import 'package:chokro/core/constants.dart';
 import 'package:chokro/core/theme.dart';
 import 'package:chokro/models/donation_model.dart';
+import 'package:chokro/models/payment_model.dart';
 import 'package:chokro/models/user_model.dart';
 import 'package:chokro/models/wallet_model.dart';
 import 'package:chokro/views/donations/donation_view.dart';
@@ -88,6 +89,41 @@ void main() {
       findsOneWidget,
     );
     await tester.tap(find.widgetWithText(TextButton, 'Not yet'));
+    await tester.pumpAndSettle();
+
+    // The selector is lazily disposed while the ListView is at the bottom.
+    // Return to the top so its segment widgets are mounted again.
+    await tester.drag(donationScroll, const Offset(0, 2000));
+    await tester.pumpAndSettle();
+    final modeSelector = tester.widget<SegmentedButton<DonationMode>>(
+      find.byWidgetPredicate(
+        (widget) => widget is SegmentedButton<DonationMode>,
+      ),
+    );
+    modeSelector.onSelectionChanged?.call({DonationMode.prototypeOnline});
+    await tester.pumpAndSettle();
+    await tester.drag(donationScroll, const Offset(0, -1000));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(RadioListTile<SettlementMethod>), findsNWidgets(3));
+    final reviewPrototype = find.widgetWithText(
+      FilledButton,
+      'Review prototype payment',
+    );
+    await tester.scrollUntilVisible(
+      reviewPrototype,
+      160,
+      scrollable: donationScroll,
+    );
+    await tester.ensureVisible(reviewPrototype);
+    await tester.pumpAndSettle();
+    await tester.tap(reviewPrototype);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Prototype payment'), findsOneWidget);
+    expect(find.textContaining('no real money'), findsOneWidget);
+    expect(find.text('Simulate successful payment'), findsOneWidget);
+    await tester.tap(find.widgetWithText(TextButton, 'Cancel'));
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     semantics.dispose();

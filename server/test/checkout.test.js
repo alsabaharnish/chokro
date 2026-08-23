@@ -21,6 +21,7 @@ const {
   MAX_CART_ITEMS,
   MAX_LINE_QTY,
   SETTLEMENT_METHODS,
+  paymentDetailsForCheckout,
 } = require('../src/checkout');
 
 const { nextStatusFor, STATUSES } = require('../src/orders');
@@ -320,8 +321,28 @@ describe('nextStatusFor', () => {
 });
 
 describe('settlement', () => {
-  it('offers cash on delivery and nothing that stores card data', () => {
-    // §6.2: no payment card data in any schema.
-    expect(SETTLEMENT_METHODS).toEqual(['cashOnDelivery']);
+  it('offers cash plus explicitly named prototype methods', () => {
+    expect(SETTLEMENT_METHODS).toEqual([
+      'cashOnDelivery',
+      'prototypeBkash',
+      'prototypeNagad',
+      'prototypeCard',
+    ]);
+  });
+
+  it('keeps cash pending and permanently labels online simulations', () => {
+    expect(paymentDetailsForCheckout('cashOnDelivery', 'checkout_1')).toEqual({
+      paymentStatus: 'pending',
+      paymentReference: null,
+      paymentPrototype: false,
+    });
+
+    expect(
+      paymentDetailsForCheckout('prototypeNagad', 'checkout_1'),
+    ).toEqual({
+      paymentStatus: 'paid',
+      paymentReference: 'SIM-ORD-NAGAD-CHECKOUT1',
+      paymentPrototype: true,
+    });
   });
 });

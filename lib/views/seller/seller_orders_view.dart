@@ -164,6 +164,8 @@ class _AdvanceButtonState extends ConsumerState<_AdvanceButton> {
 
     final label = next == OrderStatus.shipped
         ? 'Mark as shipped'
+        : widget.order.paymentStatus == PaymentStatus.paid
+        ? 'Mark as delivered'
         : 'Mark as delivered and paid';
 
     return FilledButton.icon(
@@ -185,17 +187,19 @@ class _AdvanceButtonState extends ConsumerState<_AdvanceButton> {
 
   Future<void> _advance(OrderStatus next) async {
     if (next == OrderStatus.delivered) {
-      // Delivery is also where cash changes hands (F4.8), so it is worth one
-      // confirmation: it records payment as well as arrival, and nothing walks
-      // it back.
+      final alreadyPaid = widget.order.paymentStatus == PaymentStatus.paid;
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
-          title: const Text('Delivered and paid?'),
+          title: Text(alreadyPaid ? 'Delivered?' : 'Delivered and paid?'),
           content: Text(
-            'This records that the Champion has the order and has paid '
-            '${widget.order.payable} taka in cash. They then confirm receipt '
-            'themselves, which is what closes the order.',
+            alreadyPaid
+                ? 'This order is already recorded as paid through a prototype '
+                      'online payment. Confirm that the Champion now has it. '
+                      'They will close the order themselves.'
+                : 'This records that the Champion has the order and has paid '
+                      '${widget.order.payable} taka in cash. They then confirm '
+                      'receipt themselves, which is what closes the order.',
           ),
           actions: [
             TextButton(

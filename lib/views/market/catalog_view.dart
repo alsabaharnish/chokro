@@ -204,10 +204,9 @@ class _SearchAndFilters extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: AppTheme.gapSm),
-              SizedBox(
-                height: 40,
-                child: ListView(
-                  scrollDirection: Axis.horizontal,
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(
                   children: [
                     FilterChip(
                       label: const Text('All'),

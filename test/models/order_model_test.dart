@@ -123,6 +123,7 @@ void main() {
         'payable': 190,
         'settlementMethod': 'cashOnDelivery',
         'paymentStatus': 'paid',
+        'paymentReference': 'SIM-ORD-CARD-ABC',
         'status': 'delivered',
         'pointsAwarded': 9,
       }, id: 'o1');
@@ -131,6 +132,7 @@ void main() {
       expect(parsed.itemCount, 2);
       expect(parsed.payable, 190);
       expect(parsed.paymentStatus, PaymentStatus.paid);
+      expect(parsed.paymentReference, 'SIM-ORD-CARD-ABC');
       expect(parsed.status, OrderStatus.delivered);
       expect(parsed.pointsAwarded, 9);
     });
@@ -193,6 +195,20 @@ void main() {
       expect(parsed.pointsAwarded, isNull);
     });
   });
+
+  test(
+    'prototype payment methods are explicit and never parse from nonsense',
+    () {
+      expect(SettlementMethod.prototypeBkash.isPrototype, isTrue);
+      expect(SettlementMethod.prototypeNagad.isPrototype, isTrue);
+      expect(SettlementMethod.prototypeCard.isPrototype, isTrue);
+      expect(SettlementMethod.cashOnDelivery.isPrototype, isFalse);
+      expect(
+        SettlementMethod.fromName('unverifiedPayment'),
+        SettlementMethod.cashOnDelivery,
+      );
+    },
+  );
 
   test('subtotal, discount and payable stay consistent on a real order', () {
     final o = order();

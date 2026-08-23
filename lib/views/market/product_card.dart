@@ -72,7 +72,10 @@ class ProductCard extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: AppTheme.gapSm),
-                    Row(
+                    Wrap(
+                      spacing: AppTheme.gapSm,
+                      runSpacing: AppTheme.gapXs,
+                      crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         Text(
                           formatTaka(product.price),
@@ -81,7 +84,6 @@ class ProductCard extends StatelessWidget {
                             color: scheme.primary,
                           ),
                         ),
-                        const SizedBox(width: AppTheme.gapSm),
                         if (product.isOutOfStock)
                           const _Pill(
                             label: 'Out of stock',

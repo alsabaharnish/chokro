@@ -66,6 +66,16 @@ void main() {
     expect(stats.donationsReceived, 3);
   });
 
+  test('keeps prototype donation totals separate from real counters', () {
+    final stats = PlatformStats.fromMap({
+      'prototypeDonationTaka': 1250,
+      'prototypeDonationsReceived': 4,
+    });
+    expect(stats.prototypeDonationTaka, 1250);
+    expect(stats.prototypeDonationsReceived, 4);
+    expect(stats.pointsDonated, 0);
+  });
+
   test('does not silently truncate a fractional counter', () {
     final stats = PlatformStats.fromMap({'pointsIssued': 500.5});
     expect(stats.pointsIssued, 0);

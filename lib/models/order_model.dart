@@ -20,6 +20,10 @@
 /// every client, administrators included, exactly as they do for `disposals`.
 library;
 
+import 'payment_model.dart';
+
+export 'payment_model.dart';
+
 /// Where an order is in its life. Ordered, and the order is enforced.
 ///
 /// A seller cannot skip to `delivered` without shipping, cannot confirm their
@@ -33,8 +37,8 @@ enum OrderStatus {
   /// The seller has dispatched it.
   shipped,
 
-  /// The seller says it arrived. Cash is collected on delivery (F4.8), so this
-  /// is also where payment is recorded.
+  /// The seller says it arrived. Cash-on-delivery payment is recorded here;
+  /// prototype online payments were already marked paid at checkout.
   delivered,
 
   /// The **buyer** says it arrived. The only transition that credits points.
@@ -108,41 +112,6 @@ enum OrderStatus {
   }
 }
 
-/// How the order is settled (F4.8).
-///
-/// One value today, and the field exists anyway. §6.2 forbids storing card data
-/// in any schema, so the alternatives are cash or nothing; recording *which*
-/// keeps the receipt honest and leaves somewhere for a second method to go
-/// without a migration.
-enum SettlementMethod {
-  cashOnDelivery;
-
-  static SettlementMethod fromName(String? name) {
-    for (final method in SettlementMethod.values) {
-      if (method.name == name) return method;
-    }
-    return SettlementMethod.cashOnDelivery;
-  }
-
-  String get label => 'Cash on delivery';
-}
-
-/// Whether the money has changed hands (F4.8). Points are settled separately and
-/// immediately at checkout; this tracks the taka only.
-enum PaymentStatus {
-  pending,
-  paid;
-
-  static PaymentStatus fromName(String? name) {
-    for (final status in PaymentStatus.values) {
-      if (status.name == name) return status;
-    }
-    return PaymentStatus.pending;
-  }
-
-  String get label => this == PaymentStatus.paid ? 'Paid' : 'Payment due';
-}
-
 /// One line of an order, with the title and unit price **snapshotted** at
 /// purchase time (§6.2).
 ///
@@ -200,6 +169,7 @@ class OrderModel {
     required this.settlementMethod,
     required this.paymentStatus,
     required this.status,
+    this.paymentReference,
     this.pointsAwarded,
     this.createdAt,
     this.shippedAt,
@@ -237,11 +207,16 @@ class OrderModel {
   /// The taka [pointsApplied] bought.
   final int discount;
 
-  /// What the buyer pays in cash. `subtotal - discount`.
+  /// What the buyer settles after points. `subtotal - discount`.
   final int payable;
 
   final SettlementMethod settlementMethod;
   final PaymentStatus paymentStatus;
+
+  /// A non-secret server-generated reference for simulated online payments.
+  /// Null for cash on delivery and for legacy orders.
+  final String? paymentReference;
+
   final OrderStatus status;
 
   /// Purchase points credited on confirmation, snapshotted at that moment
@@ -294,6 +269,7 @@ class OrderModel {
       paymentStatus: PaymentStatus.fromName(
         _nullableString(data['paymentStatus']),
       ),
+      paymentReference: _nullableString(data['paymentReference']),
       status: OrderStatus.fromName(_nullableString(data['status'])),
       pointsAwarded: _nullableInt(data['pointsAwarded']),
       createdAt: _date(data['createdAt']),

@@ -157,8 +157,15 @@ class AdminDashboardView extends ConsumerWidget {
                         _Stat(
                           label: 'Sales value',
                           value: formatTaka(stats.salesPayable),
-                          detail: 'Cash due after points were applied',
+                          detail: 'Order value after points were applied',
                           icon: Icons.payments_outlined,
+                        ),
+                        _Stat(
+                          label: 'Prototype donations',
+                          value: formatTaka(stats.prototypeDonationTaka),
+                          detail:
+                              '${stats.prototypeDonationsReceived} simulations — not real funds',
+                          icon: Icons.science_outlined,
                         ),
                       ],
                     ),

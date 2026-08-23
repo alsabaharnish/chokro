@@ -4,8 +4,8 @@
 **Student:** Arnish (solo project)
 **Platform:** Flutter (Android + Web, single codebase) + Node service
 **Repository:** `https://github.com/alsabaharnish/chokro`
-**Document version:** 3.0 — role identity, multi-profile navigation, and point
-donations complete
+**Document version:** 3.1 — role identity, multi-profile navigation, point
+donations, and prototype online payments complete
 
 > Formerly titled *EcoPoint360*. The product is now **Chokro**. Older drafts of
 > this document circulate under the previous name; this file supersedes them.
@@ -37,6 +37,7 @@ authorization schema:
 | Profile switching | Held profiles are selectable from the account menu and profile screen; changing profile changes the workspace, never the server-authorized role |
 | Greenpreneur pathway | A Champion can learn what a Greenpreneur does and submit the existing application (stored in `sellerApplications`); duplicate pending applications are blocked |
 | Initiative support | A Champion can donate earned points to a selected 3ZERO green initiative through the trusted service |
+| Prototype online payments | Orders and initiative support can simulate bKash, Nagad, or card payment without collecting credentials or moving real money |
 
 The persisted `users.role` values remain `admin`, `seller`, and `buyer`, and
 existing field names such as `sellerId` and `buyerId` remain unchanged. They are
@@ -464,7 +465,7 @@ shared, a second view tree is roughly a day of work per screen.
 | Browse, cart, checkout | ✅ | ✅ | |
 | Account profile switcher | ✅ | ✅ | Held profiles only; never elevates authorization |
 | Greenpreneur console | ✅ | ✅ primary | |
-| Champion point donation | ✅ | ✅ | Trusted service performs the wallet debit |
+| Champion initiative support | ✅ | ✅ | Point debit or clearly labelled prototype online donation |
 | Bin registration + QR generation | ✅ primary | ✅ | Mobile-first: GPS captured on site |
 | 3ZERO Admin review queues | ✅ | ✅ primary | Table on web, card list on mobile |
 | 3ZERO Admin dashboard | ✅ | ✅ primary | Stat cards stack on mobile |
@@ -486,15 +487,15 @@ wide table; dashboard density suits side-by-side comparison.
 | `disposals` | see below — the largest change from v1.5 |
 | `wallets` | `userId`, `balance`, `updatedAt` — one document per user |
 | `transactions` | `userId`, `delta`, `source` (disposal/purchase/claim/redemption/donation), `refId`, `balanceAfter`, `createdAt` |
-| `donations` | Server-only receipt keyed by `{uid}_{donationId}`: `userId`, `initiative`, `points`, `balanceAfter`, `status`, `createdAt` |
+| `donations` | Server-only receipt keyed by `{uid}_{donationId}`. Point receipts store `kind=points`, `initiative`, `points`, and `balanceAfter`; simulated online receipts store `kind=prototypeOnline`, `amountTaka`, `settlementMethod`, `paymentStatus`, `paymentReference`, and `paymentPrototype=true` |
 | `products` | `sellerId`, `shopName`, `title`, `titleLower`, `searchTokens[]`, `description`, `category`, `tags[]`, `price`, `stock`, `imageUrls[]`, `active`, `hiddenBySuspension` (server), `createdAt`, `updatedAt` |
 | `carts` | `userId`, `items[]` (productId, qty only — never a cached price) |
-| `orders` | `buyerId`, `buyerName`, `sellerId`, `sellerName`, `shopName`, `checkoutId`, `items[]` (productId + **snapshot** of title and unit price), `subtotal`, `pointsApplied`, `discount`, `payable`, `settlementMethod`, `paymentStatus`, `status`, `pointsAwarded`, timestamps |
+| `orders` | `buyerId`, `buyerName`, `sellerId`, `sellerName`, `shopName`, `checkoutId`, `items[]` (productId + **snapshot** of title and unit price), `subtotal`, `pointsApplied`, `discount`, `payable`, `settlementMethod`, `paymentStatus`, optional simulation `paymentReference`, `paymentPrototype`, `status`, `pointsAwarded`, timestamps |
 | `claims` | `userId`, `actionType`, `photoUrl`, `photoHash`, `status`, `rejectionReason`, `reviewedBy`, `reviewedAt`, `pointsAwarded`, `createdAt` |
 | `claimQuotas` | Document ID `{userId}_{isoWeek}`, field `count` |
 | `lockouts` | Document ID `{userId}_{binId}`, field `expiresAt` |
 | `config/points` | The runtime points policy — see §7.3 |
-| `stats` | Single document (`stats/platform`) holding running counters for the Admin dashboard, including `pointsIssued`, `pointsRedeemed`, `pointsDonated`, `donationsReceived`, disposal/claim decisions, and order totals |
+| `stats` | Single document (`stats/platform`) holding running counters for the Admin dashboard, including point-economy, disposal/claim, and order totals. Prototype donation amount/count use separately named counters and are never shown as real funds |
 | `appeals` | `userId`, `subjectType` (disposal/claim), `subjectId`, `message`, `status` (pending/upheld/declined), `response`, `reviewedBy`, `reviewedAt`, `createdAt` |
 
 ### 6.1 The `disposals` document
@@ -562,9 +563,14 @@ may carry several at once.
 - Every donation request has a client-generated `donationId` scoped to the
   authenticated UID. Retrying the same request is idempotent; reusing the key
   with different content is rejected.
-- Donations use earned reward points, not cash, and can never overdraw the
-  wallet. A request must be a whole number from 10 through 1,000,000 points.
-- No payment card data is stored in any schema. Settlement is cash-on-delivery.
+- Point donations can never overdraw the wallet. A request must be a whole
+  number from 10 through 1,000,000 points.
+- Orders may use cash on delivery or a bKash, Nagad, or card **simulation**.
+  Prototype support donations accept whole taka from 10 through 1,000,000.
+- No payment credential is requested or stored: no card number, mobile-wallet
+  number, PIN, OTP, password, processor token, or provider payload. Prototype
+  records carry `paymentPrototype=true` and a `SIM-...` reference. A production
+  integration must verify a provider callback on the server before marking paid.
 - **The cart's element shape is enforced at checkout, not in the rules.** Rules
   cannot iterate a list, and the cart carries no value — the server resolves
   every `productId` against a live listing and ignores anything else it finds.
@@ -641,7 +647,7 @@ releases purchase points. A Greenpreneur cannot confirm their own delivery.
 
 ---
 
-## 7. Scope — 39 features
+## 7. Scope — 40 features
 
 ### FR-1 Identity and roles
 
@@ -683,11 +689,16 @@ calculated it.
 | F3.2 | Source-tagged transaction ledger | Both | M2 |
 | F3.3 | **3ZERO Admin-tunable points policy** | Both (web primary) | M2 |
 | F3.4 | Champion donation of earned points to a green initiative | Both + server | ✅ v3 |
+| F3.5 | Prototype online donation with bKash, Nagad, or card simulation | Both + server | ✅ v3.1 |
 
 F3.4 supports three fixed initiatives: waste recovery, tree planting, and green
 entrepreneurship. The Champion selects an initiative and whole-point amount,
 reviews the effect on their balance, and confirms. This is a reward-point
 contribution, not a cash payment or tax-deductible financial donation.
+
+F3.5 demonstrates the online payment journey only. It records an idempotent,
+server-only receipt and explicitly does not transfer money or accept sensitive
+payment data.
 
 ### FR-4 Marketplace
 
@@ -700,7 +711,7 @@ contribution, not a cash payment or tax-deductible financial donation.
 | F4.5 | Point redemption at checkout | Both | ✅ M3 |
 | F4.6 | Order status tracking, with Greenpreneur order list and advancement | Both | ✅ M3 |
 | F4.7 | Champion receipt confirmation, releasing purchase points | Both | ✅ M3 |
-| F4.8 | Settlement method and payment status recorded | Both | ✅ M3 |
+| F4.8 | Cash-on-delivery or prototype online settlement, with payment status and simulation reference recorded | Both + server | ✅ M3 + v3.1 |
 
 ### FR-5 Administration
 
@@ -753,8 +764,9 @@ sees balance and reason in history`
 
 **Spend loop (marketplace).**
 `Greenpreneur lists product → Champion browses and filters catalogue → adds to cart →
-checkout: points optionally applied against payable, stock decremented, cart
-split into one order per Greenpreneur → settlement method recorded → Greenpreneur
+checkout: points optionally applied against payable, payment method selected,
+prototype online payment optionally simulated, stock decremented, cart split
+into one order per Greenpreneur → payment status/reference recorded → Greenpreneur
 advances status to shipped → Champion confirms receipt → order finalised, purchase points
 credited with source=purchase`
 
@@ -777,11 +789,12 @@ benefits → submits application → duplicate pending application is blocked �
 Champion profiles become available`
 
 **Initiative-support loop.**
-`Champion selects an initiative and point amount → reviews the resulting balance
-→ confirms → trusted service validates the request and available balance → wallet
-debit, donation ledger entry, receipt, and counters commit atomically → updated
-balance and confirmation are shown; retrying the same donationId does not debit
-twice`
+`Champion selects an initiative → chooses earned points or online prototype →
+point path reviews the resulting balance and atomically commits wallet debit,
+ledger entry, receipt, and counters; prototype path selects bKash/Nagad/card,
+reviews a no-real-money warning, and records an idempotent simulation receipt
+without touching the wallet → retrying the same donationId never duplicates the
+chosen contribution`
 
 **Governance loop (Admin).**
 `Champion applies for Greenpreneur role → Admin reviews → role changes on
@@ -806,6 +819,7 @@ is deliberate rather than accidental:
 | Rewards catalogue and redemption | Point redemption at checkout already demonstrates the spend path |
 | Bangla localisation | Structured for — no hard-coded display strings — but not delivered |
 | Cross-user duplicate photo detection | Hashes are compared within a user's own history only. Detecting a photograph shared between two accounts needs a global hash index; stated as a limitation |
+| Real payment processing, settlement, refunds, and reconciliation | The current bKash, Nagad, and card journey is explicitly simulated. Production needs provider onboarding, server-verified callbacks, secrets, failure states, reconciliation, and refund policy |
 
 **Removed from deferred since v1.5:** AI pre-screening of photographs (now F2.10,
 core) and in-app notifications (now F7.1, as real FCM push).
@@ -1183,6 +1197,28 @@ even though profile switching itself is client-side.
 
 ---
 
+### Product revision 3.1 — prototype online payments ✅ COMPLETE
+
+**Objective:** Demonstrate how Champions will pay for orders and financially
+support green initiatives before selecting and onboarding a real processor.
+
+**Delivered:** cash-on-delivery remains available; checkout and donation screens
+offer bKash, Nagad, and card simulations; the shared review dialog is scrollable
+on narrow screens and never asks for credentials; trusted-service receipts are
+idempotent and permanently labelled as prototype records; seller fulfilment and
+order receipts distinguish already-simulated payments from cash due on delivery;
+and Admin counters keep simulated donation totals separate from real point data.
+
+**Production boundary:** none of these records prove that money moved. A real
+release must replace client confirmation with a provider-created payment and a
+server-verified callback before setting `paymentStatus=paid`.
+
+**Verification snapshot:** `flutter analyze lib test` is clean; 470 Flutter
+tests, 279 trusted-service tests, and 222 Firestore rules tests pass; and the
+production web build succeeds.
+
+---
+
 ## 9. Working conventions
 
 - I reference features by ID (F2.5, F4.3) from Section 7. Use the same IDs when
@@ -1201,8 +1237,9 @@ even though profile switching itself is client-side.
   result before continuing.
 - I develop on macOS. Node and other tooling are Homebrew-managed. Disk headroom
   is limited; `~/.gradle/caches` is safe to clear if a build fails on space.
-- Tests should prove security properties, not just happy paths — no card data in
-  any schema, no client-writable balance field, no auto-approval on any path the
+- Tests should prove security properties, not just happy paths — no payment
+  credentials in any schema, prototype records cannot masquerade as verified
+  funds, no client-writable balance field, and no auto-approval on a path the
   client controls.
 - Four kinds of test: pure Dart unit tests, Firebase Emulator rules tests, pure
   Node unit tests for server logic, and a small number of **widget tests** where

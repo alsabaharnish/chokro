@@ -52,10 +52,9 @@ function nextStatusFor(current, { isSeller }) {
 /**
  * Advances an order along the seller's half of the machine.
  *
- * Marking `delivered` also records payment. Settlement is cash on delivery
- * (§6.2 — no card data in any schema), so "the seller says it arrived" and "the
- * seller took the money" are the same event, and recording them separately
- * would invent a state nobody can observe.
+ * Marking a cash-on-delivery order `delivered` also records payment. A prototype
+ * online order is already marked paid at checkout, so the same update is
+ * harmless and keeps legacy records moving toward a settled state.
  */
 async function advanceOrder({ orderId, actorUid, status }) {
   if (!STATUSES.includes(status)) {
@@ -188,8 +187,9 @@ async function confirmOrder({ orderId, buyerUid }) {
       confirmedAt: serverTimestamp(),
       // Snapshotted at decision time (§6.2).
       pointsAwarded: award,
-      // A confirmed cash-on-delivery order has been paid by definition; this
-      // repairs an order whose delivery step somehow did not record it.
+      // A confirmed order has been paid by definition. This is already true for
+      // prototype online records and repairs a cash order whose delivery step
+      // somehow did not record it.
       paymentStatus: 'paid',
     });
 

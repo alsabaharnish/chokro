@@ -83,7 +83,7 @@ class OrderService {
   /// so the screen sends them to their orders instead of guessing.
   Future<CheckoutOutcome> checkout({
     required int pointsRequested,
-    String settlementMethod = 'cashOnDelivery',
+    SettlementMethod settlementMethod = SettlementMethod.cashOnDelivery,
   }) async {
     final response = await _send(
       () async => _client
@@ -92,7 +92,7 @@ class OrderService {
             headers: await _headers(),
             body: jsonEncode({
               'pointsRequested': pointsRequested,
-              'settlementMethod': settlementMethod,
+              'settlementMethod': settlementMethod.name,
             }),
           )
           .timeout(ApiConfig.coldStartTimeout),
@@ -103,6 +103,27 @@ class OrderService {
 
     if (response.statusCode == 201) {
       final rawOrders = body['orders'];
+      final receiptMethod = SettlementMethod.fromName(
+        wireString(body['settlementMethod']),
+      );
+      final receiptStatus = PaymentStatus.fromName(
+        wireString(body['paymentStatus']),
+      );
+      final receiptReference = wireString(body['paymentReference']);
+      final validPayment =
+          receiptMethod == settlementMethod &&
+          (settlementMethod.isPrototype
+              ? receiptStatus == PaymentStatus.paid &&
+                    receiptReference != null &&
+                    receiptReference.isNotEmpty &&
+                    body['paymentPrototype'] == true
+              : receiptStatus == PaymentStatus.pending);
+      if (!validPayment) {
+        throw const OrderException(
+          'The order may have been placed, but its payment receipt was invalid. '
+          'Check My orders before trying again.',
+        );
+      }
       return CheckoutOutcome(
         checkoutId: wireString(body['checkoutId']) ?? '',
         orderIds: rawOrders is List
@@ -116,6 +137,9 @@ class OrderService {
         discount: wireInt(body['discount']) ?? 0,
         payable: wireInt(body['payable']) ?? 0,
         balanceAfter: wireInt(body['balanceAfter']),
+        settlementMethod: receiptMethod,
+        paymentStatus: receiptStatus,
+        paymentReference: receiptReference,
       );
     }
 
@@ -233,7 +257,10 @@ class CheckoutOutcome {
     required this.pointsApplied,
     required this.discount,
     required this.payable,
+    required this.settlementMethod,
+    required this.paymentStatus,
     this.balanceAfter,
+    this.paymentReference,
   });
 
   final String checkoutId;
@@ -245,7 +272,10 @@ class CheckoutOutcome {
   final int pointsApplied;
   final int discount;
   final int payable;
+  final SettlementMethod settlementMethod;
+  final PaymentStatus paymentStatus;
   final int? balanceAfter;
+  final String? paymentReference;
 
   int get orderCount => orderIds.length;
 

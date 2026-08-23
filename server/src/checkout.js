@@ -27,12 +27,35 @@ const { db, admin, serverTimestamp } = require('./firebase');
 const policyModule = require('./pointsPolicy');
 const { creditWalletInTransaction, SOURCES } = require('./award');
 const { isTradingProfile } = require('./suspension');
+const {
+  PROTOTYPE_PAYMENT_METHODS,
+  isPrototypePaymentMethod,
+  prototypePaymentReference,
+} = require('./prototypePayments');
 
-/** The only settlement method there is. No card data lives in any schema (§6.2). */
-const SETTLEMENT_METHODS = Object.freeze(['cashOnDelivery']);
+/** No method accepts or stores credentials. Online methods are simulations. */
+const SETTLEMENT_METHODS = Object.freeze([
+  'cashOnDelivery',
+  ...PROTOTYPE_PAYMENT_METHODS,
+]);
 
 const MAX_CART_ITEMS = 20;
 const MAX_LINE_QTY = 20;
+
+function paymentDetailsForCheckout(settlementMethod, checkoutId) {
+  const paymentPrototype = isPrototypePaymentMethod(settlementMethod);
+  return {
+    paymentStatus: paymentPrototype ? 'paid' : 'pending',
+    paymentReference: paymentPrototype
+      ? prototypePaymentReference({
+          kind: 'order',
+          id: checkoutId,
+          method: settlementMethod,
+        })
+      : null,
+    paymentPrototype,
+  };
+}
 
 /**
  * Splits a discount across seller subtotals, in whole taka.
@@ -180,6 +203,11 @@ async function checkout({
   // Allocated before the transaction so a retried attempt reuses the same ids
   // rather than scattering half-written orders under fresh ones.
   const checkoutId = firestore.collection('orders').doc().id;
+  const {
+    paymentStatus,
+    paymentReference,
+    paymentPrototype,
+  } = paymentDetailsForCheckout(settlementMethod, checkoutId);
 
   return firestore.runTransaction(async (txn) => {
     // ---- every read first; Firestore requires reads to precede writes ----
@@ -343,9 +371,11 @@ async function checkout({
         discount,
         payable: subtotals[i] - discount,
         settlementMethod,
-        // Cash on delivery: nothing has been paid yet, and the points side is
-        // settled separately and immediately below.
-        paymentStatus: 'pending',
+        // Prototype online options are simulations, not processor-verified
+        // payments. Their explicit reference makes that visible in receipts.
+        paymentStatus,
+        paymentReference,
+        paymentPrototype,
         status: 'pending',
         pointsAwarded: null,
         createdAt: serverTimestamp(),
@@ -398,6 +428,9 @@ async function checkout({
       payable: redemption.payable,
       balanceAfter,
       settlementMethod,
+      paymentStatus,
+      paymentReference,
+      paymentPrototype,
     };
   });
 }
@@ -408,6 +441,7 @@ module.exports = {
   MAX_LINE_QTY,
   allocateDiscount,
   groupBySeller,
+  paymentDetailsForCheckout,
   readCartItems,
   checkout,
 };

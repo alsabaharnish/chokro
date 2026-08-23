@@ -68,10 +68,16 @@ class OrderActions {
   /// buyer sees next reflects the debit. They are streams and would catch up on
   /// their own; invalidating means the receipt screen is not briefly showing the
   /// pre-checkout balance next to a "points spent" line.
-  Future<CheckoutOutcome> checkout({required int pointsRequested}) async {
+  Future<CheckoutOutcome> checkout({
+    required int pointsRequested,
+    SettlementMethod settlementMethod = SettlementMethod.cashOnDelivery,
+  }) async {
     final outcome = await _ref
         .read(orderServiceProvider)
-        .checkout(pointsRequested: pointsRequested);
+        .checkout(
+          pointsRequested: pointsRequested,
+          settlementMethod: settlementMethod,
+        );
 
     _ref.read(cartActionsProvider).resetAfterCheckout();
     _refreshBalance();

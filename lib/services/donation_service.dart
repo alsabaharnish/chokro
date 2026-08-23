@@ -9,6 +9,7 @@ import '../core/api_config.dart';
 import '../core/network_errors.dart';
 import '../core/wire_values.dart';
 import '../models/donation_model.dart';
+import '../models/payment_model.dart';
 
 /// Sends point donations to the trusted service.
 ///
@@ -71,6 +72,76 @@ class DonationService {
     throw DonationException(
       wireString(body['message']) ??
           'The donation could not be completed. No points were taken.',
+    );
+  }
+
+  Future<PrototypeDonationOutcome> donatePrototypePayment({
+    required String donationId,
+    required GreenInitiative initiative,
+    required int amountTaka,
+    required SettlementMethod settlementMethod,
+  }) async {
+    if (!settlementMethod.isPrototype) {
+      throw const DonationException(
+        'Choose a prototype online payment method.',
+      );
+    }
+
+    final response = await _send(
+      () async => _client
+          .post(
+            ApiConfig.path('/donations/prototype-payments'),
+            headers: await _headers(),
+            body: jsonEncode({
+              'donationId': donationId,
+              'initiative': initiative.wireValue,
+              'amountTaka': amountTaka,
+              'settlementMethod': settlementMethod.name,
+            }),
+          )
+          .timeout(ApiConfig.coldStartTimeout),
+    );
+    final body = _decode(response.body);
+
+    if (response.statusCode == 200 || response.statusCode == 201) {
+      final receiptId = wireString(body['donationId']);
+      final receiptInitiative = wireString(body['initiative']);
+      final receiptAmount = wireInt(body['amountTaka']);
+      final receiptMethod = SettlementMethod.fromName(
+        wireString(body['settlementMethod']),
+      );
+      final paymentStatus = PaymentStatus.fromName(
+        wireString(body['paymentStatus']),
+      );
+      final paymentReference = wireString(body['paymentReference']);
+      final isPrototype = body['paymentPrototype'] == true;
+
+      if (receiptId != donationId ||
+          receiptInitiative != initiative.wireValue ||
+          receiptAmount != amountTaka ||
+          receiptMethod != settlementMethod ||
+          paymentStatus != PaymentStatus.paid ||
+          paymentReference == null ||
+          paymentReference.isEmpty ||
+          !isPrototype) {
+        throw const DonationException(
+          'The server did not return a valid prototype payment receipt. Try '
+          'the same donation again; no real money will be taken.',
+        );
+      }
+
+      return PrototypeDonationOutcome(
+        donationId: receiptId!,
+        initiative: initiative,
+        amountTaka: receiptAmount!,
+        settlementMethod: receiptMethod,
+        paymentReference: paymentReference,
+      );
+    }
+
+    throw DonationException(
+      wireString(body['message']) ??
+          'The payment simulation could not be completed. No real money was taken.',
     );
   }
 

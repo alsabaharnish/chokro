@@ -1,3 +1,5 @@
+import 'payment_model.dart';
+
 enum GreenInitiative { wasteRecovery, treePlanting, greenEntrepreneurship }
 
 extension GreenInitiativeDisplay on GreenInitiative {
@@ -31,4 +33,21 @@ class DonationOutcome {
   final GreenInitiative initiative;
   final int points;
   final int balanceAfter;
+}
+
+/// Receipt for a simulation-only online donation.
+class PrototypeDonationOutcome {
+  const PrototypeDonationOutcome({
+    required this.donationId,
+    required this.initiative,
+    required this.amountTaka,
+    required this.settlementMethod,
+    required this.paymentReference,
+  });
+
+  final String donationId;
+  final GreenInitiative initiative;
+  final int amountTaka;
+  final SettlementMethod settlementMethod;
+  final String paymentReference;
 }

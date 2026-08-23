@@ -19,6 +19,7 @@
  *   POST /orders/:id/status   seller    — ship or deliver (F4.6, F4.8)
  *   POST /orders/:id/confirm  auth      — buyer confirms receipt (F4.7)
  *   POST /donations           auth      — donate points to a green initiative
+ *   POST /donations/prototype-payments auth — simulate an online donation
  *   POST /sellers/:uid/listings  admin  — hide or restore a catalogue (§7.4)
  *
  * Every wallet credit goes through `award.js`, which is the single path.
@@ -517,6 +518,43 @@ app.post('/donations', requireAuth, writeLimit, async (req, res) => {
     });
   }
 });
+
+/**
+ * Simulates an online donation for product-flow testing.
+ *
+ * No real payment credentials are accepted and no processor is contacted. The
+ * receipt is permanently labelled as a prototype so it cannot be confused
+ * with verified income.
+ */
+app.post(
+  '/donations/prototype-payments',
+  requireAuth,
+  writeLimit,
+  async (req, res) => {
+    const { donationId, initiative, amountTaka, settlementMethod } =
+      req.body || {};
+
+    try {
+      const result = await donationsModule.donatePrototypePayment({
+        uid: req.user.uid,
+        donationId,
+        initiative,
+        amountTaka,
+        settlementMethod,
+      });
+      return res.status(result.repeated ? 200 : 201).json({ ok: true, ...result });
+    } catch (err) {
+      const known = err instanceof donationsModule.DonationError;
+      console.error(`Prototype donation for ${req.user.uid} failed:`, err.message);
+      return res.status(known ? err.status : 500).json({
+        error: known ? err.code : 'prototype_donation_failed',
+        message: known
+          ? err.message
+          : 'The payment simulation could not be completed. No real money was taken.',
+      });
+    }
+  },
+);
 
 /**
  * The seller ships or delivers (F4.6, F4.8).

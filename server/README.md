@@ -3,7 +3,7 @@
 This Express service owns operations that a Flutter client must not be trusted
 to perform: evidence verification, 3ZERO Admin decisions, policy changes, bin
 registration, push decisions, and every wallet/ledger mutation, including
-Champion point donations.
+Champion point donations and explicitly simulated online-payment receipts.
 
 ## Run
 
@@ -48,6 +48,7 @@ Except for health/upload limits, endpoints require a Firebase ID token in
 | POST | `/claims/:id/review` | 3ZERO Admin approve/reject a claim |
 | POST | `/checkout` | Atomically redeem points, decrement stock, consume cart, and create orders |
 | POST | `/donations` | Atomically donate Champion points to a fixed green initiative |
+| POST | `/donations/prototype-payments` | Record an idempotent bKash, Nagad, or card simulation; no real payment |
 | POST | `/orders/:id/status` | Greenpreneur advances an owned order |
 | POST | `/orders/:id/confirm` | Purchasing Champion confirms receipt and releases points |
 | POST | `/sellers/:uid/listings` | Admin updates listing visibility after account action; path keeps the wire-role name |
@@ -73,6 +74,14 @@ authenticated UID and uses one Firestore transaction to:
 Retrying the same request returns the original result without another debit.
 Reusing its ID with different content is rejected. A failure before commit takes
 no points, and Firestore rules deny all client reads and writes on receipts.
+
+`POST /donations/prototype-payments` accepts the same UID-scoped idempotency key
+and initiative, a whole-taka amount from 10 through 1,000,000, and one of
+`prototypeBkash`, `prototypeNagad`, or `prototypeCard`. It never accepts an
+account number, card number, PIN, OTP, password, token, or processor payload. It
+writes a `kind=prototypeOnline`, `paymentPrototype=true` receipt plus a `SIM-...`
+reference and increments separately named prototype counters. It does not touch
+the wallet or ledger and is not proof that money moved.
 
 ## Verification flow
 

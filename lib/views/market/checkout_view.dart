@@ -12,6 +12,7 @@ import '../../core/theme.dart';
 import '../../models/order_model.dart';
 import '../../services/order_service.dart';
 import '../shared/content_state.dart';
+import '../shared/prototype_payment_dialog.dart';
 
 /// Checkout (F4.4, F4.5, F4.8).
 ///
@@ -40,6 +41,7 @@ class CheckoutView extends ConsumerStatefulWidget {
 class _CheckoutViewState extends ConsumerState<CheckoutView> {
   bool _placing = false;
   CheckoutOutcome? _receipt;
+  SettlementMethod _settlementMethod = SettlementMethod.cashOnDelivery;
 
   @override
   Widget build(BuildContext context) {
@@ -104,6 +106,10 @@ class _CheckoutViewState extends ConsumerState<CheckoutView> {
                 return _CheckoutBody(
                   quote: quote,
                   placing: _placing,
+                  settlementMethod: _settlementMethod,
+                  onSettlementChanged: (method) {
+                    setState(() => _settlementMethod = method);
+                  },
                   onPlace: _place,
                 );
               },
@@ -112,11 +118,24 @@ class _CheckoutViewState extends ConsumerState<CheckoutView> {
   }
 
   Future<void> _place(CheckoutQuote quote) async {
+    if (_settlementMethod.isPrototype) {
+      final approved = await showPrototypePaymentDialog(
+        context: context,
+        method: _settlementMethod,
+        amountTaka: quote.payable,
+        purpose: orderCount(quote.orderCount),
+      );
+      if (!approved || !mounted) return;
+    }
+
     setState(() => _placing = true);
     try {
       final outcome = await ref
           .read(orderActionsProvider)
-          .checkout(pointsRequested: quote.pointsApplied);
+          .checkout(
+            pointsRequested: quote.pointsApplied,
+            settlementMethod: _settlementMethod,
+          );
 
       if (!mounted) return;
       setState(() => _receipt = outcome);
@@ -147,11 +166,15 @@ class _CheckoutBody extends ConsumerWidget {
   const _CheckoutBody({
     required this.quote,
     required this.placing,
+    required this.settlementMethod,
+    required this.onSettlementChanged,
     required this.onPlace,
   });
 
   final CheckoutQuote quote;
   final bool placing;
+  final SettlementMethod settlementMethod;
+  final ValueChanged<SettlementMethod> onSettlementChanged;
   final Future<void> Function(CheckoutQuote) onPlace;
 
   @override
@@ -194,10 +217,17 @@ class _CheckoutBody extends ConsumerWidget {
                       ),
 
                       const SizedBox(height: AppTheme.gapMd),
-                      const _SettlementCard(),
+                      _SettlementCard(
+                        method: settlementMethod,
+                        enabled: !placing,
+                        onChanged: onSettlementChanged,
+                      ),
 
                       const SizedBox(height: AppTheme.gapMd),
-                      _TotalsCard(quote: quote),
+                      _TotalsCard(
+                        quote: quote,
+                        settlementMethod: settlementMethod,
+                      ),
 
                       const SizedBox(height: AppTheme.gapMd),
                       Text(
@@ -241,6 +271,9 @@ class _CheckoutBody extends ConsumerWidget {
                     label: Text(
                       placing
                           ? 'Placing your order…'
+                          : settlementMethod.isPrototype
+                          ? 'Pay ${formatTaka(quote.payable)} with '
+                                '${settlementMethod.shortLabel} (prototype)'
                           : 'Place ${orderCount(quote.orderCount)} · '
                                 '${formatTaka(quote.payable)} on delivery',
                     ),
@@ -467,11 +500,17 @@ class _PointsCard extends ConsumerWidget {
 
 /// Settlement (F4.8).
 ///
-/// One option, stated rather than assumed. §6.2 forbids storing card data in any
-/// schema, so cash on delivery is the whole payment design and the receipt
-/// should say so.
+/// Cash remains available; online options are explicitly simulated.
 class _SettlementCard extends StatelessWidget {
-  const _SettlementCard();
+  const _SettlementCard({
+    required this.method,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final SettlementMethod method;
+  final bool enabled;
+  final ValueChanged<SettlementMethod> onChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -479,28 +518,80 @@ class _SettlementCard extends StatelessWidget {
 
     return Card(
       margin: EdgeInsets.zero,
-      child: ListTile(
-        leading: const Icon(Icons.payments_outlined),
-        title: Text(
-          SettlementMethod.cashOnDelivery.label,
-          style: theme.textTheme.titleSmall?.copyWith(
-            fontWeight: FontWeight.w700,
-          ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: AppTheme.gapSm),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppTheme.gapMd,
+                AppTheme.gapSm,
+                AppTheme.gapMd,
+                AppTheme.gapXs,
+              ),
+              child: Text(
+                'Payment method',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+            ),
+            RadioGroup<SettlementMethod>(
+              groupValue: method,
+              onChanged: (value) {
+                if (value != null && enabled) onChanged(value);
+              },
+              child: Column(
+                children: [
+                  for (final option in SettlementMethod.values)
+                    RadioListTile<SettlementMethod>(
+                      value: option,
+                      enabled: enabled,
+                      secondary: Icon(_paymentIcon(option)),
+                      title: Text(option.label),
+                      subtitle: Text(
+                        option.isPrototype
+                            ? 'Simulation only — no real money or payment details.'
+                            : 'Pay the Greenpreneur when the order arrives.',
+                      ),
+                    ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppTheme.gapMd,
+                AppTheme.gapXs,
+                AppTheme.gapMd,
+                AppTheme.gapSm,
+              ),
+              child: Text(
+                'Prototype options never ask for card, PIN, OTP, or wallet details.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
         ),
-        subtitle: const Text(
-          'You pay the Greenpreneur when the order arrives. Chokro stores no card '
-          'details.',
-        ),
-        trailing: const Icon(Icons.check_circle, size: 20),
       ),
     );
   }
+
+  static IconData _paymentIcon(SettlementMethod method) => switch (method) {
+    SettlementMethod.cashOnDelivery => Icons.payments_outlined,
+    SettlementMethod.prototypeBkash => Icons.phone_android_outlined,
+    SettlementMethod.prototypeNagad => Icons.smartphone_outlined,
+    SettlementMethod.prototypeCard => Icons.credit_card_outlined,
+  };
 }
 
 class _TotalsCard extends StatelessWidget {
-  const _TotalsCard({required this.quote});
+  const _TotalsCard({required this.quote, required this.settlementMethod});
 
   final CheckoutQuote quote;
+  final SettlementMethod settlementMethod;
 
   @override
   Widget build(BuildContext context) {
@@ -545,7 +636,13 @@ class _TotalsCard extends StatelessWidget {
                 '-${formatTaka(quote.discount)}',
               ),
             const Divider(),
-            row('Payable on delivery', formatTaka(quote.payable), strong: true),
+            row(
+              settlementMethod.isPrototype
+                  ? 'Prototype payment'
+                  : 'Payable on delivery',
+              formatTaka(quote.payable),
+              strong: true,
+            ),
           ],
         ),
       ),
@@ -618,10 +715,21 @@ class _Receipt extends ConsumerWidget {
                           ),
                         const Divider(),
                         _ReceiptRow(
-                          label: 'Due on delivery',
+                          label: outcome.paymentStatus == PaymentStatus.paid
+                              ? 'Prototype payment recorded'
+                              : 'Due on delivery',
                           value: formatTaka(outcome.payable),
                           strong: true,
                         ),
+                        _ReceiptRow(
+                          label: 'Payment method',
+                          value: outcome.settlementMethod.label,
+                        ),
+                        if (outcome.paymentReference != null)
+                          _ReceiptRow(
+                            label: 'Simulation reference',
+                            value: outcome.paymentReference!,
+                          ),
                         if (outcome.balanceAfter != null)
                           _ReceiptRow(
                             label: 'Points balance',
@@ -634,8 +742,12 @@ class _Receipt extends ConsumerWidget {
 
                 const SizedBox(height: AppTheme.gapLg),
                 Text(
-                  'Confirm receipt when the order arrives — that is what '
-                  'credits your purchase points and closes the order.',
+                  outcome.settlementMethod.isPrototype
+                      ? 'This payment is a simulation; no real money moved. '
+                            'Confirm receipt when the order arrives to collect '
+                            'purchase points and close the order.'
+                      : 'Confirm receipt when the order arrives — that is what '
+                            'credits your purchase points and closes the order.',
                   textAlign: TextAlign.center,
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: scheme.onSurfaceVariant,
@@ -684,9 +796,13 @@ class _ReceiptRow extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(child: Text(label, style: style)),
-          Text(value, style: style),
+          const SizedBox(width: AppTheme.gapMd),
+          Flexible(
+            child: Text(value, textAlign: TextAlign.end, style: style),
+          ),
         ],
       ),
     );

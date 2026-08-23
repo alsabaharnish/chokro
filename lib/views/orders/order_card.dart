@@ -112,6 +112,12 @@ class OrderCard extends StatelessWidget {
               value: formatTaka(order.payable),
               strong: true,
             ),
+            if (order.paymentReference != null)
+              _Row(
+                label: 'Simulation reference',
+                value: order.paymentReference!,
+                muted: true,
+              ),
 
             if (order.status.isConfirmed && order.pointsAwarded != null) ...[
               const SizedBox(height: AppTheme.gapXs),
@@ -128,7 +134,7 @@ class OrderCard extends StatelessWidget {
               // your points" would be told about somebody else's award, so the
               // seller gets the state name and the action button instead.
               viewerIsSeller
-                  ? _sellerDescription(order.status)
+                  ? _sellerDescription(order)
                   : order.status.buyerDescription,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: scheme.onSurfaceVariant,
@@ -145,13 +151,16 @@ class OrderCard extends StatelessWidget {
     );
   }
 
-  static String _sellerDescription(OrderStatus status) {
-    switch (status) {
+  static String _sellerDescription(OrderModel order) {
+    switch (order.status) {
       case OrderStatus.pending:
         return 'Waiting for you to send it.';
       case OrderStatus.shipped:
-        return 'On its way. Mark it delivered once the Champion has it and has '
-            'paid.';
+        return order.paymentStatus == PaymentStatus.paid
+            ? 'On its way and already recorded as paid. Mark it delivered once '
+                  'the Champion has it.'
+            : 'On its way. Mark it delivered once the Champion has it and has '
+                  'paid.';
       case OrderStatus.delivered:
         return 'Waiting for the Champion to confirm. Only they can close it.';
       case OrderStatus.confirmed:
@@ -256,9 +265,13 @@ class _Row extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Expanded(child: Text(label, style: style)),
-          Text(value, style: style),
+          const SizedBox(width: AppTheme.gapSm),
+          Flexible(
+            child: Text(value, textAlign: TextAlign.end, style: style),
+          ),
         ],
       ),
     );
