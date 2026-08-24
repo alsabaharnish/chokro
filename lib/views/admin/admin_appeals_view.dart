@@ -242,11 +242,24 @@ class _EvidencePanel extends StatelessWidget {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
 
-    return Container(
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerLow,
+    // `Material`, not a `Container` with a `BoxDecoration`.
+    //
+    // This card ends in a `CheckboxListTile`, and a ListTile paints its
+    // background and its ink splashes onto the nearest `Material` *ancestor* —
+    // which, behind an opaque `DecoratedBox`, is hidden by it. Flutter asserts
+    // on exactly this ("ListTile background color or ink splashes may be
+    // invisible"), once per appeal in the queue, and the visible cost is that
+    // the confirmation an administrator must tick before deciding an appeal
+    // gave no press feedback at all.
+    //
+    // A `Material` with the same colour and a `RoundedRectangleBorder` carrying
+    // the border as its `side` renders identically and gives the ink a surface
+    // of its own. That is also the shape `cardTheme` uses for every other card.
+    return Material(
+      color: scheme.surfaceContainerLow,
+      shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(AppTheme.radiusMd),
-        border: Border.all(color: scheme.outlineVariant),
+        side: BorderSide(color: scheme.outlineVariant),
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(

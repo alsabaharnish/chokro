@@ -68,6 +68,19 @@ class QueryLimits {
   /// Orders, for either party.
   static const int orders = 40;
 
+  /// Orders read for a Greenpreneur's sales report.
+  ///
+  /// Deliberately far above [orders]. The list screen shows the recent ones and
+  /// a cap there costs a seller nothing; the report *totals* them, and a total
+  /// computed over the most recent forty orders while claiming to cover "all
+  /// time" is not a degraded answer but a wrong one, with nothing about it that
+  /// looks wrong.
+  ///
+  /// Still a cap rather than an unbounded read, for the reason every other limit
+  /// here exists. When it binds, `SellerSalesReport.truncated` carries that to
+  /// the screen and the screen says so, so the figures are never quietly partial.
+  static const int salesReport = 500;
+
   /// The buyer-facing catalogue.
   static const int catalog = 30;
 

@@ -12,6 +12,20 @@ import '../core/network_errors.dart';
 import '../core/wire_values.dart';
 import '../models/order_model.dart';
 
+/// A page of a seller's orders, and whether the read was capped.
+///
+/// The flag travels with the data rather than being re-derived downstream,
+/// because the only place that can know it is the query that applied the limit.
+class SellerOrderPage {
+  const SellerOrderPage({required this.orders, required this.truncated});
+
+  final List<OrderModel> orders;
+
+  /// True when more orders exist than this page carries, so any total computed
+  /// from [orders] is a floor rather than a sum.
+  final bool truncated;
+}
+
 /// Orders (F4.4–F4.8).
 ///
 /// Split along the trust boundary like every other paying path: reads come
@@ -51,6 +65,41 @@ class OrderService {
       .limit(QueryLimits.orders)
       .snapshots()
       .map((snap) => snap.docs.map(_fromDoc).toList());
+
+  /// Every order a seller has, up to [QueryLimits.salesReport], for the sales
+  /// report to total.
+  ///
+  /// Separate from [watchSellerOrders] because of the cap. Forty is the right
+  /// number for a fulfilment list and the wrong one for an "all time" total — so
+  /// this reads far deeper, and the caller is handed the raw count so it can tell
+  /// whether the cap bound and say so on screen.
+  ///
+  /// Uses the same `sellerId` + `createdAt desc` composite index the list
+  /// already relies on (`firestore.indexes.json`), so no index is added. Periods
+  /// are applied in Dart rather than as a `where` range: one subscription serves
+  /// all five windows, and switching between them costs no read at all.
+  ///
+  /// Fetches one document beyond the cap and trims it. Asking for exactly the
+  /// cap and inferring truncation from `length == cap` is ambiguous precisely
+  /// when it matters — a seller with exactly [QueryLimits.salesReport] orders
+  /// would be warned their complete total might be partial. Reading one more
+  /// turns the question into a fact: if the extra document exists, there are
+  /// more orders than the report covers.
+  Stream<SellerOrderPage> watchSellerOrdersForReport(String uid) => _orders
+      .where('sellerId', isEqualTo: uid)
+      .orderBy('createdAt', descending: true)
+      .limit(QueryLimits.salesReport + 1)
+      .snapshots()
+      .map((snap) {
+        final truncated = snap.docs.length > QueryLimits.salesReport;
+        final docs = truncated
+            ? snap.docs.take(QueryLimits.salesReport)
+            : snap.docs;
+        return SellerOrderPage(
+          orders: docs.map(_fromDoc).toList(),
+          truncated: truncated,
+        );
+      });
 
   OrderModel _fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = Map<String, dynamic>.from(doc.data() ?? <String, dynamic>{});

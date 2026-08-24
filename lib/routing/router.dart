@@ -38,6 +38,7 @@ import '../views/orders/buyer_orders_view.dart';
 import '../views/seller/product_edit_view.dart';
 import '../views/seller/seller_orders_view.dart';
 import '../views/seller/seller_products_view.dart';
+import '../views/seller/seller_sales_view.dart';
 import '../views/shared/account_incomplete_view.dart';
 import '../views/shared/startup_error_view.dart';
 import '../views/shared/route_error_view.dart';
@@ -526,6 +527,11 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/seller/orders',
         builder: (context, state) => const SellerOrdersView(),
+        redirect: requireSeller,
+      ),
+      GoRoute(
+        path: '/seller/sales',
+        builder: (context, state) => const SellerSalesView(),
         redirect: requireSeller,
       ),
 

@@ -57,6 +57,17 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
   final _stock = TextEditingController();
   final _tags = TextEditingController();
 
+  /// Lets the keyboard's action key move to the next field.
+  ///
+  /// On a phone that key is the on-screen "next"; on a desktop browser it is
+  /// Enter, which every seller tries and which previously did nothing at all in
+  /// any field of this form.
+  final _shopNameFocus = FocusNode();
+  final _priceFocus = FocusNode();
+  final _stockFocus = FocusNode();
+  final _descriptionFocus = FocusNode();
+  final _tagsFocus = FocusNode();
+
   ProductCategory _category = ProductCategory.homeAndLiving;
   List<String> _imageUrls = const <String>[];
 
@@ -74,6 +85,11 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
     _price.dispose();
     _stock.dispose();
     _tags.dispose();
+    _shopNameFocus.dispose();
+    _priceFocus.dispose();
+    _stockFocus.dispose();
+    _descriptionFocus.dispose();
+    _tagsFocus.dispose();
     super.dispose();
   }
 
@@ -122,7 +138,7 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
           title: 'The listing did not load',
           message: 'Check your connection and open it again.',
           actionLabel: 'Back to listings',
-          onAction: () => context.pop(),
+          onAction: _leaveEditor,
         ),
       ),
       data: (product) {
@@ -133,7 +149,7 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
               title: 'No such listing',
               message: 'It may have been removed.',
               actionLabel: 'Back to listings',
-              onAction: () => context.pop(),
+              onAction: _leaveEditor,
             ),
           );
         }
@@ -235,6 +251,12 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
                   const SizedBox(height: AppTheme.gapLg),
                   TextFormField(
                     controller: _title,
+                    // The first thing a seller wants to type, focused on open
+                    // so a desktop browser does not present a form with no
+                    // cursor in it.
+                    autofocus: _isNew,
+                    textInputAction: TextInputAction.next,
+                    onFieldSubmitted: (_) => _shopNameFocus.requestFocus(),
                     textCapitalization: TextCapitalization.sentences,
                     decoration: const InputDecoration(
                       labelText: 'Title',
@@ -249,6 +271,9 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
 
                   TextFormField(
                     controller: _shopName,
+                    focusNode: _shopNameFocus,
+                    textInputAction: TextInputAction.next,
+                    onFieldSubmitted: (_) => _priceFocus.requestFocus(),
                     textCapitalization: TextCapitalization.words,
                     decoration: const InputDecoration(
                       labelText: 'Shop name',
@@ -281,6 +306,9 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
                       Expanded(
                         child: TextFormField(
                           controller: _price,
+                          focusNode: _priceFocus,
+                          textInputAction: TextInputAction.next,
+                          onFieldSubmitted: (_) => _stockFocus.requestFocus(),
                           keyboardType: TextInputType.number,
                           inputFormatters: [
                             FilteringTextInputFormatter.digitsOnly,
@@ -299,6 +327,10 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
                       Expanded(
                         child: TextFormField(
                           controller: _stock,
+                          focusNode: _stockFocus,
+                          textInputAction: TextInputAction.next,
+                          onFieldSubmitted: (_) =>
+                              _descriptionFocus.requestFocus(),
                           keyboardType: TextInputType.number,
                           inputFormatters: [
                             FilteringTextInputFormatter.digitsOnly,
@@ -316,6 +348,7 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
                   const SizedBox(height: AppTheme.gapMd),
                   TextFormField(
                     controller: _description,
+                    focusNode: _descriptionFocus,
                     textCapitalization: TextCapitalization.sentences,
                     minLines: 3,
                     maxLines: 8,
@@ -334,6 +367,12 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
 
                   TextFormField(
                     controller: _tags,
+                    focusNode: _tagsFocus,
+                    // The last field, so its action key saves rather than
+                    // moving on to nothing.
+                    textInputAction: TextInputAction.done,
+                    onFieldSubmitted: (_) =>
+                        _saving || _uploading ? null : _save(existing),
                     decoration: const InputDecoration(
                       labelText: 'Tags',
                       helperText:
@@ -489,6 +528,7 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
 
     setState(() => _saving = true);
     final messenger = ScaffoldMessenger.of(context);
+    var saved = false;
     try {
       final actions = ref.read(sellerProductActionsProvider);
       if (existing == null) {
@@ -497,21 +537,48 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
         await actions.update(existing.id!, draft);
       }
 
-      if (!mounted) return;
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            existing == null ? 'Listing published.' : 'Listing saved.',
-          ),
-        ),
-      );
-      context.pop();
+      saved = true;
     } catch (error) {
       messenger.showSnackBar(
         SnackBar(content: Text(_saveFailureMessage(error))),
       );
     } finally {
       if (mounted) setState(() => _saving = false);
+    }
+
+    // Navigation happens *outside* the try, and this is not tidiness.
+    //
+    // `context.pop()` used to sit on the last line of the `try`. It throws
+    // `GoError: There is nothing to pop` whenever this screen is the only route
+    // on the stack — which is exactly what a browser refresh or a pasted
+    // `/seller/products/:id` URL produces, and on the web both are everyday
+    // gestures. The write had already succeeded, so the seller saw "Listing
+    // saved." and then, from the catch, a message telling them it had failed.
+    // The last thing they read was wrong, and the natural response is to save
+    // the same listing again.
+    if (!saved || !mounted) return;
+
+    messenger.showSnackBar(
+      SnackBar(
+        content: Text(
+          existing == null ? 'Listing published.' : 'Listing saved.',
+        ),
+      ),
+    );
+    _leaveEditor();
+  }
+
+  /// Closes the editor, from any entry point.
+  ///
+  /// Popping is right when the seller arrived from their console. When they
+  /// arrived by URL there is nothing beneath this route, so it goes to the
+  /// console instead of throwing — which also gives a deep-linked seller
+  /// somewhere to go, rather than a screen with no navigation on it at all.
+  void _leaveEditor() {
+    if (context.canPop()) {
+      context.pop();
+    } else {
+      context.go('/seller/products');
     }
   }
 

@@ -17,6 +17,24 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-08-24 18:40 (+06) — Greenpreneur sales report, and web fixes
+
+Added a sales report for the 3ZERO Greenpreneur — order value, cash collected,
+simulated payments and amounts still to collect, over today / 7 / 30 / 90 days
+and all time — as a new `Sales` tab and a home card. Figures are deliberately
+split rather than summed: nothing in this system ever pays a seller, and the
+prototype online methods move no money, so a single "received" total would be
+partly fictional. Also fixed a listing-editor save that reported success as
+failure when the page had been refreshed, and gave the form keyboard navigation.
+
+Files: `core/sales_report.dart`, `controllers/sales_report_controller.dart`,
+`views/seller/seller_sales_view.dart` (new); `order_service.dart`,
+`constants.dart`, `router.dart`, `app_shell.dart`, `home_view.dart`,
+`product_edit_view.dart`, `order_card.dart`; two new test files.
+
+Checks: `flutter analyze` clean · `flutter test` 525 → **567** ·
+`flutter build web` succeeds.
+
 ## 2026-08-24 17:20 (+06) — UI/UX pass: layout, contrast, and dead ends
 
 Fixed usability and correctness defects the suite did not cover: two layout
@@ -28,7 +46,11 @@ are in `UX_AUDIT_OUTSTANDING.md`.
 Files: 22 modified, 3 added (`views/shared/app_snackbar.dart`,
 `views/shared/unsaved_changes.dart`, `test/ux_hardening_test.dart`).
 
-Checks: `flutter analyze` clean · `flutter test` 496 → **524** ·
+Also fixed a `ListTile` assertion caught on device: the appeal evidence card
+wrapped its `CheckboxListTile` in an opaque `DecoratedBox`, hiding the tile's ink
+splashes, so the confirmation an admin must tick gave no press feedback.
+
+Checks: `flutter analyze` clean · `flutter test` 496 → **525** ·
 `flutter build web` succeeds.
 
 ## 2026-08-24 12:52 (+06) — Internal audit of `5b1b779`: fixed seven defects

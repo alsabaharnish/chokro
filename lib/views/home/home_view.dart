@@ -280,6 +280,18 @@ class HomeView extends ConsumerWidget {
                                           : () =>
                                                 context.push('/seller/orders'),
                                     ),
+                                    ActionCard(
+                                      icon: Icons.query_stats_outlined,
+                                      title: 'Sales report',
+                                      subtitle:
+                                          'What your orders were worth, what you '
+                                          'have collected and what is still out.',
+                                      disabledSubtitle:
+                                          'Unavailable while suspended.',
+                                      onTap: suspended
+                                          ? null
+                                          : () => context.push('/seller/sales'),
+                                    ),
                                   ],
                                 ),
                               ],

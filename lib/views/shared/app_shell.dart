@@ -104,6 +104,12 @@ class AppShell extends ConsumerWidget {
           'Orders',
         ),
         ShellDestination(
+          '/seller/sales',
+          Icons.query_stats_outlined,
+          Icons.query_stats,
+          'Sales',
+        ),
+        ShellDestination(
           '/profile',
           Icons.person_outline,
           Icons.person,

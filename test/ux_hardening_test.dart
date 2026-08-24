@@ -4,13 +4,16 @@ import 'package:chokro/controllers/account_profile_controller.dart';
 import 'package:chokro/controllers/admin_workload_controller.dart';
 import 'package:chokro/controllers/auth_controller.dart';
 import 'package:chokro/controllers/cart_controller.dart';
+import 'package:chokro/controllers/appeals_controller.dart';
 import 'package:chokro/controllers/submission_history_controller.dart';
 import 'package:chokro/core/account_profile.dart';
 import 'package:chokro/core/auth_errors.dart';
 import 'package:chokro/core/constants.dart';
 import 'package:chokro/core/theme.dart';
+import 'package:chokro/models/appeal_model.dart';
 import 'package:chokro/models/disposal_model.dart';
 import 'package:chokro/models/user_model.dart';
+import 'package:chokro/views/admin/admin_appeals_view.dart';
 import 'package:chokro/views/history/submission_history_view.dart';
 import 'package:chokro/views/shared/action_card.dart';
 import 'package:chokro/views/shared/flow_progress.dart';
@@ -33,6 +36,14 @@ const _champion = UserModel(
   name: 'Nadia Islam',
   email: 'nadia@example.com',
   role: AppConstants.roleBuyer,
+  status: AppConstants.statusActive,
+);
+
+const _admin = UserModel(
+  uid: 'admin-1',
+  name: 'Ayesha Rahman',
+  email: 'ayesha@example.com',
+  role: AppConstants.roleAdmin,
   status: AppConstants.statusActive,
 );
 
@@ -73,6 +84,36 @@ double _contrast(Color a, Color b) {
   final la = _relativeLuminance(a);
   final lb = _relativeLuminance(b);
   return (math.max(la, lb) + 0.05) / (math.min(la, lb) + 0.05);
+}
+
+/// Mirrors `ListTile._findIntermediateWidget`: walking up from a tile, returns
+/// the first opaque `ColoredBox`/`DecoratedBox` reached *before* any `Material`,
+/// or null if a `Material` comes first.
+///
+/// Asserting on the structure rather than on Flutter's own assertion, because
+/// that assertion is guarded by `onTap != null || onLongPress != null ||
+/// hasOpaqueBackground`. The tile in question takes its `onChanged` from whether
+/// the evidence photograph has loaded, and in a widget test it never does — so
+/// the framework check silently skips, which is precisely why a green suite
+/// missed this while the device hit it on every appeal.
+Widget? _opaqueBoxAboveTile(WidgetTester tester, Finder tile) {
+  Widget? offender;
+  tester.element(tile).visitAncestorElements((ancestor) {
+    if (ancestor.widget is Material) return false;
+    final widget = ancestor.widget;
+    final Color? colour = switch (widget) {
+      ColoredBox(:final Color color) => color,
+      DecoratedBox(decoration: BoxDecoration(:final Color? color)) => color,
+      DecoratedBox(decoration: ShapeDecoration(:final Color? color)) => color,
+      _ => null,
+    };
+    if (colour != null && colour.a > 0) {
+      offender = widget;
+      return false;
+    }
+    return true;
+  });
+  return offender;
 }
 
 void main() {
@@ -330,5 +371,83 @@ void main() {
     // signing you in" described the wrong step and sent people to a sign-in
     // screen where their new credentials worked perfectly well.
     expect(authErrorMessage(null), isNot(contains('signing you in')));
+  });
+
+  testWidgets('the appeal evidence card gives its checkbox a Material to ink on', (
+    tester,
+  ) async {
+    // The card was a `Container` with an opaque `BoxDecoration`, and it ends in
+    // a `CheckboxListTile`. A ListTile paints its background and ink splashes on
+    // the nearest `Material` ancestor, which that box hid — so Flutter asserted
+    // once per appeal in the queue, and the confirmation an administrator has to
+    // tick before deciding an appeal gave no press feedback at all.
+    //
+    // The existing queue test overrides the evidence to null, so `_EvidencePanel`
+    // never built and CI never saw it. This one supplies real evidence.
+    const appeal = AppealModel(
+      id: 'appeal-1',
+      userId: 'champion-1',
+      subjectType: AppealSubject.disposal,
+      subjectId: 'disposal-1',
+      message: 'The submitted photograph clearly shows the recycled items.',
+    );
+    const evidence = AppealSubjectEvidence(
+      subjectType: AppealSubject.disposal,
+      title: 'Plastic bottles at Dhanmondi Bin 4',
+      photoUrl: 'https://storage.example/photo.jpg',
+      rejectionReason: 'The photograph did not show the bin.',
+    );
+
+    final router = GoRouter(
+      initialLocation: '/admin/appeals',
+      routes: [
+        GoRoute(
+          path: '/home',
+          builder: (_, _) => const Scaffold(body: Text('Admin home')),
+        ),
+        GoRoute(
+          path: '/admin/appeals',
+          builder: (_, _) => const AdminAppealsView(),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          currentUserProvider.overrideWith((ref) => Stream.value(_admin)),
+          activeAccountProfileProvider.overrideWithValue(AccountProfile.admin),
+          cartCountProvider.overrideWithValue(0),
+          adminWorkloadProvider.overrideWithValue(AdminWorkload.empty),
+          pendingAppealsProvider.overrideWith(
+            (ref) => Stream.value(const [appeal]),
+          ),
+          appealSubjectEvidenceProvider.overrideWith(
+            (ref, subject) async => evidence,
+          ),
+        ],
+        child: MaterialApp.router(
+          theme: AppTheme.light(),
+          routerConfig: router,
+        ),
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
+    expect(
+      find.text('I reviewed the original photograph'),
+      findsOneWidget,
+      reason: 'the panel under test must actually have rendered',
+    );
+    expect(
+      _opaqueBoxAboveTile(tester, find.byType(CheckboxListTile)),
+      isNull,
+      reason:
+          'an opaque box between the tile and its Material hides the ink '
+          'splash, so ticking the confirmation looks like nothing happened',
+    );
+    expect(tester.takeException(), isNull);
   });
 }

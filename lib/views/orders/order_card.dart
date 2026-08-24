@@ -117,6 +117,7 @@ class OrderCard extends StatelessWidget {
                 label: 'Simulation reference',
                 value: order.paymentReference!,
                 muted: true,
+                selectable: true,
               ),
 
             if (order.status.isConfirmed && order.pointsAwarded != null) ...[
@@ -242,12 +243,21 @@ class _Row extends StatelessWidget {
     required this.value,
     this.strong = false,
     this.muted = false,
+    this.selectable = false,
   });
 
   final String label;
   final String value;
   final bool strong;
   final bool muted;
+
+  /// Renders the value as selectable text.
+  ///
+  /// For the payment reference, which is the one string on this card anybody
+  /// needs to take somewhere else. Flutter draws to a canvas, so on the web
+  /// nothing is selectable unless it is asked for — a seller reconciling an
+  /// order could read the reference but not copy it.
+  final bool selectable;
 
   @override
   Widget build(BuildContext context) {
@@ -270,7 +280,13 @@ class _Row extends StatelessWidget {
           Expanded(child: Text(label, style: style)),
           const SizedBox(width: AppTheme.gapSm),
           Flexible(
-            child: Text(value, textAlign: TextAlign.end, style: style),
+            child: selectable
+                ? SelectableText(
+                    value,
+                    textAlign: TextAlign.end,
+                    style: style,
+                  )
+                : Text(value, textAlign: TextAlign.end, style: style),
           ),
         ],
       ),
