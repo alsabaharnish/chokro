@@ -1,10 +1,13 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../controllers/appeals_controller.dart';
+import '../../core/label_format.dart';
 import '../../core/theme.dart';
 import '../../models/appeal_model.dart';
 import '../appeals/appeals_view.dart';
+import '../shared/app_shell.dart';
 import '../shared/content_state.dart';
 import '../shared/error_retry.dart';
 
@@ -25,9 +28,9 @@ class AdminAppealsView extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final appealsAsync = ref.watch(pendingAppealsProvider);
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Appeals')),
-      body: appealsAsync.when(
+    return AppShell(
+      title: 'Appeals',
+      child: appealsAsync.when(
         loading: () => const ContentLoading(label: 'Loading the queue…'),
         error: (error, _) => ErrorRetry(
           error: error,
@@ -62,10 +65,7 @@ class AdminAppealsView extends ConsumerWidget {
                       _QueueNotice(count: appeals.length),
                       const SizedBox(height: AppTheme.gapMd),
                       for (final appeal in appeals) ...[
-                        AppealCard(
-                          appeal: appeal,
-                          action: _DecisionButtons(appeal: appeal),
-                        ),
+                        _AdminAppealCard(appeal: appeal),
                         const SizedBox(height: AppTheme.gapMd),
                       ],
                     ],
@@ -75,6 +75,329 @@ class AdminAppealsView extends ConsumerWidget {
             ],
           );
         },
+      ),
+    );
+  }
+}
+
+class _AdminAppealCard extends ConsumerStatefulWidget {
+  const _AdminAppealCard({required this.appeal});
+
+  final AppealModel appeal;
+
+  @override
+  ConsumerState<_AdminAppealCard> createState() => _AdminAppealCardState();
+}
+
+class _AdminAppealCardState extends ConsumerState<_AdminAppealCard> {
+  bool _photoLoaded = false;
+  bool _confirmed = false;
+  int _imageAttempt = 0;
+
+  AppealSubjectReference get _subject => (
+    subjectType: widget.appeal.subjectType,
+    subjectId: widget.appeal.subjectId,
+  );
+
+  void _setPhotoLoaded(bool loaded) {
+    if (!mounted || loaded == _photoLoaded) return;
+    setState(() {
+      _photoLoaded = loaded;
+      if (!loaded) _confirmed = false;
+    });
+  }
+
+  Future<void> _retryPhoto(String url) async {
+    _setPhotoLoaded(false);
+    await CachedNetworkImage.evictFromCache(url);
+    if (!mounted) return;
+    setState(() => _imageAttempt += 1);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final evidenceAsync = ref.watch(appealSubjectEvidenceProvider(_subject));
+    final evidence = evidenceAsync.value;
+    final canDecide = evidence?.hasPhoto == true && _photoLoaded && _confirmed;
+
+    return AppealCard(
+      appeal: widget.appeal,
+      evidence: evidenceAsync.when(
+        loading: () => const _EvidenceLoading(),
+        error: (_, _) => _EvidenceFailure(
+          message: 'The original submission could not be loaded.',
+          onRetry: () =>
+              ref.invalidate(appealSubjectEvidenceProvider(_subject)),
+        ),
+        data: (evidence) {
+          if (evidence == null || !evidence.hasPhoto) {
+            return const _EvidenceFailure(
+              message:
+                  'The original submission or its photograph is missing. '
+                  'This appeal cannot be decided safely.',
+            );
+          }
+          return _EvidencePanel(
+            key: ValueKey('${evidence.photoUrl}:$_imageAttempt'),
+            evidence: evidence,
+            photoLoaded: _photoLoaded,
+            confirmed: _confirmed,
+            onPhotoStateChanged: _setPhotoLoaded,
+            onConfirmationChanged: (value) {
+              setState(() => _confirmed = value);
+            },
+            onRetryPhoto: () => _retryPhoto(evidence.photoUrl),
+          );
+        },
+      ),
+      action: _DecisionButtons(
+        appeal: widget.appeal,
+        evidenceConfirmed: canDecide,
+      ),
+    );
+  }
+}
+
+class _EvidenceLoading extends StatelessWidget {
+  const _EvidenceLoading();
+
+  @override
+  Widget build(BuildContext context) => Container(
+    padding: const EdgeInsets.all(AppTheme.gapMd),
+    decoration: BoxDecoration(
+      color: Theme.of(context).colorScheme.surfaceContainerLow,
+      borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+    ),
+    child: const Row(
+      children: [
+        SizedBox(
+          width: 18,
+          height: 18,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
+        SizedBox(width: 12),
+        Expanded(child: Text('Loading the original evidence…')),
+      ],
+    ),
+  );
+}
+
+class _EvidenceFailure extends StatelessWidget {
+  const _EvidenceFailure({required this.message, this.onRetry});
+
+  final String message;
+  final VoidCallback? onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Container(
+      padding: const EdgeInsets.all(AppTheme.gapMd),
+      decoration: BoxDecoration(
+        color: scheme.errorContainer,
+        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+      ),
+      child: Row(
+        children: [
+          Icon(Icons.hide_image_outlined, color: scheme.onErrorContainer),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(
+              message,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onErrorContainer,
+              ),
+            ),
+          ),
+          if (onRetry != null)
+            TextButton(onPressed: onRetry, child: const Text('Retry')),
+        ],
+      ),
+    );
+  }
+}
+
+class _EvidencePanel extends StatelessWidget {
+  const _EvidencePanel({
+    super.key,
+    required this.evidence,
+    required this.photoLoaded,
+    required this.confirmed,
+    required this.onPhotoStateChanged,
+    required this.onConfirmationChanged,
+    required this.onRetryPhoto,
+  });
+
+  final AppealSubjectEvidence evidence;
+  final bool photoLoaded;
+  final bool confirmed;
+  final ValueChanged<bool> onPhotoStateChanged;
+  final ValueChanged<bool> onConfirmationChanged;
+  final VoidCallback onRetryPhoto;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLow,
+        borderRadius: BorderRadius.circular(AppTheme.radiusMd),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(AppTheme.gapMd),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'ORIGINAL SUBMISSION',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: scheme.primary,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1,
+                  ),
+                ),
+                const SizedBox(height: AppTheme.gapXs),
+                Text(
+                  evidence.title,
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                if (evidence.submittedAt != null) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    'Submitted ${formatAge(evidence.submittedAt)}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ],
+            ),
+          ),
+          AspectRatio(
+            aspectRatio: 4 / 3,
+            child: CachedNetworkImage(
+              imageUrl: evidence.photoUrl,
+              fit: BoxFit.contain,
+              imageBuilder: (context, imageProvider) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  onPhotoStateChanged(true);
+                });
+                return Ink.image(
+                  image: imageProvider,
+                  fit: BoxFit.contain,
+                  child: InkWell(
+                    onTap: () => _showFullPhoto(context, imageProvider),
+                  ),
+                );
+              },
+              placeholder: (_, _) => ColoredBox(
+                color: scheme.surfaceContainerHighest,
+                child: const Center(child: CircularProgressIndicator()),
+              ),
+              errorWidget: (_, _, _) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  onPhotoStateChanged(false);
+                });
+                return ColoredBox(
+                  color: scheme.errorContainer,
+                  child: Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.broken_image_outlined,
+                          color: scheme.onErrorContainer,
+                        ),
+                        const SizedBox(height: AppTheme.gapSm),
+                        Text(
+                          'The evidence photo did not load.',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: scheme.onErrorContainer,
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: onRetryPhoto,
+                          child: const Text('Retry photo'),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          if (evidence.rejectionReason?.trim().isNotEmpty == true)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(
+                AppTheme.gapMd,
+                AppTheme.gapMd,
+                AppTheme.gapMd,
+                0,
+              ),
+              child: Text(
+                'Original rejection: ${evidence.rejectionReason}',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          CheckboxListTile(
+            value: confirmed,
+            onChanged: photoLoaded
+                ? (value) => onConfirmationChanged(value ?? false)
+                : null,
+            controlAffinity: ListTileControlAffinity.leading,
+            title: const Text('I reviewed the original photograph'),
+            subtitle: Text(
+              photoLoaded
+                  ? 'Required before an appeal decision.'
+                  : 'Wait for the photograph to load.',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showFullPhoto(
+    BuildContext context,
+    ImageProvider imageProvider,
+  ) {
+    return showDialog<void>(
+      context: context,
+      builder: (context) => Dialog(
+        insetPadding: const EdgeInsets.all(AppTheme.gapMd),
+        child: Stack(
+          children: [
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 960, maxHeight: 760),
+              child: InteractiveViewer(
+                minScale: .8,
+                maxScale: 5,
+                child: Image(image: imageProvider, fit: BoxFit.contain),
+              ),
+            ),
+            Positioned(
+              right: 8,
+              top: 8,
+              child: IconButton.filled(
+                tooltip: 'Close photograph',
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.close),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -120,9 +443,13 @@ class _QueueNotice extends StatelessWidget {
 }
 
 class _DecisionButtons extends ConsumerStatefulWidget {
-  const _DecisionButtons({required this.appeal});
+  const _DecisionButtons({
+    required this.appeal,
+    required this.evidenceConfirmed,
+  });
 
   final AppealModel appeal;
+  final bool evidenceConfirmed;
 
   @override
   ConsumerState<_DecisionButtons> createState() => _DecisionButtonsState();
@@ -133,28 +460,46 @@ class _DecisionButtonsState extends ConsumerState<_DecisionButtons> {
 
   @override
   Widget build(BuildContext context) {
-    return Row(
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Expanded(
-          child: OutlinedButton.icon(
-            onPressed: _busy ? null : () => _decide(uphold: false),
-            icon: const Icon(Icons.thumb_down_outlined),
-            label: const Text('Decline'),
+        if (!widget.evidenceConfirmed) ...[
+          Text(
+            'Review and confirm the original photograph to enable a decision.',
+            style: Theme.of(context).textTheme.bodySmall?.copyWith(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
-        ),
-        const SizedBox(width: AppTheme.gapSm),
-        Expanded(
-          child: FilledButton.icon(
-            onPressed: _busy ? null : () => _decide(uphold: true),
-            icon: _busy
-                ? const SizedBox(
-                    width: 18,
-                    height: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.thumb_up_outlined),
-            label: const Text('Uphold'),
-          ),
+          const SizedBox(height: AppTheme.gapSm),
+        ],
+        Row(
+          children: [
+            Expanded(
+              child: OutlinedButton.icon(
+                onPressed: _busy || !widget.evidenceConfirmed
+                    ? null
+                    : () => _decide(uphold: false),
+                icon: const Icon(Icons.thumb_down_outlined),
+                label: const Text('Decline'),
+              ),
+            ),
+            const SizedBox(width: AppTheme.gapSm),
+            Expanded(
+              child: FilledButton.icon(
+                onPressed: _busy || !widget.evidenceConfirmed
+                    ? null
+                    : () => _decide(uphold: true),
+                icon: _busy
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.thumb_up_outlined),
+                label: const Text('Uphold'),
+              ),
+            ),
+          ],
         ),
       ],
     );

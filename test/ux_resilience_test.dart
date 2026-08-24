@@ -1,4 +1,5 @@
 import 'package:chokro/controllers/account_profile_controller.dart';
+import 'package:chokro/controllers/admin_workload_controller.dart';
 import 'package:chokro/controllers/auth_controller.dart';
 import 'package:chokro/controllers/cart_controller.dart';
 import 'package:chokro/core/account_profile.dart';
@@ -49,6 +50,59 @@ void _useAccessiblePhoneSize(WidgetTester tester) {
 }
 
 void main() {
+  testWidgets('admin review navigation and badges fit an accessible phone', (
+    tester,
+  ) async {
+    _useAccessiblePhoneSize(tester);
+
+    final router = GoRouter(
+      initialLocation: '/admin/dashboard',
+      routes: [
+        GoRoute(
+          path: '/home',
+          builder: (_, _) => const Scaffold(body: Text('Home destination')),
+        ),
+        GoRoute(
+          path: '/admin/dashboard',
+          builder: (_, _) => const AppShell(
+            title: 'Dashboard',
+            child: Center(child: Text('Admin dashboard')),
+          ),
+        ),
+      ],
+    );
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          currentUserProvider.overrideWith((ref) => Stream.value(_admin)),
+          activeAccountProfileProvider.overrideWithValue(AccountProfile.admin),
+          cartCountProvider.overrideWithValue(0),
+          adminWorkloadProvider.overrideWithValue(
+            const AdminWorkload(
+              claims: AdminTaskProgress(pending: 2),
+              appeals: AdminTaskProgress(pending: 1),
+            ),
+          ),
+        ],
+        child: MaterialApp.router(
+          theme: AppTheme.light(),
+          routerConfig: router,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('Admin dashboard'), findsOneWidget);
+    expect(find.byType(Badge), findsNWidgets(2));
+    expect(tester.takeException(), isNull);
+
+    await tester.tap(find.text('Home'));
+    await tester.pumpAndSettle();
+    expect(find.text('Home destination'), findsOneWidget);
+  });
+
   testWidgets('a deep-linked secondary screen always has a route home', (
     tester,
   ) async {
@@ -77,6 +131,7 @@ void main() {
         overrides: [
           currentUserProvider.overrideWith((ref) => Stream.value(_admin)),
           activeAccountProfileProvider.overrideWithValue(AccountProfile.admin),
+          adminWorkloadProvider.overrideWithValue(AdminWorkload.empty),
           cartCountProvider.overrideWithValue(0),
         ],
         child: MaterialApp.router(

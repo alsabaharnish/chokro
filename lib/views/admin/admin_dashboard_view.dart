@@ -7,6 +7,7 @@ import '../../core/label_format.dart';
 import '../../core/theme.dart';
 import '../../models/stats_model.dart';
 import '../shared/action_card.dart';
+import '../shared/app_shell.dart';
 import '../shared/content_state.dart';
 import '../shared/error_retry.dart';
 
@@ -33,9 +34,9 @@ class AdminDashboardView extends ConsumerWidget {
     final statsAsync = ref.watch(platformStatsProvider);
     final accounts = ref.watch(accountTotalsProvider);
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Dashboard')),
-      body: statsAsync.when(
+    return AppShell(
+      title: 'Dashboard',
+      child: statsAsync.when(
         loading: () => const ContentLoading(label: 'Reading the counters…'),
         error: (error, _) => ErrorRetry(
           error: error,

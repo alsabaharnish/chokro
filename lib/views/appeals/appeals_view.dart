@@ -76,9 +76,15 @@ class AppealsView extends ConsumerWidget {
 /// Shared with the administrator's queue so the reviewer reads exactly what the
 /// user wrote and what any previous reviewer answered, in the same layout.
 class AppealCard extends StatelessWidget {
-  const AppealCard({super.key, required this.appeal, this.action});
+  const AppealCard({
+    super.key,
+    required this.appeal,
+    this.evidence,
+    this.action,
+  });
 
   final AppealModel appeal;
+  final Widget? evidence;
   final Widget? action;
 
   @override
@@ -154,6 +160,11 @@ class AppealCard extends StatelessWidget {
             ),
             const SizedBox(height: AppTheme.gapSm),
             Text(appeal.message, style: theme.textTheme.bodyMedium),
+
+            if (evidence != null) ...[
+              const SizedBox(height: AppTheme.gapMd),
+              evidence!,
+            ],
 
             if (appeal.response != null && appeal.response!.isNotEmpty) ...[
               const Divider(height: AppTheme.gapLg),

@@ -172,6 +172,26 @@ class AppealModel {
   }
 }
 
+/// The original rejected submission an administrator must inspect before an
+/// appeal decision is enabled.
+class AppealSubjectEvidence {
+  const AppealSubjectEvidence({
+    required this.subjectType,
+    required this.title,
+    required this.photoUrl,
+    this.rejectionReason,
+    this.submittedAt,
+  });
+
+  final AppealSubject subjectType;
+  final String title;
+  final String photoUrl;
+  final String? rejectionReason;
+  final DateTime? submittedAt;
+
+  bool get hasPhoto => photoUrl.trim().isNotEmpty;
+}
+
 String _string(Object? value) => value is String ? value : '';
 String? _nullableString(Object? value) => value is String ? value : null;
 

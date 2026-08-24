@@ -2,6 +2,8 @@ import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../core/constants.dart';
 import '../models/appeal_model.dart';
+import '../models/claim_model.dart';
+import '../models/disposal_model.dart';
 
 /// Appeals against a rejection (F5.4).
 ///
@@ -60,6 +62,52 @@ class AppealService {
   /// reviewer should have.
   Stream<List<AppealModel>> watchAppealsFor(String uid) =>
       watchUserAppeals(uid);
+
+  /// Loads the original rejected record whose photograph is the evidence for
+  /// this appeal. A decision screen that only shows the appellant's text asks an
+  /// administrator to decide blind.
+  Future<AppealSubjectEvidence?> fetchSubjectEvidence({
+    required AppealSubject subjectType,
+    required String subjectId,
+  }) async {
+    if (subjectId.trim().isEmpty) return null;
+
+    final collection = subjectType == AppealSubject.disposal
+        ? 'disposals'
+        : 'claims';
+    final document = await _db.collection(collection).doc(subjectId).get();
+    if (!document.exists) return null;
+
+    final data = Map<String, dynamic>.from(
+      document.data() ?? const <String, dynamic>{},
+    );
+    for (final key in ['createdAt', 'reviewedAt']) {
+      final value = data[key];
+      data[key] = value is Timestamp ? value.toDate() : null;
+    }
+
+    if (subjectType == AppealSubject.disposal) {
+      final disposal = DisposalModel.fromJson(data, id: document.id);
+      return AppealSubjectEvidence(
+        subjectType: subjectType,
+        title:
+            '${disposal.itemType.label} · '
+            '${disposal.declaredItemCount} item${disposal.declaredItemCount == 1 ? '' : 's'}',
+        photoUrl: disposal.photoUrl,
+        rejectionReason: disposal.rejectionReason,
+        submittedAt: disposal.createdAt,
+      );
+    }
+
+    final claim = ClaimModel.fromJson(data, id: document.id);
+    return AppealSubjectEvidence(
+      subjectType: subjectType,
+      title: claim.actionType.label,
+      photoUrl: claim.photoUrl,
+      rejectionReason: claim.rejectionReason,
+      submittedAt: claim.createdAt,
+    );
+  }
 
   /// Resolves an appeal.
   ///

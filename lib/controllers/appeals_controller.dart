@@ -32,6 +32,22 @@ final pendingAppealsProvider = StreamProvider.autoDispose<List<AppealModel>>((
   return ref.watch(appealServiceProvider).watchPendingAppeals();
 });
 
+typedef AppealSubjectReference = ({
+  AppealSubject subjectType,
+  String subjectId,
+});
+
+/// The original rejected submission shown beside an admin appeal decision.
+final appealSubjectEvidenceProvider = FutureProvider.autoDispose
+    .family<AppealSubjectEvidence?, AppealSubjectReference>((ref, subject) {
+      return ref
+          .watch(appealServiceProvider)
+          .fetchSubjectEvidence(
+            subjectType: subject.subjectType,
+            subjectId: subject.subjectId,
+          );
+    });
+
 /// Raising and resolving an appeal.
 class AppealActions {
   AppealActions(this._ref);

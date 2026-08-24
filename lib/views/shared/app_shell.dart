@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../controllers/account_profile_controller.dart';
+import '../../controllers/admin_workload_controller.dart';
 import '../../controllers/auth_controller.dart';
 import '../../controllers/cart_controller.dart';
 import '../../core/account_profile.dart';
@@ -41,6 +42,10 @@ class AppShell extends ConsumerWidget {
     // Watched at the shell rather than on the shop screen, so a buyer who adds
     // something and navigates away can still see they have a cart open.
     final cartCount = ref.watch(cartCountProvider);
+    final adminWorkload =
+        user?.isAdmin == true && activeProfile == AccountProfile.admin
+        ? ref.watch(adminWorkloadProvider)
+        : AdminWorkload.empty;
 
     // One account can have multiple profiles, but each profile gets a focused
     // workspace. Permissions still come from [user]; this only controls which
@@ -58,13 +63,14 @@ class AppShell extends ConsumerWidget {
           '/admin/disposals',
           Icons.fact_check_outlined,
           Icons.fact_check,
-          'Review',
+          'Disposals',
         ),
+        ShellDestination('/admin/claims', Icons.eco_outlined, Icons.eco, 'Eco'),
         ShellDestination(
-          '/admin/users',
-          Icons.people_outline,
-          Icons.people,
-          'Accounts',
+          '/admin/appeals',
+          Icons.gavel_outlined,
+          Icons.gavel,
+          'Appeals',
         ),
       ],
       AccountProfile.greenpreneur => const <ShellDestination>[
@@ -132,6 +138,14 @@ class AppShell extends ConsumerWidget {
       // Home → Wallet → Home the back button then has to unwind.
       context.go(target);
     }
+
+    int badgeFor(String path) => switch (path) {
+      '/market' => cartCount,
+      '/admin/disposals' => adminWorkload.disposals.pending,
+      '/admin/claims' => adminWorkload.claims.pending,
+      '/admin/appeals' => adminWorkload.appeals.pending,
+      _ => 0,
+    };
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -249,11 +263,11 @@ class AppShell extends ConsumerWidget {
                             (d) => NavigationRailDestination(
                               icon: _DestinationIcon(
                                 icon: d.icon,
-                                badge: d.path == '/market' ? cartCount : 0,
+                                badge: badgeFor(d.path),
                               ),
                               selectedIcon: _DestinationIcon(
                                 icon: d.selectedIcon,
-                                badge: d.path == '/market' ? cartCount : 0,
+                                badge: badgeFor(d.path),
                               ),
                               label: Text(d.label),
                             ),
@@ -281,11 +295,11 @@ class AppShell extends ConsumerWidget {
                           (d) => NavigationDestination(
                             icon: _DestinationIcon(
                               icon: d.icon,
-                              badge: d.path == '/market' ? cartCount : 0,
+                              badge: badgeFor(d.path),
                             ),
                             selectedIcon: _DestinationIcon(
                               icon: d.selectedIcon,
-                              badge: d.path == '/market' ? cartCount : 0,
+                              badge: badgeFor(d.path),
                             ),
                             label: d.label,
                           ),

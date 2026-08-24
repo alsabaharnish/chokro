@@ -1,4 +1,5 @@
 import 'package:chokro/controllers/auth_controller.dart';
+import 'package:chokro/controllers/admin_workload_controller.dart';
 import 'package:chokro/controllers/cart_controller.dart';
 import 'package:chokro/controllers/orders_controller.dart';
 import 'package:chokro/controllers/submission_history_controller.dart';
@@ -17,7 +18,7 @@ import 'package:go_router/go_router.dart';
 
 UserModel _user(String role) => UserModel(
   uid: 'uid-1',
-  name: 'Nabil',
+  name: 'AL SABAH ARNISH',
   email: 'nabil@example.com',
   role: role,
   status: AppConstants.statusActive,
@@ -33,6 +34,7 @@ Future<void> _pumpHome(WidgetTester tester, String role) async {
     ProviderScope(
       overrides: [
         currentUserProvider.overrideWith((ref) => Stream.value(_user(role))),
+        adminWorkloadProvider.overrideWithValue(AdminWorkload.empty),
         walletProvider.overrideWith(
           (ref) =>
               Stream.value(const WalletModel(userId: 'uid-1', balance: 500)),
@@ -55,6 +57,8 @@ void main() {
     await _pumpHome(tester, AppConstants.roleAdmin);
 
     expect(find.text('Using 3ZERO Admin'), findsOneWidget);
+    expect(find.text('Hello, Arnish'), findsOneWidget);
+    expect(find.textContaining('AL SABAH'), findsNothing);
     expect(find.text('Platform dashboard'), findsOneWidget);
     expect(find.text('Greenpreneur applications'), findsOneWidget);
     expect(find.text('Support green initiatives'), findsNothing);
@@ -92,6 +96,10 @@ void main() {
     final semantics = tester.ensureSemantics();
     await _pumpHome(tester, AppConstants.roleAdmin);
 
+    await tester.scrollUntilVisible(
+      find.widgetWithText(OutlinedButton, 'Switch'),
+      200,
+    );
     await tester.tap(find.widgetWithText(OutlinedButton, 'Switch'));
     await tester.pumpAndSettle();
 

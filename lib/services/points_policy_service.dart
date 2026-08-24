@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
@@ -12,7 +13,8 @@ import '../core/points_policy.dart';
 import '../core/network_errors.dart';
 import '../core/wire_values.dart';
 
-/// Reads and writes `config/points` through the trusted service (F3.3).
+/// Reads `config/points` directly and writes it through the trusted service
+/// (F3.3).
 ///
 /// The policy is not written from the client even though an administrator is
 /// the one editing it. Rules cannot express the invariant that matters — that
@@ -21,34 +23,53 @@ import '../core/wire_values.dart';
 /// feedback; the server is not trusting it.
 class PointsPolicyService {
   final http.Client _client;
+  final FirebaseFirestore _db;
 
-  PointsPolicyService({http.Client? client})
-    : _client = client ?? http.Client();
+  PointsPolicyService({http.Client? client, FirebaseFirestore? firestore})
+    : _client = client ?? http.Client(),
+      _db = firestore ?? FirebaseFirestore.instance;
 
   /// Current policy. Any signed-in user may read it — the values are visible
   /// in the app anyway, as the amount a disposal is worth.
   Future<PolicySnapshot> fetch() async {
-    final response = await _send(
-      () async => _client
-          .get(ApiConfig.path('/config/points'), headers: await _headers())
-          .timeout(ApiConfig.coldStartTimeout),
-      action: 'loading the points policy',
-    );
+    // Reads go straight to Firestore. Routing this harmless, read-only document
+    // through the free trusted service made the editor wait for a 30–60 second
+    // cold start even though the rules already allow every signed-in client to
+    // read `config/points`. Writes still use the server below because validation
+    // across policy fields is the trust boundary.
+    try {
+      final document = await _db.collection('config').doc('points').get();
+      final data = Map<String, dynamic>.from(
+        document.data() ?? const <String, dynamic>{},
+      );
 
-    if (response.statusCode == 200) {
-      final body = _decode(response.body);
-      // The provenance rides alongside the policy numbers in the same object,
-      // so the editor gets both from one request (F3.3).
-      return PolicySnapshot.fromJson(body);
+      final updatedAt = data['updatedAt'];
+      if (updatedAt is Timestamp) {
+        data['updatedAt'] = updatedAt.toDate().toIso8601String();
+      }
+
+      final updatedBy = data['updatedBy'];
+      if (updatedBy is String && updatedBy.isNotEmpty) {
+        try {
+          final editor = await _db.collection('users').doc(updatedBy).get();
+          final name = editor.data()?['name'];
+          if (name is String && name.trim().isNotEmpty) {
+            data['updatedByName'] = name;
+          }
+        } catch (_) {
+          // Buyers may read the public policy but cannot read another user's
+          // profile. The name is provenance convenience, never a reason to fail
+          // checkout or the policy read.
+        }
+      }
+
+      return PolicySnapshot.fromJson(data);
+    } on FirebaseException catch (error) {
+      _log('Firestore policy read failed', error);
+      throw const PolicyException(
+        'The points policy could not be read. Check your connection and try again.',
+      );
     }
-
-    throw PolicyException(
-      _messageFor(
-        response,
-        'The policy could not be '
-        'loaded.',
-      ),
-    );
   }
 
   /// Writes [policy] after the server revalidates it.

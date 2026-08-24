@@ -11,10 +11,12 @@ final pointsPolicyServiceProvider = Provider<PointsPolicyService>((ref) {
 ///
 /// A [FutureProvider] rather than a stream: the policy changes rarely and only
 /// by administrator action, so a listener on the document would cost more than
-/// it returns. The editor invalidates this after a successful save.
-/// The policy and the provenance of its last change, from one request.
-final policySnapshotProvider =
-    FutureProvider.autoDispose<PolicySnapshot>((ref) {
+/// it returns. It is intentionally kept for the signed-in app session so moving
+/// between checkout and the editor does not refetch an unchanged document. The
+/// editor invalidates it after a successful save.
+///
+/// The policy and the provenance of its last change come from one read.
+final policySnapshotProvider = FutureProvider<PolicySnapshot>((ref) {
   return ref.watch(pointsPolicyServiceProvider).fetch();
 });
 
@@ -22,9 +24,7 @@ final policySnapshotProvider =
 ///
 /// Derived from [policySnapshotProvider] rather than fetching again — every
 /// award calculation reads this, and provenance is not worth a second request.
-final pointsPolicyProvider = FutureProvider.autoDispose<PointsPolicy>((
-  ref,
-) async {
+final pointsPolicyProvider = FutureProvider<PointsPolicy>((ref) async {
   final snapshot = await ref.watch(policySnapshotProvider.future);
   return snapshot.policy;
 });

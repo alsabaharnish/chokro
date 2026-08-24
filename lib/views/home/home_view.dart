@@ -2,14 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../controllers/account_profile_controller.dart';
+import '../../controllers/admin_workload_controller.dart';
 import '../../controllers/auth_controller.dart';
 import '../../controllers/wallet_controller.dart';
 import '../../controllers/orders_controller.dart';
 import '../../controllers/submission_history_controller.dart';
 import '../../core/account_profile.dart';
 import '../../core/label_format.dart';
+import '../../core/name_format.dart';
 import '../../core/theme.dart';
 import '../../models/wallet_model.dart';
+import '../admin/admin_todo_list.dart';
 import '../shared/account_profile_switcher.dart';
 import '../shared/action_card.dart';
 import '../shared/app_shell.dart';
@@ -47,6 +50,9 @@ class HomeView extends ConsumerWidget {
           }
 
           final suspended = !user.isActive;
+          final adminWorkload = activeProfile == AccountProfile.admin
+              ? ref.watch(adminWorkloadProvider)
+              : AdminWorkload.empty;
 
           return RefreshIndicator(
             onRefresh: () async {
@@ -83,9 +89,14 @@ class HomeView extends ConsumerWidget {
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
                             _Greeting(
-                              name: user.name,
+                              name: addressName(user.name),
                               role: activeProfile.label,
                             ),
+
+                            if (activeProfile == AccountProfile.admin) ...[
+                              const SizedBox(height: AppTheme.gapMd),
+                              const AdminTodoList(),
+                            ],
 
                             if (suspended) ...[
                               const SizedBox(height: AppTheme.gapMd),
@@ -128,6 +139,8 @@ class HomeView extends ConsumerWidget {
                                           'Approve or reject pending disposals.',
                                       disabledSubtitle:
                                           'Unavailable while suspended.',
+                                      badgeCount:
+                                          adminWorkload.disposals.pending,
                                       tone: ActionTone.admin,
                                       onTap: suspended
                                           ? null
@@ -142,6 +155,7 @@ class HomeView extends ConsumerWidget {
                                           'Decide self-reported green actions.',
                                       disabledSubtitle:
                                           'Unavailable while suspended.',
+                                      badgeCount: adminWorkload.claims.pending,
                                       tone: ActionTone.admin,
                                       onTap: suspended
                                           ? null
@@ -154,6 +168,7 @@ class HomeView extends ConsumerWidget {
                                           'Answer Champions who dispute a decision.',
                                       disabledSubtitle:
                                           'Unavailable while suspended.',
+                                      badgeCount: adminWorkload.appeals.pending,
                                       tone: ActionTone.admin,
                                       onTap: suspended
                                           ? null
@@ -167,6 +182,8 @@ class HomeView extends ConsumerWidget {
                                           'Review Champion requests to start selling.',
                                       disabledSubtitle:
                                           'Unavailable while suspended.',
+                                      badgeCount:
+                                          adminWorkload.applications.pending,
                                       tone: ActionTone.admin,
                                       onTap: suspended
                                           ? null
