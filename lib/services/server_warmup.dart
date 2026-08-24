@@ -47,6 +47,14 @@ class ServerWarmup {
 
   /// Fire-and-forget. Never throws, never blocks the caller.
   static void ping({http.Client? client}) {
+    // Said before the doomed request rather than after it. A base URL that
+    // cannot resolve on this platform produces a bare "Failed to fetch", which
+    // names neither the address nor the reason — and this is the first call the
+    // app makes, so it is the first place anyone will look.
+    final warning = ApiConfig.configurationWarning;
+    if (kDebugMode && warning != null) {
+      debugPrint('[warmup] CONFIGURATION: $warning');
+    }
     unawaited(_ping(client ?? http.Client()));
   }
 
