@@ -32,6 +32,21 @@ class ClaimSubmitView extends ConsumerWidget {
       return const _ClaimSubmitted();
     }
 
+    // The quota was read, shown, and then ignored by both buttons. A Champion
+    // at their weekly limit saw "You have used all 3 claims for this week" in
+    // red and was still invited to choose an action, photograph it, upload the
+    // evidence and submit — because nothing downstream stops them either.
+    // `validClaimCreate` in `firestore.rules` does not read the quota, so the
+    // write succeeds; the limit is enforced inside `approveClaim`, which fails
+    // in front of the *administrator* days later, leaving them to reject by
+    // hand a claim that was never approvable.
+    //
+    // `claimQuotaProvider`'s own comment says the point of reading it is "so a
+    // user is not invited to photograph something they cannot submit". Only the
+    // `data` branch blocks: a quota that failed to load or is still loading must
+    // stay permissive, which is what the notice above already promises.
+    final quotaSpent = quota.asData?.value.isExhausted ?? false;
+
     return AppShell(
       title: 'Log an eco-action',
       child: Center(
@@ -134,7 +149,7 @@ class ClaimSubmitView extends ConsumerWidget {
                 ),
               if (draft.hasPhoto) const SizedBox(height: 10),
               OutlinedButton.icon(
-                onPressed: draft.isCapturing || draft.isSubmitting
+                onPressed: draft.isCapturing || draft.isSubmitting || quotaSpent
                     ? null
                     : () =>
                           ref.read(claimDraftProvider.notifier).capturePhoto(),
@@ -168,7 +183,8 @@ class ClaimSubmitView extends ConsumerWidget {
               ],
               const SizedBox(height: 22),
               FilledButton.icon(
-                onPressed: draft.isReadyToSubmit && !draft.isSubmitting
+                onPressed:
+                    draft.isReadyToSubmit && !draft.isSubmitting && !quotaSpent
                     ? () => ref.read(claimDraftProvider.notifier).submit()
                     : null,
                 icon: draft.isSubmitting
@@ -182,6 +198,21 @@ class ClaimSubmitView extends ConsumerWidget {
                   draft.isSubmitting ? 'Submitting…' : 'Submit claim',
                 ),
               ),
+
+              // A disabled control has to say why it is disabled. The quota
+              // banner is at the top of a long scrolling form, so by the time
+              // the reader reaches a greyed-out Submit it is off screen.
+              if (quotaSpent) ...[
+                const SizedBox(height: AppTheme.gapSm),
+                Text(
+                  'Submitting is paused until your weekly limit resets on '
+                  'Monday. Disposals at a registered bin are not affected.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
 
               // ── Earlier claims ───────────────────────────────────────────
               //

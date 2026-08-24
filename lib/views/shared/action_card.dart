@@ -99,6 +99,14 @@ class _ActionCardState extends State<ActionCard> {
       label:
           '${widget.title}. $shownSubtitle'
           '${widget.badgeCount > 0 ? ' ${widget.badgeCount} awaiting review.' : ''}',
+      // `excludeSemantics` drops the descendants' semantics, and the InkWell's
+      // tap action is one of them — so this node advertised itself as a button
+      // and then had nothing to handle `SemanticsAction.tap`. Every card on the
+      // home screen is one of these, which meant a TalkBack or VoiceOver user
+      // could hear each destination announced and activate none of them: the
+      // whole home screen was read-only to a screen reader. The action has to be
+      // restated on the node that replaces them.
+      onTap: widget.onTap,
       excludeSemantics: true,
       child: MouseRegion(
         onEnter: _enabled ? (_) => setState(() => _hovered = true) : null,
@@ -285,11 +293,18 @@ class SectionHeading extends StatelessWidget {
             ),
             const SizedBox(width: 10),
           ],
-          Text(
-            label,
-            style: theme.textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.w800,
-              letterSpacing: -.3,
+          // `Expanded`, because these are headings rather than chips and they
+          // are long: "3ZERO administration" and "Your recycling" at
+          // `titleLarge` sit beside a fixed 30 px icon, so at an accessibility
+          // text size the Row asked for more width than any phone has and the
+          // heading over-ran the screen edge on every home screen.
+          Expanded(
+            child: Text(
+              label,
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w800,
+                letterSpacing: -.3,
+              ),
             ),
           ),
         ],

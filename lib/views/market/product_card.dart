@@ -177,7 +177,12 @@ class _Pill extends StatelessWidget {
     final scheme = theme.colorScheme;
 
     final (background, foreground) = switch (tone) {
-      _Tone.warning => (scheme.errorContainer, scheme.onErrorContainer),
+      // `warningContainer`, not `errorContainer`. This tone marks "3 left" and
+      // "Out of stock", which are stock facts a shopper should notice, not
+      // errors — and the red pill read as though something about the listing
+      // had gone wrong. Red is also the shop's only signal for a genuine
+      // failure, so spending it here weakened it there.
+      _Tone.warning => (scheme.warningContainer, scheme.onWarningContainer),
       _Tone.muted => (scheme.surfaceContainerHighest, scheme.onSurfaceVariant),
     };
 

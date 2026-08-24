@@ -29,10 +29,26 @@ class ShellDestination {
 
 /// The app frame: title bar, navigation, sign-out.
 class AppShell extends ConsumerWidget {
-  const AppShell({super.key, required this.title, required this.child});
+  const AppShell({
+    super.key,
+    required this.title,
+    required this.child,
+    this.floatingActionButton,
+  });
 
   final String title;
   final Widget child;
+
+  /// The screen's primary create action, if it has one.
+  ///
+  /// Exists so that a destination with a floating action button does not have
+  /// to opt out of the shell to keep it. The Greenpreneur's two nav
+  /// destinations did exactly that — they built their own bare `Scaffold`, so
+  /// selecting "Listings" in the navigation bar removed the navigation bar, and
+  /// because they are reached with `go` rather than `push` there was no back
+  /// button either. The only marked way out was a "Switch to 3ZERO Champion"
+  /// action, which escaped by silently changing the active profile.
+  final Widget? floatingActionButton;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -163,104 +179,162 @@ class AppShell extends ConsumerWidget {
           child: child,
         );
 
-        return Scaffold(
-          backgroundColor: scheme.surface,
-          appBar: AppBar(
-            backgroundColor: scheme.surfaceContainerLowest.withValues(
-              alpha: .97,
-            ),
-            shape: Border(
-              bottom: BorderSide(
-                color: scheme.outlineVariant.withValues(alpha: .82),
+        // Android's back gesture should walk back to the start destination
+        // before it leaves the app — that is the platform convention, and
+        // `NavigationBar` selections are made with `go`, which replaces the
+        // stack rather than growing it. So every tab but Home sat on a
+        // single-entry stack, and one back gesture from Wallet, Shop, History
+        // or any admin queue closed Chokro outright. Only that case is
+        // intercepted: a pushed screen still has something to pop, and Home
+        // itself is where back is supposed to exit.
+        final interceptBack = isDestination && location != '/home' && !canPop;
+
+        return PopScope(
+          canPop: !interceptBack,
+          onPopInvokedWithResult: (didPop, _) {
+            if (didPop) return;
+            context.go('/home');
+          },
+          child: Scaffold(
+            backgroundColor: scheme.surface,
+            floatingActionButton: floatingActionButton,
+            appBar: AppBar(
+              backgroundColor: scheme.surfaceContainerLowest.withValues(
+                alpha: .97,
               ),
-            ),
-            leading: !isDestination && !canPop
-                ? IconButton(
-                    tooltip: 'Back to home',
-                    onPressed: () => context.go('/home'),
-                    icon: const Icon(Icons.arrow_back),
-                  )
-                : null,
-            title: location == '/home' && !isWide
-                ? const BrandMark(size: 34, showWordmark: true)
-                : Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
-            actions: [
-              PopupMenuButton<_AccountAction>(
-                tooltip: 'Account menu',
-                onSelected: (action) {
-                  switch (action) {
-                    case _AccountAction.switchProfile:
-                      showAccountProfilePicker(context, ref, returnHome: true);
-                    case _AccountAction.profile:
-                      context.push('/profile');
-                    case _AccountAction.signOut:
-                      _confirmSignOut(context, ref);
-                  }
-                },
-                itemBuilder: (context) => [
-                  if (user != null &&
-                      accountProfilesForRole(user.role).length > 1)
-                    PopupMenuItem(
-                      value: _AccountAction.switchProfile,
-                      child: ListTile(
-                        leading: Icon(accountProfileIcon(activeProfile)),
-                        title: const Text('Switch profile'),
-                        subtitle: Text(activeProfile.label),
-                        contentPadding: EdgeInsets.zero,
+              shape: Border(
+                bottom: BorderSide(
+                  color: scheme.outlineVariant.withValues(alpha: .82),
+                ),
+              ),
+              leading: !isDestination && !canPop
+                  ? IconButton(
+                      tooltip: 'Back to home',
+                      onPressed: () => context.go('/home'),
+                      icon: const Icon(Icons.arrow_back),
+                    )
+                  : null,
+              title: location == '/home' && !isWide
+                  ? const BrandMark(size: 34, showWordmark: true)
+                  : Text(title, maxLines: 1, overflow: TextOverflow.ellipsis),
+              actions: [
+                PopupMenuButton<_AccountAction>(
+                  tooltip: 'Account menu',
+                  onSelected: (action) {
+                    switch (action) {
+                      case _AccountAction.switchProfile:
+                        showAccountProfilePicker(
+                          context,
+                          ref,
+                          returnHome: true,
+                        );
+                      case _AccountAction.profile:
+                        context.push('/profile');
+                      case _AccountAction.signOut:
+                        _confirmSignOut(context, ref);
+                    }
+                  },
+                  itemBuilder: (context) => [
+                    if (user != null &&
+                        accountProfilesForRole(user.role).length > 1)
+                      PopupMenuItem(
+                        value: _AccountAction.switchProfile,
+                        child: ListTile(
+                          leading: Icon(accountProfileIcon(activeProfile)),
+                          title: const Text('Switch profile'),
+                          subtitle: Text(activeProfile.label),
+                          contentPadding: EdgeInsets.zero,
+                        ),
                       ),
-                    ),
-                  if (location != '/profile')
+                    if (location != '/profile')
+                      const PopupMenuItem(
+                        value: _AccountAction.profile,
+                        child: ListTile(
+                          leading: Icon(Icons.person_outline),
+                          title: Text('Profile'),
+                          contentPadding: EdgeInsets.zero,
+                        ),
+                      ),
                     const PopupMenuItem(
-                      value: _AccountAction.profile,
+                      value: _AccountAction.signOut,
                       child: ListTile(
-                        leading: Icon(Icons.person_outline),
-                        title: Text('Profile'),
+                        leading: Icon(Icons.logout),
+                        title: Text('Sign out'),
                         contentPadding: EdgeInsets.zero,
                       ),
                     ),
-                  const PopupMenuItem(
-                    value: _AccountAction.signOut,
-                    child: ListTile(
-                      leading: Icon(Icons.logout),
-                      title: Text('Sign out'),
-                      contentPadding: EdgeInsets.zero,
-                    ),
+                  ],
+                  // PopupMenuButton already wraps its icon in an IconButton with
+                  // this tooltip and its own expanded-state semantics. Nesting a
+                  // second Tooltip here makes two semantics owners re-parent the
+                  // avatar while the menu route animates, which can trip
+                  // RenderObject's parentDataDirty assertion on web.
+                  icon: _AccountAvatar(name: user?.name),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppTheme.gapSm,
                   ),
-                ],
-                // PopupMenuButton already wraps its icon in an IconButton with
-                // this tooltip and its own expanded-state semantics. Nesting a
-                // second Tooltip here makes two semantics owners re-parent the
-                // avatar while the menu route animates, which can trip
-                // RenderObject's parentDataDirty assertion on web.
-                icon: _AccountAvatar(name: user?.name),
-                padding: const EdgeInsets.symmetric(horizontal: AppTheme.gapSm),
-                offset: const Offset(0, 8),
-              ),
-              const SizedBox(width: AppTheme.gapSm),
-            ],
-          ),
-          body: isWide && isDestination
-              ? Row(
-                  children: [
-                    NavigationRail(
-                      extended: expandedRail,
+                  offset: const Offset(0, 8),
+                ),
+                const SizedBox(width: AppTheme.gapSm),
+              ],
+            ),
+            body: isWide && isDestination
+                ? Row(
+                    children: [
+                      NavigationRail(
+                        extended: expandedRail,
+                        selectedIndex: index,
+                        onDestinationSelected: onSelect,
+                        labelType: expandedRail
+                            ? NavigationRailLabelType.none
+                            : NavigationRailLabelType.all,
+                        groupAlignment: -.72,
+                        minExtendedWidth: 220,
+                        leading: Padding(
+                          padding: const EdgeInsets.only(
+                            top: AppTheme.gapMd,
+                            bottom: AppTheme.gapXl,
+                          ),
+                          child: BrandMark(
+                            size: 42,
+                            showWordmark: expandedRail,
+                          ),
+                        ),
+                        destinations: destinations
+                            .map(
+                              (d) => NavigationRailDestination(
+                                icon: _DestinationIcon(
+                                  icon: d.icon,
+                                  badge: badgeFor(d.path),
+                                ),
+                                selectedIcon: _DestinationIcon(
+                                  icon: d.selectedIcon,
+                                  badge: badgeFor(d.path),
+                                ),
+                                label: Text(d.label),
+                              ),
+                            )
+                            .toList(),
+                      ),
+                      const VerticalDivider(width: 1),
+                      Expanded(child: content),
+                    ],
+                  )
+                : content,
+            bottomNavigationBar: isWide || !isDestination
+                ? null
+                : DecoratedBox(
+                    decoration: BoxDecoration(
+                      border: Border(
+                        top: BorderSide(color: scheme.outlineVariant),
+                      ),
+                    ),
+                    child: NavigationBar(
                       selectedIndex: index,
                       onDestinationSelected: onSelect,
-                      labelType: expandedRail
-                          ? NavigationRailLabelType.none
-                          : NavigationRailLabelType.all,
-                      groupAlignment: -.72,
-                      minExtendedWidth: 220,
-                      leading: Padding(
-                        padding: const EdgeInsets.only(
-                          top: AppTheme.gapMd,
-                          bottom: AppTheme.gapXl,
-                        ),
-                        child: BrandMark(size: 42, showWordmark: expandedRail),
-                      ),
                       destinations: destinations
                           .map(
-                            (d) => NavigationRailDestination(
+                            (d) => NavigationDestination(
                               icon: _DestinationIcon(
                                 icon: d.icon,
                                 badge: badgeFor(d.path),
@@ -269,44 +343,13 @@ class AppShell extends ConsumerWidget {
                                 icon: d.selectedIcon,
                                 badge: badgeFor(d.path),
                               ),
-                              label: Text(d.label),
+                              label: d.label,
                             ),
                           )
                           .toList(),
                     ),
-                    const VerticalDivider(width: 1),
-                    Expanded(child: content),
-                  ],
-                )
-              : content,
-          bottomNavigationBar: isWide || !isDestination
-              ? null
-              : DecoratedBox(
-                  decoration: BoxDecoration(
-                    border: Border(
-                      top: BorderSide(color: scheme.outlineVariant),
-                    ),
                   ),
-                  child: NavigationBar(
-                    selectedIndex: index,
-                    onDestinationSelected: onSelect,
-                    destinations: destinations
-                        .map(
-                          (d) => NavigationDestination(
-                            icon: _DestinationIcon(
-                              icon: d.icon,
-                              badge: badgeFor(d.path),
-                            ),
-                            selectedIcon: _DestinationIcon(
-                              icon: d.selectedIcon,
-                              badge: badgeFor(d.path),
-                            ),
-                            label: d.label,
-                          ),
-                        )
-                        .toList(),
-                  ),
-                ),
+          ),
         );
       },
     );

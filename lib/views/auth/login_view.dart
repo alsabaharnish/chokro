@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../controllers/auth_controller.dart';
 import '../../core/auth_errors.dart';
 import '../../core/validators.dart';
+import '../shared/app_snackbar.dart';
 import '../shared/auth_frame.dart';
 
 class LoginView extends ConsumerStatefulWidget {
@@ -34,12 +35,17 @@ class _LoginViewState extends ConsumerState<LoginView> {
 
   /// Sends a password-reset email (F1.1).
   ///
-  /// Confirms the same way whether or not the address has an account. Firebase
-  /// does not report which, and this must not imply it either — a form that
-  /// answered "no such account" would let anyone test which email addresses hold
-  /// accounts. That is the same leak `authErrorMessage` avoids by keeping the
-  /// three credential failures indistinguishable, and it would be a poor place to
-  /// undo it.
+  /// Confirms the same way whether or not the address has an account — in the
+  /// failure branch as well as the success one. A form that answered "no such
+  /// account" would let anyone test which email addresses hold accounts, which
+  /// is the same leak `authErrorMessage` avoids by keeping the three credential
+  /// failures indistinguishable.
+  ///
+  /// The failure branch used to undo exactly that: it reported
+  /// `authErrorMessage`, whose answer for `user-not-found` is "That email and
+  /// password do not match" — a password on a screen that asks for none, and a
+  /// confirmation that the address is unregistered. `passwordResetMessage`
+  /// reports only the failures that are about the request itself.
   ///
   /// The email field is validated first, and reused, so someone who has already
   /// typed their address does not type it twice.
@@ -50,15 +56,9 @@ class _LoginViewState extends ConsumerState<LoginView> {
     final invalid = validateEmail(email);
 
     if (invalid != null) {
-      final scheme = Theme.of(context).colorScheme;
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            content: Text('Enter your email address first — $invalid.'),
-            backgroundColor: scheme.errorContainer,
-          ),
-        );
+      AppSnackBar.of(
+        context,
+      ).failure('Enter your email address first — $invalid.');
       return;
     }
 
@@ -89,26 +89,29 @@ class _LoginViewState extends ConsumerState<LoginView> {
     if (!mounted) return;
 
     final error = ref.read(authControllerProvider).error;
-    final scheme = Theme.of(context).colorScheme;
+    final notify = AppSnackBar.of(context);
 
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          // A malformed address is worth reporting — that is about the text
-          // typed, not about who exists. Anything else confirms, including the
-          // case where no account has that address.
-          content: Text(
-            error == null
-                ? 'If an account exists for $email, a reset link is on its way.'
-                : (error is AuthFailure
-                      ? error.message
-                      : authErrorMessage(null)),
-          ),
-          backgroundColor: error == null ? null : scheme.errorContainer,
-          showCloseIcon: true,
-        ),
-      );
+    // Only failures about the *request* are reported. A failure that would
+    // reveal whether the address is registered is folded back into the same
+    // neutral confirmation a success gets — see `passwordResetMessage`. What
+    // was here before reported `authErrorMessage`, so a reset for an unknown
+    // address answered "That email and password do not match", which both
+    // named a password nobody had typed and confirmed the account was absent.
+    // An error that never became an `AuthFailure` did not come from Firebase
+    // Auth at all, so it says nothing about who exists and must not be swallowed
+    // into the neutral confirmation.
+    final reportable = switch (error) {
+      null => null,
+      AuthFailure(:final code) => passwordResetMessage(code),
+      _ => 'The reset link could not be sent. Try again in a moment.',
+    };
+
+    if (reportable != null) {
+      notify.failure(reportable);
+      return;
+    }
+
+    notify.info('If an account exists for $email, a reset link is on its way.');
   }
 
   Future<void> _submit() async {
@@ -129,25 +132,20 @@ class _LoginViewState extends ConsumerState<LoginView> {
     final error = ref.read(authControllerProvider).error;
     if (error == null) return;
 
-    final scheme = Theme.of(context).colorScheme;
-    ScaffoldMessenger.of(context)
-      // One message at a time. Tapping Sign In twice used to stack snackbars,
-      // so the second attempt's result queued behind the first.
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(
-            // The controller has already converted the vendor exception into
-            // something readable. `error.toString()` used to land here, which
-            // put "[firebase_auth/invalid-credential] The supplied auth
-            // credential is incorrect, malformed or has expired." in front of
-            // someone who had mistyped their password.
-            error is AuthFailure ? error.message : authErrorMessage(null),
-          ),
-          backgroundColor: scheme.errorContainer,
-          showCloseIcon: true,
-        ),
-      );
+    // The controller has already converted the vendor exception into something
+    // readable. `error.toString()` used to land here, which put
+    // "[firebase_auth/invalid-credential] The supplied auth credential is
+    // incorrect, malformed or has expired." in front of someone who had
+    // mistyped their password.
+    //
+    // `AppSnackBar` replaces a hand-built SnackBar that set
+    // `backgroundColor: errorContainer` and left the content colour at
+    // SnackBar's `onInverseSurface` default — 1.70:1 against that pink, so the
+    // message was unreadable. It also collapses the one-at-a-time handling that
+    // was written out here: tapping Sign In twice used to stack snackbars.
+    AppSnackBar.of(
+      context,
+    ).failure(error is AuthFailure ? error.message : authErrorMessage(null));
   }
 
   @override

@@ -8,6 +8,7 @@ import '../../controllers/catalog_controller.dart';
 import '../../core/label_format.dart';
 import '../../core/network_errors.dart';
 import '../../core/theme.dart';
+import '../../models/cart_model.dart';
 import '../../models/product_model.dart';
 import '../shared/content_state.dart';
 import '../shared/error_retry.dart';
@@ -298,8 +299,30 @@ class _BuyRowState extends ConsumerState<_BuyRow> {
   Future<void> _add() async {
     setState(() => _busy = true);
     try {
-      await ref.read(cartActionsProvider).add(widget.product.id!);
+      final added = await ref.read(cartActionsProvider).add(widget.product.id!);
       if (!mounted) return;
+
+      // The cart has two ceilings the Add button cannot see — 20 distinct
+      // lines and 20 of any one product — and reaching either makes the add a
+      // no-op. This used to report "… added to your cart." either way, so a
+      // full cart quietly ignored the tap while confirming it.
+      if (!added) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              'Your cart is full, so nothing was added. It holds up to '
+              '${CartItem.maxItems} different products and '
+              '${CartItem.maxQty} of any one.',
+            ),
+            action: SnackBarAction(
+              label: 'Cart',
+              onPressed: () => context.push('/cart'),
+            ),
+          ),
+        );
+        return;
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('${widget.product.title} added to your cart.'),

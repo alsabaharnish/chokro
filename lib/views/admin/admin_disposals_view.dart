@@ -9,6 +9,7 @@ import '../../core/submitter_record.dart';
 import '../../core/theme.dart';
 import '../../models/disposal_model.dart';
 import '../shared/app_shell.dart';
+import '../shared/app_snackbar.dart';
 import '../shared/rejection_reason_dialog.dart';
 import '../shared/error_retry.dart';
 
@@ -32,16 +33,14 @@ class AdminDisposalsView extends ConsumerWidget {
     final theme = Theme.of(context);
 
     ref.listen(adminReviewControllerProvider, (previous, next) {
-      final messenger = ScaffoldMessenger.of(context);
+      final notify = AppSnackBar.of(context);
       if (next.error != null) {
-        messenger.showSnackBar(
-          SnackBar(
-            content: Text(next.error!),
-            backgroundColor: theme.colorScheme.error,
-          ),
-        );
+        notify.failure(next.error!);
       } else if (next.lastMessage != null) {
-        messenger.showSnackBar(SnackBar(content: Text(next.lastMessage!)));
+        // A completed review used to share the neutral pill with every failure
+        // in the app. On a queue worked through one row at a time, "Approved —
+        // 50 points credited" and "That did not go through" looked identical.
+        notify.success(next.lastMessage!);
       }
     });
 

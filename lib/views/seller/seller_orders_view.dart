@@ -1,14 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
-import '../../controllers/account_profile_controller.dart';
 import '../../controllers/orders_controller.dart';
-import '../../core/account_profile.dart';
 import '../../core/theme.dart';
 import '../../models/order_model.dart';
 import '../../services/order_service.dart';
 import '../orders/order_card.dart';
+import '../shared/app_shell.dart';
 import '../shared/content_state.dart';
 import '../shared/error_retry.dart';
 
@@ -28,23 +26,13 @@ class SellerOrdersView extends ConsumerWidget {
     final ordersAsync = ref.watch(sellerOrdersProvider);
     final open = ref.watch(sellerOpenOrdersProvider);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Greenpreneur orders'),
-        actions: [
-          IconButton(
-            tooltip: 'Switch to 3ZERO Champion',
-            onPressed: () {
-              ref
-                  .read(accountProfileControllerProvider.notifier)
-                  .select(AccountProfile.champion);
-              context.go('/home');
-            },
-            icon: const Icon(Icons.swap_horiz),
-          ),
-        ],
-      ),
-      body: ordersAsync.when(
+    // Inside `AppShell` — see the note in `seller_products_view.dart`. The
+    // "Switch to 3ZERO Champion" action that used to be the only way off this
+    // screen is now the shell's account menu, which switches profile because
+    // the user asked to rather than because they wanted to leave.
+    return AppShell(
+      title: 'Your orders',
+      child: ordersAsync.when(
         loading: () => const ContentLoading(label: 'Loading your orders…'),
         error: (error, _) => ErrorRetry(
           error: error,

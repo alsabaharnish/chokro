@@ -404,7 +404,29 @@ extension AppSemanticColors on ColorScheme {
       : const Color(0xFF1B3D1E);
 
   /// Something needing attention but not an error — a flagged submission.
+  ///
+  /// The light value was `#8D6E00`, which measures 4.58:1 on `surface` and
+  /// therefore passed AA only on the two lightest of the four surfaces this app
+  /// paints on: 4.37 on `surfaceContainerLow` and 4.15 on `surfaceContainer`
+  /// both fail the 4.5 floor, and those are the surfaces cards and chips
+  /// actually sit on. Darkened to clear AA everywhere with margin rather than
+  /// leaving a colour whose legality depended on which container it landed in.
+  /// Dark mode was already comfortable at 9–11:1 and is unchanged.
   Color get warning => brightness == Brightness.light
-      ? const Color(0xFF8D6E00)
+      ? const Color(0xFF6E5500)
       : const Color(0xFFE8C547);
+
+  /// The tinted background for a warning, and its matching foreground.
+  ///
+  /// [success] had a container pair and [warning] did not, so "needs attention"
+  /// had nothing consistent to sit on — `product_card.dart` reached for
+  /// `errorContainer` to render a *warning* tone, which says "this failed" for
+  /// a listing that is merely low on stock.
+  Color get warningContainer => brightness == Brightness.light
+      ? const Color(0xFFFFE08A)
+      : const Color(0xFF453A00);
+
+  Color get onWarningContainer => brightness == Brightness.light
+      ? const Color(0xFF3D2F00)
+      : const Color(0xFFFFE08A);
 }

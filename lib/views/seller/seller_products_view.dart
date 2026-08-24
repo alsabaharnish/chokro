@@ -2,13 +2,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
-import '../../controllers/account_profile_controller.dart';
 import '../../controllers/seller_products_controller.dart';
-import '../../core/account_profile.dart';
 import '../../core/network_errors.dart';
 import '../../core/theme.dart';
 import '../../models/product_model.dart';
 import '../market/product_card.dart';
+import '../shared/app_shell.dart';
 import '../shared/content_state.dart';
 import '../shared/error_retry.dart';
 
@@ -25,33 +24,20 @@ class SellerProductsView extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final productsAsync = ref.watch(sellerProductsProvider);
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Greenpreneur listings'),
-        actions: [
-          IconButton(
-            tooltip: 'Switch to 3ZERO Champion',
-            onPressed: () {
-              ref
-                  .read(accountProfileControllerProvider.notifier)
-                  .select(AccountProfile.champion);
-              context.go('/home');
-            },
-            icon: const Icon(Icons.swap_horiz),
-          ),
-          IconButton(
-            tooltip: 'Orders to fulfil',
-            onPressed: () => context.push('/seller/orders'),
-            icon: const Icon(Icons.local_shipping_outlined),
-          ),
-        ],
-      ),
+    // Inside `AppShell`, like every other navigation destination. As a bare
+    // `Scaffold` this screen removed the navigation bar the moment it was
+    // selected from the navigation bar, and offered no back button, so its two
+    // app-bar actions were carrying the whole burden of escape. Both are now
+    // redundant and gone: switching profile is in the shell's account menu, and
+    // "Orders to fulfil" is the Orders tab sitting next to this one.
+    return AppShell(
+      title: 'Your listings',
       floatingActionButton: FloatingActionButton.extended(
         onPressed: () => context.push('/seller/products/new'),
         icon: const Icon(Icons.add),
         label: const Text('New listing'),
       ),
-      body: productsAsync.when(
+      child: productsAsync.when(
         loading: () => const ContentLoading(label: 'Loading your listings…'),
         error: (error, _) => ErrorRetry(
           error: error,

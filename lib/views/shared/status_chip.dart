@@ -65,12 +65,28 @@ class StatusChip extends StatelessWidget {
         children: [
           Icon(icon, size: dense ? 13 : 15, color: foreground),
           const SizedBox(width: 5),
-          Text(
-            label,
-            style: (dense
-                    ? Theme.of(context).textTheme.labelSmall
-                    : Theme.of(context).textTheme.labelMedium)
-                ?.copyWith(color: foreground, fontWeight: FontWeight.w600),
+          // `Flexible`, not a bare `Text`. Three of the four labels are short
+          // sentences rather than single words, and `MainAxisSize.min` asks the
+          // Row for their full intrinsic width however little the parent has —
+          // so the chip overflowed its container on *every* phone size at the
+          // default text scale, not merely at an accessibility one. Measured on
+          // the submissions list, where the chip shares a row with a 64 px
+          // thumbnail and the points badge: 204 px over at 320 dp, 164 at 360,
+          // 134 at 390, 94 at 430. Debug builds paint the striped banner; a
+          // release build silently clips the label with no ellipsis, so
+          // "Approved automatically" read as "Approved autom".
+          //
+          // Wrapping rather than ellipsising: the label *is* the information,
+          // and "Verified by a reviewer" truncated to "Verified by a…" loses
+          // the part that distinguishes it from the automatic decision.
+          Flexible(
+            child: Text(
+              label,
+              style: (dense
+                      ? Theme.of(context).textTheme.labelSmall
+                      : Theme.of(context).textTheme.labelMedium)
+                  ?.copyWith(color: foreground, fontWeight: FontWeight.w600),
+            ),
           ),
         ],
       ),

@@ -145,14 +145,24 @@ class _SubmissionCardState extends ConsumerState<_SubmissionCard> {
                           color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
-                      const SizedBox(height: 8),
-                      StatusChip(status: disposal.status),
                     ],
                   ),
                 ),
                 const SizedBox(width: 8),
                 _PointsBadge(points: points, status: status),
               ],
+            ),
+            // The status sits on its own line rather than inside the middle
+            // column. In that column it was competing with a 64 px thumbnail
+            // and the points badge for what was left of the row — 91 px on a
+            // 320 dp phone, against the ~295 px "Approved automatically" needs
+            // — so it overflowed on every handset. Given the full card width it
+            // fits on one line on any phone, and it reads better: the status is
+            // the thing a submitter opens this screen to check.
+            const SizedBox(height: 10),
+            Align(
+              alignment: Alignment.centerLeft,
+              child: StatusChip(status: disposal.status),
             ),
             if (status.isRejected && reason != null && reason.isNotEmpty)
               _Note(

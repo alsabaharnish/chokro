@@ -17,6 +17,20 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-08-24 17:20 (+06) — UI/UX pass: layout, contrast, and dead ends
+
+Fixed usability and correctness defects the suite did not cover: two layout
+overflows that hit at the default text size, error snackbars rendered at 1.70:1
+contrast, and dead ends in the scanner, checkout, the Greenpreneur destinations
+and Android back. Remaining leads, and the five areas the audit did not reach,
+are in `UX_AUDIT_OUTSTANDING.md`.
+
+Files: 22 modified, 3 added (`views/shared/app_snackbar.dart`,
+`views/shared/unsaved_changes.dart`, `test/ux_hardening_test.dart`).
+
+Checks: `flutter analyze` clean · `flutter test` 496 → **524** ·
+`flutter build web` succeeds.
+
 ## 2026-08-24 12:52 (+06) — Internal audit of `5b1b779`: fixed seven defects
 
 Read the whole trust boundary — `server/src`, `firestore.rules`, `lib/` —

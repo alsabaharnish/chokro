@@ -268,12 +268,39 @@ class CartActions {
     return cart;
   }
 
-  Future<void> add(String productId, {int qty = 1}) async {
+  /// Adds to the cart, reporting whether anything actually changed.
+  ///
+  /// [CartModel.withItem] has two ceilings it enforces by returning a cart that
+  /// is *equal to the one it was given*: [CartItem.maxItems] distinct lines, and
+  /// [CartItem.maxQty] of any one product. Silently doing nothing is the right
+  /// behaviour for the model — a buyer tapping "add" repeatedly should stop
+  /// climbing rather than meet an exception — but the caller then had no way to
+  /// tell the two outcomes apart, and the product screen congratulated the buyer
+  /// with "… added to your cart." over a cart that had not changed.
+  ///
+  /// Returns false when the cart was already at a ceiling, so the caller can say
+  /// so instead.
+  Future<bool> add(String productId, {int qty = 1}) async {
     final cart = _requireCart();
-    await _ref
-        .read(cartServiceProvider)
-        .save(cart.withItem(productId, qty: qty));
+    final next = cart.withItem(productId, qty: qty);
+
+    // Compared field by field rather than with `==`: neither [CartModel] nor
+    // [CartItem] overrides equality, so `next == cart` would be an identity
+    // check. That happens to be right for the `maxItems` ceiling, which returns
+    // the very same instance, and wrong for the `maxQty` clamp, which builds a
+    // new instance holding identical quantities.
+    final changed =
+        next.items.length != cart.items.length ||
+        _quantityOf(next, productId) != _quantityOf(cart, productId);
+    if (!changed) return false;
+
+    await _ref.read(cartServiceProvider).save(next);
+    return true;
   }
+
+  static int _quantityOf(CartModel cart, String productId) => cart.items
+      .where((item) => item.productId == productId)
+      .fold(0, (sum, item) => sum + item.qty);
 
   Future<void> setQuantity(String productId, int qty) async {
     final cart = _requireCart();

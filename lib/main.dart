@@ -94,6 +94,21 @@ class _ChokroAppState extends ConsumerState<ChokroApp> {
   /// them, including those.
   final _messengerKey = GlobalKey<ScaffoldMessengerState>();
 
+  /// Built once rather than on every `build`.
+  ///
+  /// `AppTheme.light()` and `AppTheme.dark()` were called inline in the widget
+  /// tree below, so each rebuild of this widget re-ran `ColorScheme.fromSeed`
+  /// twice — that is the HCT colour-science pipeline, plus
+  /// `Typography.material2021` and about twenty-five component themes, for a
+  /// result that cannot change while the app is running.
+  ///
+  /// Held per instance rather than in a `static`, deliberately: `_build` reads
+  /// `defaultTargetPlatform` for its typography and page transitions, and a
+  /// process-wide cache would hand a stale theme to any test that overrides the
+  /// platform.
+  late final ThemeData _light = AppTheme.light();
+  late final ThemeData _dark = AppTheme.dark();
+
   @override
   void initState() {
     super.initState();
@@ -165,8 +180,8 @@ class _ChokroAppState extends ConsumerState<ChokroApp> {
       title: 'Chokro',
       debugShowCheckedModeBanner: false,
       scaffoldMessengerKey: _messengerKey,
-      theme: AppTheme.light(),
-      darkTheme: AppTheme.dark(),
+      theme: _light,
+      darkTheme: _dark,
       // Follows the device. The app is used outdoors at a bin and indoors at a
       // desk, and a user who has chosen dark mode system-wide has chosen it here
       // too — there was previously no dark theme at all, so every screen was a

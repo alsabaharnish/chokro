@@ -7,6 +7,7 @@ import '../../core/network_errors.dart';
 import '../../core/theme.dart';
 import '../../models/appeal_model.dart';
 import '../shared/content_state.dart';
+import '../shared/unsaved_changes.dart';
 
 /// Raising an appeal against a rejection (F5.4).
 ///
@@ -70,91 +71,118 @@ class _AppealFormViewState extends ConsumerState<AppealFormView> {
       );
     }
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('Appeal a decision')),
-      body: Form(
-        key: _formKey,
-        child: ListView(
-          padding: const EdgeInsets.fromLTRB(
-            AppTheme.gapMd,
-            AppTheme.gapMd,
-            AppTheme.gapMd,
-            AppTheme.gap2Xl,
-          ),
-          children: [
-            Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(
-                  maxWidth: AppTheme.maxContentWidth,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Card(
-                      color: theme.colorScheme.surfaceContainerHighest,
-                      margin: EdgeInsets.zero,
-                      child: Padding(
-                        padding: const EdgeInsets.all(AppTheme.gapMd),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Appealing a ${widget.subjectType.label.toLowerCase()}',
-                              style: theme.textTheme.titleSmall?.copyWith(
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(height: AppTheme.gapXs),
-                            Text(
-                              'A 3ZERO Admin reads what you write and answers '
-                              'in writing. An appeal does not award points on its '
-                              'own — where a rejection was wrong, the fix is to '
-                              'submit again so the checks can run.',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: theme.colorScheme.onSurfaceVariant,
-                                height: 1.45,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
-
-                    const SizedBox(height: AppTheme.gapLg),
-                    TextFormField(
-                      controller: _message,
-                      textCapitalization: TextCapitalization.sentences,
-                      minLines: 5,
-                      maxLines: 12,
-                      maxLength: AppealModel.messageMax,
-                      autofocus: true,
-                      decoration: const InputDecoration(
-                        labelText: 'Why do you think the decision was wrong?',
-                        alignLabelWithHint: true,
-                        helperText:
-                            'Be specific: what the photograph shows, where you '
-                            'were, what you disposed of.',
-                      ),
-                      validator: AppealModel.validateMessage,
-                    ),
-
-                    const SizedBox(height: AppTheme.gapMd),
-                    FilledButton.icon(
-                      onPressed: _sending ? null : _send,
-                      icon: _sending
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.send_outlined),
-                      label: Text(_sending ? 'Sending…' : 'Send appeal'),
-                    ),
-                  ],
-                ),
+    // An appeal is a piece of writing with a twenty-character minimum, composed
+    // in one sitting on a phone. Losing it to a back-swipe and having to write
+    // it again is the most discouraging thing this screen could do to someone
+    // who already believes they were treated unfairly.
+    // Rebuilt as the appellant types: `PopScope.canPop` is read at build time
+    // and a `TextEditingController` does not rebuild this State, so the guard
+    // would otherwise still hold the value it had when the empty form opened
+    // and would wave the first back gesture straight through.
+    return ListenableBuilder(
+      listenable: _message,
+      builder: (context, _) => UnsavedChangesGuard(
+        hasChanges: _message.text.trim().isNotEmpty && !_sending,
+        title: 'Discard this appeal?',
+        message:
+            'What you have written has not been sent, and leaving now loses '
+            'it.',
+        child: Scaffold(
+          appBar: AppBar(title: const Text('Appeal a decision')),
+          body: Form(
+            key: _formKey,
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(
+                AppTheme.gapMd,
+                AppTheme.gapMd,
+                AppTheme.gapMd,
+                AppTheme.gap2Xl,
               ),
+              children: [
+                Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      maxWidth: AppTheme.maxContentWidth,
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Card(
+                          color: theme.colorScheme.surfaceContainerHighest,
+                          margin: EdgeInsets.zero,
+                          child: Padding(
+                            padding: const EdgeInsets.all(AppTheme.gapMd),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Appealing a ${widget.subjectType.label.toLowerCase()}',
+                                  style: theme.textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.w700,
+                                  ),
+                                ),
+                                const SizedBox(height: AppTheme.gapXs),
+                                Text(
+                                  'A 3ZERO Admin reads what you write and answers '
+                                  'in writing. An appeal does not award points on its '
+                                  'own — where a rejection was wrong, the fix is to '
+                                  'submit again so the checks can run.',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                    height: 1.45,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+
+                        const SizedBox(height: AppTheme.gapLg),
+                        TextFormField(
+                          controller: _message,
+                          // The twenty-character minimum used to be discovered
+                          // only by pressing Send. Validating once the appellant
+                          // has interacted puts the requirement in front of them
+                          // while they are still writing, beside the character
+                          // counter that already states the maximum.
+                          autovalidateMode: AutovalidateMode.onUserInteraction,
+                          textCapitalization: TextCapitalization.sentences,
+                          minLines: 5,
+                          maxLines: 12,
+                          maxLength: AppealModel.messageMax,
+                          autofocus: true,
+                          decoration: const InputDecoration(
+                            labelText:
+                                'Why do you think the decision was wrong?',
+                            alignLabelWithHint: true,
+                            helperText:
+                                'Be specific: what the photograph shows, where you '
+                                'were, what you disposed of.',
+                          ),
+                          validator: AppealModel.validateMessage,
+                        ),
+
+                        const SizedBox(height: AppTheme.gapMd),
+                        FilledButton.icon(
+                          onPressed: _sending ? null : _send,
+                          icon: _sending
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.send_outlined),
+                          label: Text(_sending ? 'Sending…' : 'Send appeal'),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

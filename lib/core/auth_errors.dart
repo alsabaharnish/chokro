@@ -73,6 +73,46 @@ String authErrorMessage(String? code) {
       return 'For security, sign in again before making this change.';
 
     default:
-      return 'Something went wrong signing you in. Try again.';
+      // Deliberately not "signing you in": this same fallback is what the
+      // registration screen reaches when the Firebase *account* was created and
+      // the Firestore profile write then failed. Telling someone who is
+      // registering that we could not sign them in describes the wrong step and
+      // sends them to the sign-in screen, where their new credentials do work.
+      return 'Something went wrong. Try again in a moment.';
+  }
+}
+
+/// The message for a **password reset** request, which is not a sign-in.
+///
+/// `authErrorMessage` cannot be reused here, and reusing it was a real leak.
+/// Reset is asked for with an email address and no password, so its
+/// `user-not-found` / `invalid-credential` answer rendered as *"That email and
+/// password do not match. Check both and try again."* — nonsense to someone who
+/// typed no password, and worse than nonsense in what it discloses.
+///
+/// The success wording on that screen is deliberately non-committal — "If an
+/// account exists for this address, a reset link is on its way" — precisely so
+/// that asking for a reset cannot be used to test whether an address is
+/// registered. Reporting "no such account" in the failure branch handed the
+/// attacker exactly the answer the success branch withholds.
+///
+/// So only failures that are about the *request* rather than about who exists
+/// are reported. Everything else returns null, and the caller shows the same
+/// neutral confirmation it would have shown on success.
+String? passwordResetMessage(String? code) {
+  switch (code) {
+    case 'invalid-email':
+      return 'That does not look like an email address.';
+
+    case 'too-many-requests':
+      return 'Too many attempts. Wait a few minutes before trying again.';
+
+    case 'network-request-failed':
+      return 'No connection. Check your network and try again.';
+
+    // Includes `user-not-found` and `invalid-credential`: whether an account
+    // exists is not something this screen will confirm either way.
+    default:
+      return null;
   }
 }

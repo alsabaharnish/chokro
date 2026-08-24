@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../controllers/auth_controller.dart';
 import '../../core/auth_errors.dart';
 import '../../core/validators.dart';
+import '../shared/app_snackbar.dart';
 import '../shared/auth_frame.dart';
 
 class RegisterView extends ConsumerStatefulWidget {
@@ -58,18 +59,12 @@ class _RegisterViewState extends ConsumerState<RegisterView> {
       return;
     }
 
-    final scheme = Theme.of(context).colorScheme;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(
-            error is AuthFailure ? error.message : authErrorMessage(null),
-          ),
-          backgroundColor: scheme.errorContainer,
-          showCloseIcon: true,
-        ),
-      );
+    // Was a hand-built SnackBar with `backgroundColor: errorContainer` over
+    // SnackBar's default `onInverseSurface` text: 1.70:1, i.e. unreadable. So
+    // every registration failure reported itself invisibly.
+    AppSnackBar.of(
+      context,
+    ).failure(error is AuthFailure ? error.message : authErrorMessage(null));
   }
 
   @override

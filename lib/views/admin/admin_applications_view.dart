@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import '../../controllers/seller_application_controller.dart';
 import '../../models/seller_application_model.dart';
 import '../shared/app_shell.dart';
+import '../shared/app_snackbar.dart';
 import '../shared/rejection_reason_dialog.dart';
 import '../shared/error_retry.dart';
 
@@ -56,20 +57,20 @@ class AdminApplicationsView extends ConsumerWidget {
     WidgetRef ref, {
     required String success,
   }) {
-    final scheme = Theme.of(context).colorScheme;
     final error = ref.read(sellerApplicationControllerProvider).error;
+    final notify = AppSnackBar.of(context);
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          error == null
-              ? success
-              : 'That did not go through. Check your connection and try again.',
-        ),
-        backgroundColor: error != null ? scheme.errorContainer : null,
-        showCloseIcon: error != null,
-      ),
-    );
+    // The failure branch used to paint `errorContainer` behind SnackBar's
+    // default `onInverseSurface` text, which is 1.70:1 — so an administrator
+    // whose decision failed to save was told so in text they could not read,
+    // and the application stayed in the queue looking unreviewed.
+    if (error != null) {
+      notify.failure(
+        'That did not go through. Check your connection and try again.',
+      );
+      return;
+    }
+    notify.success(success);
   }
 
   @override

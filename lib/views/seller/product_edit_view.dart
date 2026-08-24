@@ -16,6 +16,7 @@ import '../../models/product_model.dart';
 import '../../services/photo_upload_service.dart';
 import '../market/product_card.dart';
 import '../shared/content_state.dart';
+import '../shared/unsaved_changes.dart';
 
 /// Create or edit a listing (F4.1).
 ///
@@ -92,6 +93,7 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
     _tags.text = product.tags.join(', ');
     _category = product.category;
     _imageUrls = product.imageUrls;
+    _pristine = _snapshot();
   }
 
   @override
@@ -104,6 +106,7 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
       if (!_seeded) {
         _seeded = true;
         _shopName.text = ref.read(currentUserProvider).value?.name ?? '';
+        _pristine = _snapshot();
       }
       return _scaffold(child: _form());
     }
@@ -140,10 +143,64 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
     );
   }
 
-  Widget _scaffold({required Widget child}) => Scaffold(
-    appBar: AppBar(title: Text(_isNew ? 'New listing' : 'Edit listing')),
-    body: child,
-  );
+  /// Everything the seller could have typed or picked, flattened so the form's
+  /// current state can be compared against the state it was seeded with.
+  ///
+  /// A field-by-field comparison would work too; one string is simply harder to
+  /// forget to extend when a field is added.
+  String _snapshot() => [
+    _title.text,
+    _shopName.text,
+    _description.text,
+    _price.text,
+    _stock.text,
+    _tags.text,
+    _category.name,
+    _imageUrls.join('|'),
+  ].join('\u0000');
+
+  /// The state the form was opened with — the stored listing, or the defaults
+  /// for a new one. Set by [_seed] and by the create branch in [build].
+  String? _pristine;
+
+  bool get _hasUnsavedChanges =>
+      _pristine != null && _snapshot() != _pristine && !_saving;
+
+  Widget _scaffold({required Widget child}) {
+    // `PopScope.canPop` is read when the widget builds, and typing into a
+    // `TextEditingController` does not rebuild this State — so without this the
+    // guard would still be holding the value it had when the form opened, and
+    // would wave the first back gesture straight through. Only the guard is
+    // rebuilt on each keystroke: the scaffold below is passed through as
+    // `child`, so the same widget instance is reused and the form itself does
+    // not rebuild.
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        _title,
+        _shopName,
+        _description,
+        _price,
+        _stock,
+        _tags,
+      ]),
+      builder: (context, scaffold) => UnsavedChangesGuard(
+        hasChanges: _hasUnsavedChanges,
+        title: 'Discard this listing?',
+        message: _isNew
+            // Worth naming: a photograph is uploaded the moment it is picked,
+            // so an abandoned new listing is not merely lost typing.
+            ? 'This listing has not been saved. Any photograph you added stays '
+                  'uploaded but will not belong to a listing.'
+            : 'Your edits to this listing have not been saved, and leaving now '
+                  'loses them.',
+        child: scaffold!,
+      ),
+      child: Scaffold(
+        appBar: AppBar(title: Text(_isNew ? 'New listing' : 'Edit listing')),
+        body: child,
+      ),
+    );
+  }
 
   Widget _form({ProductModel? existing}) {
     final theme = Theme.of(context);

@@ -62,19 +62,47 @@ class _ScanViewState extends ConsumerState<ScanView> {
     ref.read(scanControllerProvider.notifier).resolve(raw);
   }
 
-  void _scanAgain() {
+  /// Puts the scanner back into a state where it can actually read a code.
+  ///
+  /// Clearing [_handled] is not enough on its own. The controller runs with
+  /// [DetectionSpeed.noDuplicates], whose native side keeps the last decoded
+  /// value and suppresses anything equal to it — `lastScanned` in the Android
+  /// plugin — until the camera session is restarted, which is the only thing
+  /// that sets it back to null. So after a bin failed to resolve, "Scan again"
+  /// pointed at *that same bin* produced no detection at all, forever. The
+  /// failure that most needs a retry is a transient one on a single bin, which
+  /// is exactly the case this made unrecoverable.
+  Future<void> _restartScanner() async {
     _handled = false;
     ref.read(scanControllerProvider.notifier).reset();
+    try {
+      await _controller.stop();
+      await _controller.start();
+    } on MobileScannerException {
+      // Already stopped, or the camera is unavailable. `MobileScanner`'s
+      // errorBuilder owns that case and is already showing it; throwing out of
+      // a button handler would only add an unhandled-exception overlay on top.
+    }
   }
 
-  void _continueToPhoto() {
+  Future<void> _continueToPhoto() async {
     final bin = ref.read(scanControllerProvider).bin;
     if (bin == null) return;
 
     // Opens a fresh draft here rather than on the photo screen: backing out and
     // scanning a different bin must not leave a photo attached to the old one.
     ref.read(disposalDraftProvider.notifier).startForBin(bin);
-    context.push('/dispose/photo');
+    await context.push('/dispose/photo');
+
+    // Back from step 2, and this screen was kept alive underneath it the whole
+    // time — so `_handled` was still true and `_onDetect` returned immediately
+    // on every frame. The panel below shows "Continue" rather than "Scan again"
+    // once a bin has resolved, so there was no affordance to recover with
+    // either: a Champion who backed out to pick a different bin found a live
+    // camera preview that could not scan anything and no way to reset it short
+    // of leaving the flow.
+    if (!mounted) return;
+    await _restartScanner();
   }
 
   @override
@@ -119,7 +147,12 @@ class _ScanViewState extends ConsumerState<ScanView> {
                 MobileScanner(
                   controller: _controller,
                   onDetect: _onDetect,
-                  errorBuilder: (context, error) => _CameraError(error: error),
+                  errorBuilder: (context, error) => _CameraError(
+                    error: error,
+                    onRetry: _restartScanner,
+                    onOpenSettings: () =>
+                        ref.read(locationServiceProvider).openSettings(),
+                  ),
                 ),
                 // Simple aiming frame. Purely visual — the scanner reads the
                 // whole frame, not just this box.
@@ -139,7 +172,7 @@ class _ScanViewState extends ConsumerState<ScanView> {
           _ResultPanel(
             scan: scan,
             theme: theme,
-            onScanAgain: _scanAgain,
+            onScanAgain: _restartScanner,
             onContinue: _continueToPhoto,
           ),
         ],
@@ -151,8 +184,8 @@ class _ScanViewState extends ConsumerState<ScanView> {
 class _ResultPanel extends StatelessWidget {
   final ScanState scan;
   final ThemeData theme;
-  final VoidCallback onScanAgain;
-  final VoidCallback onContinue;
+  final Future<void> Function() onScanAgain;
+  final Future<void> Function() onContinue;
 
   const _ResultPanel({
     required this.scan,
@@ -258,10 +291,28 @@ class _ResultPanel extends StatelessWidget {
   }
 }
 
+/// Shown in place of the preview when the camera will not start.
+///
+/// This used to be an icon and a sentence, and the sentence was "Enable it in
+/// Settings and return here" — an instruction with no way to follow it and no
+/// effect once followed. There was no control on the screen at all: no way to
+/// reach Settings, and nothing to retry with afterwards, so a Champion who
+/// granted the permission came back to the same black panel and had to kill the
+/// app. Step 1 of the app's core flow was unrecoverable from its most likely
+/// first-run failure.
+///
+/// So both halves are here now: a route to the OS page where the permission
+/// lives, and a retry that restarts the camera session for when they return.
 class _CameraError extends StatelessWidget {
   final MobileScannerException error;
+  final Future<void> Function() onRetry;
+  final Future<void> Function() onOpenSettings;
 
-  const _CameraError({required this.error});
+  const _CameraError({
+    required this.error,
+    required this.onRetry,
+    required this.onOpenSettings,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -270,7 +321,10 @@ class _CameraError extends StatelessWidget {
 
     return ColoredBox(
       color: Colors.black,
-      child: Center(
+      // Scrollable because this panel is sized by the camera preview's slot,
+      // which on a short window with the keyboard-free step bar above it is not
+      // guaranteed to fit an icon, two lines and two buttons at large text.
+      child: SingleChildScrollView(
         child: Padding(
           padding: const EdgeInsets.all(24),
           child: Column(
@@ -281,14 +335,34 @@ class _CameraError extends StatelessWidget {
                 color: Colors.white70,
                 size: 48,
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: AppTheme.gapMd),
               Text(
                 isPermission
-                    ? 'Camera permission is needed to scan bin codes. '
-                          'Enable it in Settings and return here.'
-                    : 'The camera could not be started.',
+                    ? 'Chokro needs camera access to read the code on a bin. '
+                          'Open Settings to allow it, then come back and tap '
+                          'Try again.'
+                    : 'The camera could not be started. Close anything else '
+                          'using it, then tap Try again.',
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: Colors.white70),
+              ),
+              const SizedBox(height: AppTheme.gapLg),
+              if (isPermission) ...[
+                FilledButton.icon(
+                  onPressed: onOpenSettings,
+                  icon: const Icon(Icons.settings_outlined),
+                  label: const Text('Open Settings'),
+                ),
+                const SizedBox(height: AppTheme.gapSm),
+              ],
+              OutlinedButton.icon(
+                onPressed: onRetry,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Try again'),
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white,
+                  side: const BorderSide(color: Colors.white70),
+                ),
               ),
             ],
           ),

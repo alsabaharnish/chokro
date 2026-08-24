@@ -63,14 +63,17 @@ class _CheckoutViewState extends ConsumerState<CheckoutView> {
                 label: 'Reading the points policy…',
                 slowHint: ContentLoading.serverWakingHint,
               ),
-              error: (error, _) => ContentEmpty(
-                icon: Icons.cloud_off_outlined,
+              // "Try again in a moment" with only a "Back to cart" button was a
+              // promise the screen did not keep: the provider holds its error,
+              // so returning to checkout showed the same message again and the
+              // buyer had no way to re-attempt the read short of restarting the
+              // app. The retry now actually re-runs it.
+              error: (error, _) => _CheckoutUnavailable(
                 title: 'The points policy did not load',
                 message:
                     'Checkout needs the redemption rate before it can show you '
-                    'a total. Try again in a moment.',
-                actionLabel: 'Back to cart',
-                onAction: () => context.pop(),
+                    'a total. Nothing has been ordered or charged.',
+                onRetry: () => ref.invalidate(pointsPolicyProvider),
               ),
               data: (_) {
                 // The balance is checked before the quote, because a failed
@@ -79,15 +82,13 @@ class _CheckoutViewState extends ConsumerState<CheckoutView> {
                 // points to spend. `checkoutQuoteProvider` now yields null
                 // rather than assuming, so this branch has to say which.
                 if (balanceAsync.hasError) {
-                  return ContentEmpty(
-                    icon: Icons.account_balance_wallet_outlined,
+                  return _CheckoutUnavailable(
                     title: 'Your balance did not load',
                     message:
                         'Checkout needs it before it can show what your points '
                         'are worth on this order. Nothing has been ordered or '
                         'charged.',
-                    actionLabel: 'Back to cart',
-                    onAction: () => context.pop(),
+                    onRetry: () => ref.invalidate(spendableBalanceProvider),
                   );
                 }
                 if (balanceAsync.isLoading || quote == null) {
@@ -815,6 +816,79 @@ class _ReceiptRow extends StatelessWidget {
             child: Text(value, textAlign: TextAlign.end, style: style),
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// A checkout read that failed, with both ways out of it.
+///
+/// Checkout cannot show a total until the points policy and the wallet balance
+/// have both been read, so a failure in either has to stop the screen. What it
+/// must not do is strand the buyer: these two branches previously offered only
+/// "Back to cart" while their own text said "Try again in a moment", and since
+/// the providers retain their error, coming back to checkout produced the same
+/// dead end. Retry is the primary action because a failed read here is almost
+/// always the trusted service still waking.
+class _CheckoutUnavailable extends StatelessWidget {
+  const _CheckoutUnavailable({
+    required this.title,
+    required this.message,
+    required this.onRetry,
+  });
+
+  final String title;
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return Center(
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(AppTheme.gapXl),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 420),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(
+                Icons.cloud_off_outlined,
+                size: 40,
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+              const SizedBox(height: AppTheme.gapMd),
+              Text(
+                title,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: AppTheme.gapSm),
+              Text(
+                message,
+                textAlign: TextAlign.center,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                  height: 1.45,
+                ),
+              ),
+              const SizedBox(height: AppTheme.gapLg),
+              FilledButton.icon(
+                onPressed: onRetry,
+                icon: const Icon(Icons.refresh),
+                label: const Text('Try again'),
+              ),
+              const SizedBox(height: AppTheme.gapSm),
+              TextButton(
+                onPressed: () => context.pop(),
+                child: const Text('Back to cart'),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
