@@ -1,6 +1,11 @@
 import 'package:chokro/core/product_taxonomy.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+/// The pattern `validTag` and `validSearchToken` apply in `firestore.rules`.
+/// Copied verbatim, because a value this side produces that the rules refuse
+/// fails the entire product write with an unattributable permission-denied.
+const String rulesTagPattern = r'^[a-z0-9]+(-[a-z0-9]+)*$';
+
 void main() {
   group('normalizeTag', () {
     test('lowercases, trims and hyphenates inner whitespace', () {
@@ -23,6 +28,20 @@ void main() {
 
     test('caps length so one tag cannot spend the document', () {
       expect(normalizeTag('a' * 200).length, 40);
+    });
+
+    test('truncation never leaves the trailing dash rules refuse', () {
+      // 9 + 1 + 9 + 1 + 9 + 1 + 9 = 39 characters, so the cut at 40 lands
+      // exactly on the separator before the last word. Before this was fixed
+      // the result was `handmades-recycleds-shoppings-luggagess-`, which fails
+      // `validTag` in firestore.rules and took the whole product write down
+      // with a bare permission-denied.
+      const raw = 'handmades recycleds shoppings luggagess carrier';
+      final tag = normalizeTag(raw);
+
+      expect(tag, 'handmades-recycleds-shoppings-luggagess');
+      expect(tag, matches(rulesTagPattern));
+      expect(tag.length, lessThanOrEqualTo(40));
     });
   });
 
@@ -100,6 +119,26 @@ void main() {
       );
 
       expect(tokens.length, lessThanOrEqualTo(ProductLimits.maxSearchTokens));
+    });
+
+    test('every token satisfies the pattern the rules check it against', () {
+      // `validSearchToken` in firestore.rules is `validString(v, 2, 40)` plus
+      // this pattern, and one bad entry refuses the whole product document.
+      final tokens = searchTokensFor(
+        title: 'Handmade Jute Bag',
+        category: ProductCategory.fashion,
+        tags: const [
+          'handmades recycleds shoppings luggagess carrier',
+          '100% Cotton!',
+          '--eco -- friendly--',
+        ],
+      );
+
+      expect(tokens, isNotEmpty);
+      for (final token in tokens) {
+        expect(token, matches(rulesTagPattern), reason: 'token "$token"');
+        expect(token.length, inInclusiveRange(2, 40), reason: 'token "$token"');
+      }
     });
   });
 

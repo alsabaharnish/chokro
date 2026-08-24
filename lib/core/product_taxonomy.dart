@@ -112,7 +112,21 @@ String normalizeTag(String raw) {
       .replaceAll(RegExp(r'-+'), '-');
   // A leading or trailing dash is an artefact of stripping, never intent.
   final trimmed = cleaned.replaceAll(RegExp(r'^-+|-+$'), '');
-  return trimmed.length > 40 ? trimmed.substring(0, 40) : trimmed;
+  if (trimmed.length <= 40) return trimmed;
+
+  // Strip dashes AGAIN after truncating, not only before it.
+  //
+  // The cut lands wherever character 41 happens to be, and when that is the
+  // separator between two words the result ends in a dash — which
+  // `validTag` and `validSearchToken` in `firestore.rules` both refuse, since
+  // both require `^[a-z0-9]+(-[a-z0-9]+)*$`. The tag and the search token built
+  // from it are written in the same document as the listing, so one over-long
+  // tag typed in the seller console failed the whole product write with a bare
+  // `permission-denied` and nothing on the screen naming the tag as the cause.
+  //
+  // Reachable from the console today: the tags field is free text split on
+  // commas, with no length limit of its own.
+  return trimmed.substring(0, 40).replaceAll(RegExp(r'-+$'), '');
 }
 
 /// Normalises, de-duplicates and caps a tag list.

@@ -6,6 +6,7 @@ import '../../controllers/auth_controller.dart';
 import '../../controllers/cart_controller.dart';
 import '../../controllers/catalog_controller.dart';
 import '../../core/label_format.dart';
+import '../../core/network_errors.dart';
 import '../../core/theme.dart';
 import '../../models/product_model.dart';
 import '../shared/content_state.dart';
@@ -311,7 +312,14 @@ class _BuyRowState extends ConsumerState<_BuyRow> {
     } catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not update your cart: $error')),
+        // `CartUnavailableException` already carries a sentence and passes
+        // through unchanged; a Firestore failure on the cart write does not,
+        // and `$error` rendered its vendor prefix to the buyer.
+        SnackBar(
+          content: Text(
+            'Could not update your cart. ${friendlyErrorMessage(error)}',
+          ),
+        ),
       );
     } finally {
       if (mounted) setState(() => _busy = false);

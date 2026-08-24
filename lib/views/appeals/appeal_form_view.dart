@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../controllers/appeals_controller.dart';
+import '../../core/network_errors.dart';
 import '../../core/theme.dart';
 import '../../models/appeal_model.dart';
 import '../shared/content_state.dart';
@@ -191,6 +192,8 @@ class _AppealFormViewState extends ConsumerState<AppealFormView> {
       return 'That appeal was refused. You can only appeal your own '
           'submissions, and only ones that were rejected.';
     }
-    return 'The appeal could not be sent. $error';
+    // Everything that is not the refusal above — an offline write, a quota
+    // error — still reached the appellant as a raw exception.
+    return 'The appeal could not be sent. ${friendlyErrorMessage(error)}';
   }
 }

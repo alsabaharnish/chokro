@@ -92,12 +92,7 @@ class ClaimService {
     );
 
     if (response.statusCode == 200) {
-      final body = _decode(response.body);
-      return ClaimQuotaStatus(
-        weekKey: wireString(body['weekKey']) ?? '',
-        approvedThisWeek: wireInt(body['approvedThisWeek']) ?? 0,
-        limit: wireInt(body['limit']) ?? 3,
-      );
+      return ClaimQuotaStatus.fromJson(_decode(response.body));
     }
 
     throw ClaimException(
@@ -207,6 +202,27 @@ class ClaimQuotaStatus {
     required this.approvedThisWeek,
     required this.limit,
   });
+
+  /// Reads the body of `GET /claims/quota`.
+  ///
+  /// The count key on the wire is **`used`**, which is what
+  /// `claimQuotaStatus()` in `server/src/claims.js` returns. This parsing used
+  /// to be inline in [ClaimService.fetchQuota] and read `approvedThisWeek` — a
+  /// key the server has never sent — so [approvedThisWeek] was always the `?? 0`
+  /// fallback and [remaining] was always the full allowance. A Champion who had
+  /// already used their three approved claims was told "3 claims left this
+  /// week", composed a fourth, and only found out at review time. F6.4 exists
+  /// precisely so that they are told before they photograph something.
+  ///
+  /// Split out of the service so the wire contract can be asserted without a
+  /// Firebase session, the same shape as `VerificationOutcome.fromJson`.
+  factory ClaimQuotaStatus.fromJson(Map<String, dynamic> json) {
+    return ClaimQuotaStatus(
+      weekKey: wireString(json['weekKey']) ?? '',
+      approvedThisWeek: wireInt(json['used']) ?? 0,
+      limit: wireInt(json['limit']) ?? 3,
+    );
+  }
 
   final String weekKey;
   final int approvedThisWeek;

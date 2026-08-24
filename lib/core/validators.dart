@@ -42,22 +42,77 @@ String? validateNewPassword(String? value) {
   return null;
 }
 
+/// Upper bounds on free-text fields, duplicated from `firestore.rules`.
+///
+/// ## Why the maxima have to be here as well
+///
+/// Rules pin an exact length on every stored string — `validString(u.name, 2,
+/// 80)`, `validString(a.businessName, 2, 120)`, `validString(a.description, 20,
+/// 1000)` — and a write that breaks one is refused with a bare
+/// `permission-denied` that cannot say which field was wrong. Only the minima
+/// were checked on this side, so an over-long value passed the form, reached
+/// Firestore, and came back as a failure the user could neither read nor act
+/// on. On the registration path it was worse than a refusal: the Auth account
+/// is created first, so the profile write failing rolled the account back and
+/// the user was told, generically, to try again — which reproduced it exactly.
+///
+/// Any change here must be made in `firestore.rules` too, the same contract
+/// `ProductLimits` already documents for the marketplace bounds.
+class TextLimits {
+  const TextLimits._();
+
+  /// `users.name`.
+  static const int nameMin = 2;
+  static const int nameMax = 80;
+
+  /// `sellerApplications.businessName`.
+  static const int businessNameMin = 2;
+  static const int businessNameMax = 120;
+
+  /// `sellerApplications.description`.
+  static const int applicationDescriptionMin = 20;
+  static const int applicationDescriptionMax = 1000;
+
+  /// `sellerApplications.reason`, the tightest of the rejection reasons and so
+  /// the one the shared dialog is bounded by.
+  static const int rejectionReasonMin = 10;
+  static const int rejectionReasonMax = 500;
+}
+
 /// A display name. Trimmed, because ' ' is not a name.
 String? validateName(String? value) {
   final name = value?.trim() ?? '';
   if (name.isEmpty) return 'Enter your name';
-  if (name.length < 2) return 'That is too short to be a name';
+  if (name.length < TextLimits.nameMin) {
+    return 'That is too short to be a name';
+  }
+  if (name.length > TextLimits.nameMax) {
+    return 'Names are limited to ${TextLimits.nameMax} characters';
+  }
   return null;
 }
 
 /// Free text with a minimum useful length, used for the seller application's
 /// description and anywhere else a one-word answer is not an answer.
-String? validateMinLength(String? value, int minimum, String subject) {
+///
+/// [maximum] mirrors the ceiling `firestore.rules` enforces on the same field —
+/// see [TextLimits]. It is optional only so existing callers that have no stored
+/// ceiling keep working; anything written to Firestore should pass it.
+String? validateMinLength(
+  String? value,
+  int minimum,
+  String subject, {
+  int? maximum,
+}) {
   final text = value?.trim() ?? '';
   if (text.isEmpty) return 'Enter $subject';
   if (text.length < minimum) {
     final needed = minimum - text.length;
     return '$needed more character${needed == 1 ? '' : 's'}';
+  }
+  if (maximum != null && text.length > maximum) {
+    final over = text.length - maximum;
+    return '$over character${over == 1 ? '' : 's'} too many (limit $maximum)';
   }
   return null;
 }

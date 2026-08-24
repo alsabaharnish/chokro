@@ -190,7 +190,14 @@ async function approveDisposal({
     //
     // Keying on the day the decision is made takes the choice away from the
     // client. `claimQuotas` has always worked this way and was never vulnerable.
-    const capKey = `${uid}_${policyModule.dayKey(new Date())}`;
+    //
+    // One clock reading for the key and for the field written from it below.
+    // Two separate `new Date()` calls could straddle 00:00 UTC and store a
+    // `dayKey` field that disagrees with the document id it is filed under,
+    // which is exactly the pair anyone auditing the cap would compare.
+    const decidedAt = new Date();
+    const capDayKey = policyModule.dayKey(decidedAt);
+    const capKey = `${uid}_${capDayKey}`;
     const capRef = firestore.collection('dailyCaps').doc(capKey);
     const capSnap = await txn.get(capRef);
     const approvedToday = capSnap.exists
@@ -262,7 +269,8 @@ async function approveDisposal({
       capRef,
       {
         userId: uid,
-        dayKey: policyModule.dayKey(new Date()),
+        // The same reading the document id was composed from, above.
+        dayKey: capDayKey,
         count: admin.firestore.FieldValue.increment(1),
       },
       { merge: true },
@@ -277,7 +285,7 @@ async function approveDisposal({
     // compose the key from those two values alone.
     const lockoutId = `${uid}_${disposal.binId}`;
     txn.set(firestore.collection('lockouts').doc(lockoutId), {
-      expiresAt: policyModule.lockoutExpiry(policy, new Date()),
+      expiresAt: policyModule.lockoutExpiry(policy, decidedAt),
       userId: uid,
       binId: disposal.binId,
       disposalId,

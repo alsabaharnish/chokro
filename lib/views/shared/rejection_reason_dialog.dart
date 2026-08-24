@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/theme.dart';
+import '../../core/validators.dart';
 
 /// Asks an administrator why they are rejecting something.
 ///
@@ -49,7 +50,15 @@ class _RejectionReasonDialogState extends State<_RejectionReasonDialog> {
 
   /// A reason this short is not a reason. The user reads it and has to be able
   /// to act on it — "no" tells them nothing and makes an appeal unanswerable.
-  static const int _minLength = 10;
+  static const int _minLength = TextLimits.rejectionReasonMin;
+
+  /// The ceiling comes from `firestore.rules`, which caps
+  /// `sellerApplications.reason` at 500 characters and refuses a longer write
+  /// with a bare `permission-denied`. Disposal and claim rejections travel to
+  /// the trusted service instead and have no stored ceiling, but this dialog is
+  /// shared by all three, so it is bounded by the tightest of them rather than
+  /// letting one queue fail in a way the other two do not.
+  static const int _maxLength = TextLimits.rejectionReasonMax;
 
   @override
   void initState() {
@@ -68,7 +77,8 @@ class _RejectionReasonDialogState extends State<_RejectionReasonDialog> {
   void _onChanged() => setState(() {});
 
   String get _reason => _controller.text.trim();
-  bool get _isValid => _reason.length >= _minLength;
+  bool get _isValid =>
+      _reason.length >= _minLength && _reason.length <= _maxLength;
 
   void _submit() {
     if (!_isValid) return;
@@ -99,6 +109,7 @@ class _RejectionReasonDialogState extends State<_RejectionReasonDialog> {
             autofocus: true,
             maxLines: 3,
             minLines: 3,
+            maxLength: _maxLength,
             textCapitalization: TextCapitalization.sentences,
             // Enter inserts a newline in a multiline field, so submission is the
             // button's job. Keeps the keyboard's action key honest.

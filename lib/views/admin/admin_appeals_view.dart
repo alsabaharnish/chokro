@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../controllers/appeals_controller.dart';
 import '../../core/label_format.dart';
+import '../../core/network_errors.dart';
 import '../../core/theme.dart';
 import '../../models/appeal_model.dart';
 import '../appeals/appeals_view.dart';
@@ -526,7 +527,14 @@ class _DecisionButtonsState extends ConsumerState<_DecisionButtons> {
       messenger.showSnackBar(SnackBar(content: Text(error.message)));
     } catch (error) {
       messenger.showSnackBar(
-        SnackBar(content: Text('The decision was not recorded. $error')),
+        // Resolving an appeal is a Firestore write the rules can refuse for
+        // several reasons at once, and `$error` handed the administrator the
+        // vendor prefix instead of any of them.
+        SnackBar(
+          content: Text(
+            'The decision was not recorded. ${friendlyErrorMessage(error)}',
+          ),
+        ),
       );
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -596,8 +604,17 @@ class _AnswerDialogState extends State<_AnswerDialog> {
             minLines: 3,
             maxLines: 6,
             maxLength: AppealModel.responseMax,
-            decoration: const InputDecoration(
+            decoration: InputDecoration(
               hintText: 'The user reads this exactly as you write it.',
+              // Shown, not merely computed.
+              //
+              // The comment on the button below says the helper text explains
+              // why it is disabled, and nothing rendered `problem` — so an
+              // administrator two words into an answer saw a dead button and no
+              // reason for it. `_RejectionReasonDialog` counts the shortfall
+              // down for exactly this case; this dialog now does too.
+              helperText: problem ?? 'This is shown to the user.',
+              helperMaxLines: 2,
             ),
           ),
         ],

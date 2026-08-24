@@ -450,13 +450,24 @@ class _PointsCard extends ConsumerWidget {
               Slider(
                 value: quote.pointsApplied.toDouble().clamp(0, cap.toDouble()),
                 max: cap.toDouble(),
-                // One notch per whole taka, so the slider cannot land on a
-                // figure the policy would round away underneath the buyer.
+                // At most a hundred notches, because a slider with six hundred
+                // of them is not a control anybody can aim.
                 divisions: (cap ~/ pointsPerTaka).clamp(1, 100),
                 label: '${quote.pointsApplied} pts',
+                // Snapped to a whole-taka block on the way in, NOT left to the
+                // divisions.
+                //
+                // The clamp above means a notch is only worth one taka while
+                // the cap is at most a hundred taka's worth of points. Above
+                // that a notch is `cap / 100` points, which need not be a
+                // multiple of `pointsPerTaka` — so the buyer released the thumb
+                // on 347 points, `applyRedemption` floored it to 340, and the
+                // label said 340 while the thumb sat somewhere else. Rounding
+                // down here makes every value this control can produce one the
+                // policy will accept unchanged.
                 onChanged: (value) => ref
                     .read(checkoutPointsProvider.notifier)
-                    .set(value.round()),
+                    .set((value.round() ~/ pointsPerTaka) * pointsPerTaka),
               ),
               Row(
                 children: [

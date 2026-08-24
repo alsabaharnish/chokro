@@ -207,14 +207,22 @@ class _SellerApplicationViewState extends ConsumerState<SellerApplicationView> {
                           textCapitalization: TextCapitalization.words,
                           textInputAction: TextInputAction.next,
                           enabled: !isLoading,
+                          // Both bounds come from `firestore.rules`, which
+                          // refuses the write outright with no way to say which
+                          // field was wrong — see [TextLimits].
+                          maxLength: TextLimits.businessNameMax,
                           // `border` is no longer repeated at every field — the
                           // shared input theme owns it.
                           decoration: const InputDecoration(
                             labelText: 'Business name',
                             prefixIcon: Icon(Icons.storefront_outlined),
                           ),
-                          validator: (v) =>
-                              validateMinLength(v, 2, 'a business name'),
+                          validator: (v) => validateMinLength(
+                            v,
+                            TextLimits.businessNameMin,
+                            'a business name',
+                            maximum: TextLimits.businessNameMax,
+                          ),
                         ),
                         const SizedBox(height: AppTheme.gapMd),
                         TextFormField(
@@ -223,14 +231,19 @@ class _SellerApplicationViewState extends ConsumerState<SellerApplicationView> {
                           minLines: 4,
                           textCapitalization: TextCapitalization.sentences,
                           enabled: !isLoading,
+                          maxLength: TextLimits.applicationDescriptionMax,
                           decoration: const InputDecoration(
                             labelText: 'What do you make or sell?',
                             alignLabelWithHint: true,
                             helperText:
                                 'A 3ZERO Admin reads this. At least 20 characters.',
                           ),
-                          validator: (v) =>
-                              validateMinLength(v, 20, 'a description'),
+                          validator: (v) => validateMinLength(
+                            v,
+                            TextLimits.applicationDescriptionMin,
+                            'a description',
+                            maximum: TextLimits.applicationDescriptionMax,
+                          ),
                         ),
                         const SizedBox(height: AppTheme.gapLg),
                         FilledButton(

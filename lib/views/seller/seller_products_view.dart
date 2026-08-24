@@ -5,6 +5,7 @@ import 'package:go_router/go_router.dart';
 import '../../controllers/account_profile_controller.dart';
 import '../../controllers/seller_products_controller.dart';
 import '../../core/account_profile.dart';
+import '../../core/network_errors.dart';
 import '../../core/theme.dart';
 import '../../models/product_model.dart';
 import '../market/product_card.dart';
@@ -214,7 +215,12 @@ class _ListingMenu extends ConsumerWidget {
       );
     } catch (error) {
       messenger.showSnackBar(
-        SnackBar(content: Text('That did not save. $error')),
+        // Interpreted, not printed. `setActive` is a bare Firestore write, so
+        // `$error` put `[cloud_firestore/permission-denied] Missing or
+        // insufficient permissions.` in front of a seller.
+        SnackBar(
+          content: Text('That did not save. ${friendlyErrorMessage(error)}'),
+        ),
       );
     }
   }

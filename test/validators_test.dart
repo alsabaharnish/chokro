@@ -74,6 +74,18 @@ void main() {
     test('rejects a single character', () {
       expect(validateName('A'), isNotNull);
     });
+
+    test('accepts a name at exactly the stored ceiling', () {
+      expect(validateName('a' * TextLimits.nameMax), isNull);
+    });
+
+    test('rejects a name longer than firestore.rules will store', () {
+      // `validUser` caps `name` at 80. Without this check the form passed, the
+      // Auth account was created, the profile write came back
+      // permission-denied, and `AuthController.signUp` rolled the account back
+      // — so the user saw a generic failure and could reproduce it forever.
+      expect(validateName('a' * (TextLimits.nameMax + 1)), isNotNull);
+    });
   });
 
   group('validateMinLength', () {
@@ -88,6 +100,40 @@ void main() {
     test('counts the shortfall on trimmed length', () {
       expect(validateMinLength('  abc  ', 5, 'a description'),
           '2 more characters');
+    });
+
+    test('accepts text at exactly the maximum', () {
+      expect(
+        validateMinLength('a' * 1000, 20, 'a description', maximum: 1000),
+        isNull,
+      );
+    });
+
+    test('reports how far over the ceiling the text runs', () {
+      expect(
+        validateMinLength('a' * 1002, 20, 'a description', maximum: 1000),
+        '2 characters too many (limit 1000)',
+      );
+    });
+
+    test('no maximum given means no ceiling, as before', () {
+      expect(validateMinLength('a' * 5000, 20, 'a description'), isNull);
+    });
+  });
+
+  group('TextLimits', () {
+    // These are the numbers `firestore.rules` enforces. If a rule changes, the
+    // matching constant has to change with it or a valid form produces a write
+    // the database refuses without saying which field was wrong.
+    test('mirror the bounds in firestore.rules', () {
+      expect(TextLimits.nameMin, 2);
+      expect(TextLimits.nameMax, 80);
+      expect(TextLimits.businessNameMin, 2);
+      expect(TextLimits.businessNameMax, 120);
+      expect(TextLimits.applicationDescriptionMin, 20);
+      expect(TextLimits.applicationDescriptionMax, 1000);
+      expect(TextLimits.rejectionReasonMin, 10);
+      expect(TextLimits.rejectionReasonMax, 500);
     });
   });
 }
