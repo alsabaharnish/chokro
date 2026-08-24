@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -275,7 +276,12 @@ class AppShell extends ConsumerWidget {
                   // second Tooltip here makes two semantics owners re-parent the
                   // avatar while the menu route animates, which can trip
                   // RenderObject's parentDataDirty assertion on web.
-                  icon: _AccountAvatar(name: user?.name),
+                  icon: _AccountAvatar(
+                    name: user?.name,
+                    photoUrl: user?.hasProfilePhoto == true
+                        ? user!.profilePhotoUrl
+                        : null,
+                  ),
                   padding: const EdgeInsets.symmetric(
                     horizontal: AppTheme.gapSm,
                   ),
@@ -410,9 +416,10 @@ class _DestinationIcon extends StatelessWidget {
 }
 
 class _AccountAvatar extends StatelessWidget {
-  const _AccountAvatar({required this.name});
+  const _AccountAvatar({required this.name, required this.photoUrl});
 
   final String? name;
+  final String? photoUrl;
 
   @override
   Widget build(BuildContext context) {
@@ -429,9 +436,20 @@ class _AccountAvatar extends StatelessWidget {
         : (words.first.characters.first + words.last.characters.first)
               .toUpperCase();
 
+    final fallback = initials.isEmpty
+        ? Icon(Icons.person_outline, size: 20, color: scheme.onPrimaryContainer)
+        : Text(
+            initials,
+            style: Theme.of(context).textTheme.labelMedium?.copyWith(
+              color: scheme.onPrimaryContainer,
+              fontWeight: FontWeight.w800,
+            ),
+          );
+
     return Container(
       width: 38,
       height: 38,
+      clipBehavior: Clip.antiAlias,
       alignment: Alignment.center,
       decoration: BoxDecoration(
         gradient: LinearGradient(
@@ -442,18 +460,15 @@ class _AccountAvatar extends StatelessWidget {
         shape: BoxShape.circle,
         border: Border.all(color: scheme.outlineVariant),
       ),
-      child: initials.isEmpty
-          ? Icon(
-              Icons.person_outline,
-              size: 20,
-              color: scheme.onPrimaryContainer,
-            )
-          : Text(
-              initials,
-              style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                color: scheme.onPrimaryContainer,
-                fontWeight: FontWeight.w800,
-              ),
+      child: photoUrl == null || photoUrl!.isEmpty
+          ? fallback
+          : CachedNetworkImage(
+              imageUrl: photoUrl!,
+              width: 38,
+              height: 38,
+              fit: BoxFit.cover,
+              placeholder: (_, _) => fallback,
+              errorWidget: (_, _, _) => fallback,
             ),
     );
   }

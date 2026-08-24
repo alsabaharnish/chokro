@@ -25,6 +25,12 @@ const {
   updateDoc,
   deleteDoc,
   doc,
+  collection,
+  query,
+  where,
+  orderBy,
+  limit,
+  getDocs,
   serverTimestamp,
   setLogLevel,
 } = require('firebase/firestore');
@@ -58,6 +64,26 @@ async function seedClaim(claimId, uid, status = 'pending') {
       createdAt: new Date(),
     });
   });
+}
+
+function profilePhoto(uid) {
+  return {
+    url:
+      `https://res.cloudinary.com/chokro-test/image/upload/v1/` +
+      `chokro/profiles/${uid}/portrait.jpg`,
+    publicId: `chokro/profiles/${uid}/portrait`,
+  };
+}
+
+async function seedProfilePhoto(uid) {
+  const photo = profilePhoto(uid);
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await updateDoc(doc(ctx.firestore(), 'users', uid), {
+      profilePhotoUrl: photo.url,
+      profilePhotoPublicId: photo.publicId,
+    });
+  });
+  return photo;
 }
 
 /** A claim payload satisfying every rule, so a failure names one constraint. */
@@ -96,9 +122,103 @@ beforeEach(async () => {
 });
 
 describe('creating a claim', () => {
-  it('a signed-in user may create their own pending claim', async () => {
+  it('an older client may create its legacy shape without publication permission', async () => {
     const db = testEnv.authenticatedContext(ALICE).firestore();
     await assertSucceeds(setDoc(doc(db, 'claims', 'c1'), validClaim(ALICE)));
+  });
+
+  it('accepts a bounded story with an explicit anonymous choice', async () => {
+    const db = testEnv.authenticatedContext(ALICE).firestore();
+    await assertSucceeds(
+      setDoc(doc(db, 'claims', 'c1a'), {
+        ...validClaim(ALICE),
+        story: 'I started composting with my neighbours.',
+        publicationMode: 'anonymous',
+      }),
+    );
+  });
+
+  it('accepts named publication only with the current profile snapshot', async () => {
+    const photo = await seedProfilePhoto(ALICE);
+    const db = testEnv.authenticatedContext(ALICE).firestore();
+    await assertSucceeds(
+      setDoc(doc(db, 'claims', 'c1b'), {
+        ...validClaim(ALICE),
+        story: 'A small cleanup became a weekly habit.',
+        publicationMode: 'named',
+        championName: ALICE,
+        championPhotoUrl: photo.url,
+      }),
+    );
+  });
+
+  it('refuses named publication when the user has no saved profile picture', async () => {
+    const db = testEnv.authenticatedContext(ALICE).firestore();
+    await assertFails(
+      setDoc(doc(db, 'claims', 'c1-no-profile'), {
+        ...validClaim(ALICE),
+        publicationMode: 'named',
+        championName: ALICE,
+        championPhotoUrl: profilePhoto(ALICE).url,
+      }),
+    );
+  });
+
+  it("refuses another user's saved profile picture", async () => {
+    const bobPhoto = await seedProfilePhoto(BOB);
+    await seedProfilePhoto(ALICE);
+    const db = testEnv.authenticatedContext(ALICE).firestore();
+    await assertFails(
+      setDoc(doc(db, 'claims', 'c1-other-profile'), {
+        ...validClaim(ALICE),
+        publicationMode: 'named',
+        championName: ALICE,
+        championPhotoUrl: bobPhoto.url,
+      }),
+    );
+  });
+
+  it('refuses spoofed, partial, or anonymous identity snapshots', async () => {
+    const photo = await seedProfilePhoto(ALICE);
+    const db = testEnv.authenticatedContext(ALICE).firestore();
+
+    await assertFails(
+      setDoc(doc(db, 'claims', 'c1c'), {
+        ...validClaim(ALICE),
+        publicationMode: 'named',
+        championName: 'Somebody Else',
+        championPhotoUrl: photo.url,
+      }),
+    );
+    await assertFails(
+      setDoc(doc(db, 'claims', 'c1d'), {
+        ...validClaim(ALICE),
+        publicationMode: 'named',
+        championName: ALICE,
+      }),
+    );
+    await assertFails(
+      setDoc(doc(db, 'claims', 'c1e'), {
+        ...validClaim(ALICE),
+        publicationMode: 'anonymous',
+        championName: ALICE,
+        championPhotoUrl: photo.url,
+      }),
+    );
+  });
+
+  it('bounds and trims story text and closes the publication enum', async () => {
+    const db = testEnv.authenticatedContext(ALICE).firestore();
+    for (const [id, change] of [
+      ['c1f', { story: 'x'.repeat(801), publicationMode: 'anonymous' }],
+      ['c1g', { story: 7, publicationMode: 'anonymous' }],
+      ['c1h', { story: ' padded ', publicationMode: 'anonymous' }],
+      ['c1i', { publicationMode: 'public' }],
+    ]) {
+      await assertFails(
+        setDoc(doc(db, 'claims', id), { ...validClaim(ALICE), ...change }),
+      );
+    }
   });
 
   it('a user may not create a claim for someone else', async () => {
@@ -212,6 +332,40 @@ describe('creating a claim', () => {
         photoPublicId: `chokro/disposals/${ALICE}/abc123`,
       }),
     );
+  });
+});
+
+describe('approved photocard query', () => {
+  it('lets an active admin list newest approvals with a bounded query', async () => {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      for (const [id, reviewedAt] of [
+        ['approved-old', new Date('2026-01-01T00:00:00Z')],
+        ['approved-new', new Date('2026-02-01T00:00:00Z')],
+      ]) {
+        await setDoc(doc(ctx.firestore(), 'claims', id), {
+          ...validClaim(ALICE),
+          createdAt: new Date('2025-12-01T00:00:00Z'),
+          status: 'approved',
+          reviewedAt,
+          reviewedBy: ADMIN,
+          pointsAwarded: 15,
+          publicationMode: 'anonymous',
+        });
+      }
+    });
+
+    const db = testEnv.authenticatedContext(ADMIN).firestore();
+    const approved = query(
+      collection(db, 'claims'),
+      where('status', '==', 'approved'),
+      orderBy('reviewedAt', 'desc'),
+      limit(50),
+    );
+    const snapshot = await assertSucceeds(getDocs(approved));
+    expect(snapshot.docs.map((item) => item.id)).toEqual([
+      'approved-new',
+      'approved-old',
+    ]);
   });
 });
 

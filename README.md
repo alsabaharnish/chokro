@@ -48,13 +48,30 @@ requirements and role hierarchy.
 
 ## Run locally
 
+`CHOKRO_API` must name the address that means "this computer" **on the target
+you are running**, so pick the matching line rather than the first one:
+
 ```bash
 flutter pub get
-flutter run --dart-define=CHOKRO_API=http://10.0.2.2:8787
+
+# Flutter web, iOS simulator, macOS
+flutter run -d chrome --dart-define=CHOKRO_API=http://localhost:8787
+
+# Android emulator — its own localhost is the emulator, not this machine
+flutter run -d emulator-5554 --dart-define=CHOKRO_API=http://10.0.2.2:8787
+
+# Physical device — this computer's LAN address
+flutter run --dart-define=CHOKRO_API=http://192.168.1.20:8787
 ```
 
-Use `localhost` for Flutter web/iOS simulator, `10.0.2.2` for the Android
-emulator, or the development computer's LAN address for a physical device.
+Using `10.0.2.2` anywhere but an Android emulator fails as
+`ClientException: Failed to fetch`, which names neither the address nor the
+reason — the request dies in the network stack before CORS is even considered.
+On web the app now detects that exact mistake and says so at startup.
+
+`CHOKRO_API` is read with `String.fromEnvironment`, which is resolved at
+**compile time**. Changing it needs a full stop and relaunch; a hot restart
+keeps the value the binary was built with.
 
 The trusted service uses Node 22 LTS (the version pinned by `server/package.json`):
 

@@ -23,12 +23,16 @@ let configured = false;
 /**
  * Upload folders the public API is allowed to create.
  *
- * `products` is the M3 addition, and it is a folder rather than a shared bucket
- * for the same reason the other two are separate: `firestore.rules` validates a
- * stored URL against `chokro/<kind>/<uid>/`, so a listing cannot point at a
- * disposal photograph, at another seller's images, or at an arbitrary host.
+ * Each purpose gets a separate folder because `firestore.rules` validates a
+ * stored URL against `chokro/<kind>/<uid>/`: a listing cannot borrow evidence,
+ * and a profile picture cannot point at another account or an arbitrary host.
  */
-const PHOTO_KINDS = Object.freeze(['disposals', 'claims', 'products']);
+const PHOTO_KINDS = Object.freeze([
+  'disposals',
+  'claims',
+  'products',
+  'profiles',
+]);
 
 function configure() {
   if (configured) return;
@@ -110,9 +114,10 @@ function decodeImage(base64) {
  *
  * Folders are partitioned by user so that a stray listing cannot mix one
  * person's submissions with another's. This is organisation, not access control
- * — Cloudinary URLs are unguessable but public. Nothing sensitive belongs in a
- * disposal photograph, and the association between a photo and a user lives in
- * Firestore, where the rules actually apply.
+ * — Cloudinary URLs are unguessable but public. Evidence must not contain
+ * secrets, and a profile picture is public-facing by design. The association
+ * between either image and a user lives in Firestore, where access and
+ * publication permission are enforced.
  */
 async function uploadImage({ base64, uid, kind = 'disposals' }) {
   if (typeof uid !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(uid)) {
@@ -143,6 +148,23 @@ async function uploadImage({ base64, uid, kind = 'disposals' }) {
     width: result.width,
     height: result.height,
   };
+}
+
+/** Removes one managed image after a downstream operation failed. */
+async function deleteImage(publicId) {
+  const kinds = PHOTO_KINDS.join('|');
+  const managedId = new RegExp(
+    `^chokro/(?:${kinds})/[A-Za-z0-9_-]{1,128}/[A-Za-z0-9_-]{1,200}$`,
+  );
+  if (typeof publicId !== 'string' || !managedId.test(publicId)) {
+    throw new Error('Only a managed Chokro image can be removed.');
+  }
+
+  configure();
+  return cloudinary.uploader.destroy(publicId, {
+    resource_type: 'image',
+    invalidate: true,
+  });
 }
 
 /**
@@ -222,6 +244,7 @@ function isTrustedImageReference({
 
 module.exports = {
   uploadImage,
+  deleteImage,
   decodeImage,
   imageMimeType,
   isTrustedImageReference,

@@ -69,6 +69,17 @@ class ClaimService {
       .snapshots()
       .map((snap) => snap.docs.map(_fromDoc).toList());
 
+  /// Recently approved actions, newest decision first, for admin photocards.
+  ///
+  /// [limit] grows when the administrator asks for older cards, keeping every
+  /// read bounded without making the fifty-first approved action unreachable.
+  Stream<List<ClaimModel>> watchApprovedClaims({required int limit}) => _claims
+      .where('status', isEqualTo: 'approved')
+      .orderBy('reviewedAt', descending: true)
+      .limit(limit)
+      .snapshots()
+      .map((snap) => snap.docs.map(_fromDoc).toList(growable: false));
+
   ClaimModel _fromDoc(DocumentSnapshot<Map<String, dynamic>> doc) {
     final data = Map<String, dynamic>.from(doc.data() ?? <String, dynamic>{});
     for (final key in ['createdAt', 'reviewedAt']) {

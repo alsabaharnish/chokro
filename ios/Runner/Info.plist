@@ -5,11 +5,11 @@
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
     <key>NSCameraUsageDescription</key>
-    <string>Chokro uses the camera to scan bin QR codes and photograph your disposal.</string>
+    <string>Chokro uses the camera to scan bin QR codes and photograph disposal or eco-action evidence.</string>
     <key>NSLocationWhenInUseUsageDescription</key>
     <string>Chokro checks that you are at the bin when you submit a disposal.</string>
     <key>NSPhotoLibraryUsageDescription</key>
-    <string>Chokro needs access to attach a photo of your disposal.</string>	
+    <string>Chokro uses your photo library when you choose eco-action evidence or a profile picture.</string>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>

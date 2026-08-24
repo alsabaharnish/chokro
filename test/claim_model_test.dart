@@ -50,22 +50,72 @@ void main() {
     });
   });
 
+  group('ClaimPublicationMode', () {
+    test('only explicit stored choices grant public sharing permission', () {
+      expect(
+        ClaimPublicationMode.fromName('named'),
+        ClaimPublicationMode.named,
+      );
+      expect(
+        ClaimPublicationMode.fromName('anonymous'),
+        ClaimPublicationMode.anonymous,
+      );
+      for (final value in [null, '', 'public', 'NAMED']) {
+        expect(
+          ClaimPublicationMode.fromName(value),
+          ClaimPublicationMode.unspecified,
+        );
+      }
+    });
+  });
+
   group('toCreateJson', () {
     final claim = ClaimModel(
       userId: 'u1',
       actionType: ClaimActionType.composting,
       photoUrl: 'https://res.cloudinary.test/p.jpg',
       photoPublicId: 'chokro/claims/u1/p',
+      publicationMode: ClaimPublicationMode.anonymous,
     );
 
-    test('carries exactly the five client-writable keys', () {
+    test('carries the privacy-safe client keys', () {
       expect(claim.toCreateJson().keys.toSet(), {
         'userId',
         'actionType',
         'photoUrl',
         'photoPublicId',
+        'publicationMode',
         'status',
       });
+      expect(claim.toCreateJson()['publicationMode'], 'anonymous');
+    });
+
+    test('trims a story and snapshots identity only after named consent', () {
+      final named = claim.copyWith(
+        story: '  I started composting with my neighbours.  ',
+        publicationMode: ClaimPublicationMode.named,
+        championName: 'Nabil Ahmed',
+        championPhotoUrl: 'https://res.cloudinary.test/profile.jpg',
+      );
+
+      expect(
+        named.toCreateJson(),
+        containsPair('story', 'I started composting with my neighbours.'),
+      );
+      expect(named.toCreateJson(), containsPair('championName', 'Nabil Ahmed'));
+      expect(
+        named.toCreateJson(),
+        containsPair(
+          'championPhotoUrl',
+          'https://res.cloudinary.test/profile.jpg',
+        ),
+      );
+
+      final anonymous = named
+          .copyWith(publicationMode: ClaimPublicationMode.anonymous)
+          .toCreateJson();
+      expect(anonymous.containsKey('championName'), isFalse);
+      expect(anonymous.containsKey('championPhotoUrl'), isFalse);
     });
 
     test('always writes pending, whatever the model says', () {
@@ -113,6 +163,30 @@ void main() {
       expect(claim.status, ClaimStatus.pending);
       expect(claim.pointsAwarded, isNull);
       expect(claim.reviewedAt, isNull);
+      expect(claim.publicationMode, ClaimPublicationMode.unspecified);
+      expect(claim.allowsIdentityPublication, isFalse);
+      expect(claim.hasPublicationPermission, isFalse);
+    });
+
+    test('legacy and partially malformed named claims grant no permission', () {
+      final legacy = ClaimModel.fromJson(<String, dynamic>{
+        'userId': 'u1',
+        'actionType': 'composting',
+        'photoUrl': 'photo',
+      });
+      final partial = ClaimModel.fromJson(<String, dynamic>{
+        'userId': 'u1',
+        'actionType': 'composting',
+        'photoUrl': 'photo',
+        'publicationMode': 'named',
+        'championName': 'Nabil',
+      });
+
+      expect(legacy.publicationMode, ClaimPublicationMode.unspecified);
+      expect(legacy.hasPublicationPermission, isFalse);
+      expect(partial.publicationMode, ClaimPublicationMode.named);
+      expect(partial.isAnonymousPublication, isFalse);
+      expect(partial.hasPublicationPermission, isFalse);
     });
   });
 
@@ -126,6 +200,7 @@ void main() {
       userId: 'u1',
       actionType: ClaimActionType.treePlanting,
       photoUrl: 'https://res.cloudinary.test/p.jpg',
+      publicationMode: ClaimPublicationMode.anonymous,
       status: status,
       pointsAwarded: points,
       rejectionReason: reason,
@@ -141,8 +216,34 @@ void main() {
         userId: 'u1',
         actionType: ClaimActionType.treePlanting,
         photoUrl: '',
+        publicationMode: ClaimPublicationMode.anonymous,
       );
       expect(claim.validate(), isNotEmpty);
+    });
+
+    test(
+      'stories are bounded and named cards require both identity fields',
+      () {
+        expect(
+          base().copyWith(story: List.filled(801, 'x').join()).validate(),
+          isNotEmpty,
+        );
+        expect(
+          base()
+              .copyWith(publicationMode: ClaimPublicationMode.named)
+              .validate(),
+          isNotEmpty,
+        );
+      },
+    );
+
+    test('missing public sharing permission is invalid for a new claim', () {
+      expect(
+        base()
+            .copyWith(publicationMode: ClaimPublicationMode.unspecified)
+            .validate(),
+        contains('A public sharing choice is required.'),
+      );
     });
 
     test('a rejection must carry a reason', () {

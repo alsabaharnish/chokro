@@ -32,13 +32,13 @@ class AppConstants {
 
 /// Ceilings on every collection read (NFR-2).
 ///
-/// ## These are caps, not page sizes
+/// ## Most are caps, not page sizes
 ///
-/// There is no `startAfter` anywhere in this codebase, so there is no page two.
-/// Naming them `pageSize` — as three services did — implies a pagination
-/// mechanism that does not exist, and the honest reading is: *this is the most
-/// this screen will ever show.* Past the cap the oldest items are simply
-/// unreachable, and each screen that can realistically reach its cap says so.
+/// There is no cursor-based `startAfter` paging in this codebase. Most values
+/// are therefore the most their screen will ever show, and each realistic cap
+/// is disclosed. [photocardPage] is the one exception: its screen grows a
+/// bounded query in explicit increments so an older approved card remains
+/// reachable without opening an unbounded stream.
 ///
 /// ## Why they exist at all
 ///
@@ -58,6 +58,10 @@ class QueryLimits {
   /// Admin review queues: disposals, claims, appeals, seller applications.
   /// Oldest first, so a cap keeps the items that have waited longest.
   static const int reviewQueue = 50;
+
+  /// Approved eco-actions load in bounded increments; unlike the review queue,
+  /// this screen offers an explicit "load older" path.
+  static const int photocardPage = 50;
 
   /// A user's own submissions, claims or appeals. Newest first.
   static const int ownHistory = 50;

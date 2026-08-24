@@ -91,6 +91,25 @@ describe('users', () => {
     );
   });
 
+  test('registration cannot inject a profile picture', async () => {
+    const db = testEnv.authenticatedContext(ALICE, {
+      email: 'alice@test.com',
+    }).firestore();
+    await assertFails(
+      setDoc(doc(db, 'users', ALICE), {
+        name: 'Alice',
+        email: 'alice@test.com',
+        role: 'buyer',
+        status: 'active',
+        createdAt: serverTimestamp(),
+        profilePhotoUrl:
+          `https://res.cloudinary.com/chokro-test/image/upload/v1/` +
+          `chokro/profiles/${ALICE}/portrait.jpg`,
+        profilePhotoPublicId: `chokro/profiles/${ALICE}/portrait`,
+      }),
+    );
+  });
+
   test('a user cannot put a different email in their profile', async () => {
     const db = testEnv.authenticatedContext(ALICE, {
       email: 'alice@test.com',
@@ -157,6 +176,41 @@ describe('users', () => {
     const db = testEnv.authenticatedContext(ALICE).firestore();
     await assertSucceeds(
       updateDoc(doc(db, 'users', ALICE), { name: 'Alice Rahman' }),
+    );
+  });
+
+  test('a client cannot attach or replace its own profile image reference', async () => {
+    await seedUser(ALICE, 'buyer');
+    const db = testEnv.authenticatedContext(ALICE).firestore();
+    await assertFails(
+      updateDoc(doc(db, 'users', ALICE), {
+        profilePhotoUrl:
+          `https://res.cloudinary.com/chokro-test/image/upload/v1/` +
+          `chokro/profiles/${ALICE}/portrait.jpg`,
+        profilePhotoPublicId: `chokro/profiles/${ALICE}/portrait`,
+      }),
+    );
+  });
+
+  test('trusted profile fields do not break later rename or admin updates', async () => {
+    await seedUser(ALICE, 'buyer');
+    await seedUser(ADMIN, 'admin');
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await updateDoc(doc(ctx.firestore(), 'users', ALICE), {
+        profilePhotoUrl:
+          `https://res.cloudinary.com/chokro-test/image/upload/v1/` +
+          `chokro/profiles/${ALICE}/portrait.jpg`,
+        profilePhotoPublicId: `chokro/profiles/${ALICE}/portrait`,
+      });
+    });
+
+    const aliceDb = testEnv.authenticatedContext(ALICE).firestore();
+    const adminDb = testEnv.authenticatedContext(ADMIN).firestore();
+    await assertSucceeds(
+      updateDoc(doc(aliceDb, 'users', ALICE), { name: 'Alice Rahman' }),
+    );
+    await assertSucceeds(
+      updateDoc(doc(adminDb, 'users', ALICE), { role: 'seller' }),
     );
   });
 

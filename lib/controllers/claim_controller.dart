@@ -4,11 +4,12 @@ import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:image_picker/image_picker.dart';
 
+import '../core/constants.dart';
 import '../models/claim_model.dart';
 import '../models/user_model.dart';
 import '../services/claim_service.dart';
 import '../services/photo_upload_service.dart';
-import '../services/user_service.dart';
+import 'auth_controller.dart' show currentUserProvider, userServiceProvider;
 import 'current_user_provider.dart';
 import 'disposal_controller.dart' show photoUploadServiceProvider;
 
@@ -35,12 +36,29 @@ final pendingClaimsProvider = StreamProvider<List<ClaimModel>>((ref) {
   return ref.watch(claimServiceProvider).watchPendingClaims();
 });
 
+/// Approved eco-actions available for permission-aware public photocards.
+final approvedClaimsProvider = StreamProvider<List<ClaimModel>>((ref) {
+  final limit = ref.watch(approvedClaimLimitProvider);
+  return ref.watch(claimServiceProvider).watchApprovedClaims(limit: limit);
+});
+
+class ApprovedClaimLimit extends Notifier<int> {
+  @override
+  int build() => QueryLimits.photocardPage;
+
+  void loadOlder() => state += QueryLimits.photocardPage;
+}
+
+final approvedClaimLimitProvider = NotifierProvider<ApprovedClaimLimit, int>(
+  ApprovedClaimLimit.new,
+);
+
 /// Submitter details for a queue row.
 final claimSubmitterProvider = FutureProvider.family<UserModel?, String>((
   ref,
   uid,
 ) async {
-  return UserService().getUser(uid);
+  return ref.watch(userServiceProvider).getUser(uid);
 });
 
 /// A user's earlier claims, shown beside the pending one under review.
@@ -62,28 +80,41 @@ class ClaimDraft {
   const ClaimDraft({
     this.actionType,
     this.photoBytes,
+    this.story = '',
+    this.publicationMode,
     this.isCapturing = false,
     this.isSubmitting = false,
     this.submittedId,
+    this.submittedPublicationMode,
     this.error,
   });
 
   final ClaimActionType? actionType;
   final Uint8List? photoBytes;
+  final String story;
+  final ClaimPublicationMode? publicationMode;
   final bool isCapturing;
   final bool isSubmitting;
   final String? submittedId;
+  final ClaimPublicationMode? submittedPublicationMode;
   final String? error;
 
   bool get hasPhoto => photoBytes != null && photoBytes!.isNotEmpty;
-  bool get isReadyToSubmit => actionType != null && hasPhoto;
+  bool get isReadyToSubmit =>
+      actionType != null &&
+      hasPhoto &&
+      publicationMode != null &&
+      story.trim().length <= 800;
 
   ClaimDraft copyWith({
     ClaimActionType? actionType,
     Uint8List? photoBytes,
+    String? story,
+    ClaimPublicationMode? publicationMode,
     bool? isCapturing,
     bool? isSubmitting,
     String? submittedId,
+    ClaimPublicationMode? submittedPublicationMode,
     String? error,
     bool clearError = false,
     bool clearPhoto = false,
@@ -91,9 +122,13 @@ class ClaimDraft {
     return ClaimDraft(
       actionType: actionType ?? this.actionType,
       photoBytes: clearPhoto ? null : (photoBytes ?? this.photoBytes),
+      story: story ?? this.story,
+      publicationMode: publicationMode ?? this.publicationMode,
       isCapturing: isCapturing ?? this.isCapturing,
       isSubmitting: isSubmitting ?? this.isSubmitting,
       submittedId: submittedId ?? this.submittedId,
+      submittedPublicationMode:
+          submittedPublicationMode ?? this.submittedPublicationMode,
       error: clearError ? null : (error ?? this.error),
     );
   }
@@ -116,10 +151,25 @@ class ClaimDraftController extends Notifier<ClaimDraft> {
     return const ClaimDraft();
   }
 
-  void reset() => state = const ClaimDraft();
+  void reset() {
+    if (state.isSubmitting) return;
+    state = const ClaimDraft();
+  }
 
-  void setActionType(ClaimActionType type) =>
-      state = state.copyWith(actionType: type, clearError: true);
+  void setActionType(ClaimActionType type) {
+    if (state.isSubmitting) return;
+    state = state.copyWith(actionType: type, clearError: true);
+  }
+
+  void setStory(String value) {
+    if (state.isSubmitting) return;
+    state = state.copyWith(story: value, clearError: true);
+  }
+
+  void setPublicationMode(ClaimPublicationMode mode) {
+    if (state.isSubmitting) return;
+    state = state.copyWith(publicationMode: mode, clearError: true);
+  }
 
   /// Takes a photograph and compresses it.
   ///
@@ -128,6 +178,7 @@ class ClaimDraftController extends Notifier<ClaimDraft> {
   /// claim has no location fields at all, so any location data in the file
   /// would be leaked rather than recorded.
   Future<bool> capturePhoto() async {
+    if (state.isSubmitting || state.isCapturing) return false;
     state = state.copyWith(isCapturing: true, clearError: true);
 
     try {
@@ -186,13 +237,38 @@ class ClaimDraftController extends Notifier<ClaimDraft> {
   /// Nothing is verified afterwards: there is no auto-approve lane for claims,
   /// so the document simply waits for an administrator.
   Future<String?> submit() async {
+    if (state.isSubmitting) return null;
     final draft = state;
     final uid = ref.read(currentUidProvider);
+    final user = ref.read(currentUserProvider).value;
     final type = draft.actionType;
     final bytes = draft.photoBytes;
+    final publicationMode = draft.publicationMode;
 
-    if (uid == null || type == null || bytes == null || bytes.isEmpty) {
+    if (uid == null ||
+        user == null ||
+        type == null ||
+        bytes == null ||
+        bytes.isEmpty) {
       state = state.copyWith(error: 'Choose an action and take a photo first.');
+      return null;
+    }
+    if (publicationMode == null) {
+      state = state.copyWith(
+        error: 'Choose how Chokro may credit this story publicly.',
+      );
+      return null;
+    }
+    if (draft.story.trim().length > 800) {
+      state = state.copyWith(error: 'Keep your story to 800 characters.');
+      return null;
+    }
+    if (publicationMode == ClaimPublicationMode.named &&
+        !user.hasProfilePhoto) {
+      state = state.copyWith(
+        error:
+            'Add a profile picture before sharing with your name, or choose anonymous.',
+      );
       return null;
     }
 
@@ -211,10 +287,27 @@ class ClaimDraftController extends Notifier<ClaimDraft> {
               actionType: type,
               photoUrl: photo.url,
               photoPublicId: photo.publicId,
+              story: draft.story.trim(),
+              publicationMode: publicationMode,
+              championName: publicationMode == ClaimPublicationMode.named
+                  ? user.name
+                  : null,
+              championPhotoUrl: publicationMode == ClaimPublicationMode.named
+                  ? user.profilePhotoUrl
+                  : null,
             ),
           );
 
-      state = state.copyWith(isSubmitting: false, submittedId: id);
+      // Rebuild success from the immutable snapshot submitted above. Even if a
+      // future caller bypasses the UI while the request is in flight, the
+      // confirmation can never describe a different privacy choice from the
+      // one stored in Firestore.
+      state = draft.copyWith(
+        isSubmitting: false,
+        submittedId: id,
+        submittedPublicationMode: publicationMode,
+        clearError: true,
+      );
       ref.invalidate(claimQuotaProvider);
       return id;
     } on PhotoUploadException catch (err) {

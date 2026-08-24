@@ -40,7 +40,12 @@ describe('trusted Cloudinary references', () => {
     // added here without a matching rule would accept an image the rules then
     // refuse — a listing or a submission that uploads successfully and cannot be
     // saved.
-    expect(PHOTO_KINDS).toEqual(['disposals', 'claims', 'products']);
+    expect(PHOTO_KINDS).toEqual([
+      'disposals',
+      'claims',
+      'products',
+      'profiles',
+    ]);
 
     expect(
       isTrustedImageReference({
@@ -50,6 +55,17 @@ describe('trusted Cloudinary references', () => {
         url:
           'https://res.cloudinary.com/chokro-cloud/image/upload/' +
           'chokro/claims/user_123/claim1.png',
+      }),
+    ).toBe(true);
+
+    expect(
+      isTrustedImageReference({
+        ...clean,
+        kind: 'profiles',
+        publicId: 'chokro/profiles/user_123/portrait1',
+        url:
+          'https://res.cloudinary.com/chokro-cloud/image/upload/' +
+          'chokro/profiles/user_123/portrait1.jpg',
       }),
     ).toBe(true);
 

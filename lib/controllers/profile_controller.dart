@@ -7,11 +7,14 @@
 /// permission to do this was deployed and simply unreachable from the app.
 library;
 
+import 'dart:typed_data';
+
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../services/photo_upload_service.dart';
 import 'auth_controller.dart';
-
+import 'disposal_controller.dart' show photoUploadServiceProvider;
 
 /// Why a rename failed, in words the user can act on.
 class ProfileFailure implements Exception {
@@ -58,6 +61,33 @@ class ProfileController extends AsyncNotifier<void> {
     });
   }
 
+  /// Uploads and stores the signed-in Champion's profile picture.
+  ///
+  /// The trusted photo endpoint writes the user document after Cloudinary
+  /// accepts the image. Firestore rules intentionally do not grant clients a
+  /// profile-photo update path, so the returned URL cannot be replaced with an
+  /// arbitrary host by a modified app.
+  Future<void> updatePhoto(Uint8List bytes) async {
+    state = const AsyncLoading();
+    state = await AsyncValue.guard(() async {
+      final user = ref.read(currentUserProvider).value;
+      if (user == null) {
+        throw const ProfileFailure(
+          'You are not signed in. Sign in and try again.',
+        );
+      }
+      if (bytes.isEmpty) {
+        throw const ProfileFailure('Choose a profile picture first.');
+      }
+
+      try {
+        await ref.read(photoUploadServiceProvider).uploadProfilePhoto(bytes);
+      } on PhotoUploadException catch (error) {
+        throw ProfileFailure(error.message);
+      }
+    });
+  }
+
   /// Firestore's codes, translated.
   ///
   /// `permission-denied` deliberately does **not** blame a suspension. The
@@ -72,15 +102,15 @@ class ProfileController extends AsyncNotifier<void> {
   /// in this app rather than anything the user can act on, which is why the
   /// wording stays on the one thing they can try.
   static String _message(String code) => switch (code) {
-        'permission-denied' =>
-          'That change was refused. Try signing out and back in.',
-        'unavailable' || 'deadline-exceeded' =>
-          'Could not reach the database. Check your connection and try again.',
-        'not-found' =>
-          'Your account details could not be found. Try signing out and back '
-              'in.',
-        _ => 'The name could not be saved. Try again.',
-      };
+    'permission-denied' =>
+      'That change was refused. Try signing out and back in.',
+    'unavailable' || 'deadline-exceeded' =>
+      'Could not reach the database. Check your connection and try again.',
+    'not-found' =>
+      'Your account details could not be found. Try signing out and back '
+          'in.',
+    _ => 'The name could not be saved. Try again.',
+  };
 }
 
 final profileControllerProvider =

@@ -73,12 +73,26 @@ void main() {
         'email': ['not', 'a', 'string'],
         'role': 99,
         'status': false,
+        'profilePhotoUrl': 7,
+        'profilePhotoPublicId': <String>[],
         'createdAt': 'nonsense',
       });
 
       expect(user.name, isEmpty);
       expect(user.email, isEmpty);
       expect(user.createdAt, isNull);
+      expect(user.hasProfilePhoto, isFalse);
+    });
+
+    test('reads a complete paired profile picture', () {
+      final user = _user({
+        'profilePhotoUrl': 'https://example.com/profile.jpg',
+        'profilePhotoPublicId': 'chokro/profiles/uid-1/photo',
+      });
+
+      expect(user.hasProfilePhoto, isTrue);
+      expect(user.profilePhotoUrl, 'https://example.com/profile.jpg');
+      expect(user.profilePhotoPublicId, 'chokro/profiles/uid-1/photo');
     });
 
     group('failing closed', () {
@@ -147,6 +161,20 @@ void main() {
 
     test('omits suspendedUntil rather than writing an explicit null', () {
       expect(sample().toFirestore().containsKey('suspendedUntil'), isFalse);
+    });
+
+    test('never sends trusted profile-photo fields during registration', () {
+      final withPhoto = UserModel(
+        uid: 'uid-1',
+        name: 'Nabil',
+        email: 'nabil@example.com',
+        role: AppConstants.roleBuyer,
+        status: AppConstants.statusActive,
+        profilePhotoUrl: 'https://example.com/profile.jpg',
+        profilePhotoPublicId: 'chokro/profiles/uid-1/photo',
+      ).toFirestore();
+      expect(withPhoto.containsKey('profilePhotoUrl'), isFalse);
+      expect(withPhoto.containsKey('profilePhotoPublicId'), isFalse);
     });
   });
 

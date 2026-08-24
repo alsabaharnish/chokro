@@ -1,6 +1,10 @@
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_image_compress/flutter_image_compress.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../controllers/auth_controller.dart';
 import '../../controllers/account_profile_controller.dart';
@@ -94,11 +98,79 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
     );
   }
 
+  Future<void> _chooseProfilePhoto() async {
+    final messenger = ScaffoldMessenger.of(context);
+
+    try {
+      final selected = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1200,
+        maxHeight: 1200,
+        imageQuality: 90,
+      );
+      if (selected == null) return;
+
+      final original = await selected.readAsBytes();
+      final compressed = await FlutterImageCompress.compressWithList(
+        original,
+        quality: 78,
+        minWidth: 640,
+        minHeight: 640,
+        keepExif: false,
+      );
+      if (compressed.isEmpty) {
+        throw const ProfileFailure(
+          'That picture could not be processed. Choose another one.',
+        );
+      }
+
+      await ref
+          .read(profileControllerProvider.notifier)
+          .updatePhoto(compressed);
+      if (!mounted) return;
+
+      final result = ref.read(profileControllerProvider);
+      messenger.hideCurrentSnackBar();
+      result.when(
+        data: (_) => messenger.showSnackBar(
+          const SnackBar(content: Text('Profile picture updated.')),
+        ),
+        loading: () {},
+        error: (error, _) => messenger.showSnackBar(
+          SnackBar(
+            content: Text(
+              error is ProfileFailure
+                  ? error.message
+                  : 'The profile picture could not be saved. Try again.',
+            ),
+          ),
+        ),
+      );
+    } on ProfileFailure catch (error) {
+      if (!mounted) return;
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(SnackBar(content: Text(error.message)));
+    } catch (_) {
+      if (!mounted) return;
+      messenger.hideCurrentSnackBar();
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            kIsWeb
+                ? 'The picture picker could not be opened. Try another image.'
+                : 'The photo library could not be opened. Check app permission.',
+          ),
+        ),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final async = ref.watch(currentUserProvider);
     final saving = ref.watch(profileControllerProvider).isLoading;
+    final activeProfile = ref.watch(activeAccountProfileProvider);
 
     return AppShell(
       title: 'Profile',
@@ -128,7 +200,14 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
               child: ListView(
                 padding: const EdgeInsets.all(AppTheme.gapMd),
                 children: [
-                  _Avatar(name: user.name),
+                  _Avatar(
+                    user: user,
+                    canEdit:
+                        activeProfile == AccountProfile.champion &&
+                        user.isActive,
+                    isBusy: saving,
+                    onUpload: _chooseProfilePhoto,
+                  ),
                   const SizedBox(height: AppTheme.gapMd),
                   const AccountProfileSwitcher(),
                   const SizedBox(height: AppTheme.gapMd),
@@ -253,41 +332,92 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
   }
 }
 
-/// Initials on a coloured disc. No photo upload exists, and inventing one would
-/// mean a storage bucket and a moderation problem F1.1 never asked for.
+/// The Champion portrait, with initials as a resilient fallback.
 class _Avatar extends StatelessWidget {
-  const _Avatar({required this.name});
+  const _Avatar({
+    required this.user,
+    required this.canEdit,
+    required this.isBusy,
+    required this.onUpload,
+  });
 
-  final String name;
+  final UserModel user;
+  final bool canEdit;
+  final bool isBusy;
+  final VoidCallback onUpload;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final initials = _initials(name);
+    final initials = _initials(user.name);
+    final photoUrl = user.hasProfilePhoto ? user.profilePhotoUrl : null;
 
     return Column(
       children: [
-        Container(
-          width: 72,
-          height: 72,
-          alignment: Alignment.center,
-          decoration: BoxDecoration(
-            color: theme.colorScheme.primaryContainer,
-            shape: BoxShape.circle,
-          ),
-          child: initials.isEmpty
-              ? Icon(
-                  Icons.person,
-                  size: 36,
-                  color: theme.colorScheme.onPrimaryContainer,
-                )
-              : Text(
-                  initials,
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                    color: theme.colorScheme.onPrimaryContainer,
+        Semantics(
+          image: true,
+          label: photoUrl == null
+              ? 'Profile picture placeholder for ${user.name}'
+              : 'Profile picture for ${user.name}',
+          child: Container(
+            width: 88,
+            height: 88,
+            clipBehavior: Clip.antiAlias,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              color: theme.colorScheme.primaryContainer,
+              shape: BoxShape.circle,
+              border: Border.all(
+                color: theme.colorScheme.primary.withValues(alpha: 0.22),
+                width: 2,
+              ),
+            ),
+            child: photoUrl == null
+                ? _Initials(initials: initials)
+                : CachedNetworkImage(
+                    imageUrl: photoUrl,
+                    width: 88,
+                    height: 88,
+                    fit: BoxFit.cover,
+                    placeholder: (_, _) => const Center(
+                      child: SizedBox.square(
+                        dimension: 20,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                    ),
+                    errorWidget: (_, _, _) => _Initials(initials: initials),
                   ),
-                ),
+          ),
+        ),
+        const SizedBox(height: AppTheme.gapSm),
+        if (canEdit)
+          TextButton.icon(
+            onPressed: isBusy ? null : onUpload,
+            icon: isBusy
+                ? const SizedBox.square(
+                    dimension: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : Icon(
+                    photoUrl == null
+                        ? Icons.add_a_photo_outlined
+                        : Icons.edit_outlined,
+                    size: 18,
+                  ),
+            label: Text(
+              photoUrl == null ? 'Add profile picture' : 'Change picture',
+            ),
+          ),
+        Text(
+          !user.isActive
+              ? 'Profile-picture changes are paused while this account is suspended.'
+              : canEdit
+              ? 'Your picture appears only on eco-action cards you submit with named sharing. Changing it later does not change earlier permission snapshots.'
+              : 'Switch to your Champion profile to manage your public picture.',
+          textAlign: TextAlign.center,
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
         ),
       ],
     );
@@ -304,6 +434,30 @@ class _Avatar extends StatelessWidget {
     if (words.length == 1) return words.first.characters.first.toUpperCase();
     return (words.first.characters.first + words.last.characters.first)
         .toUpperCase();
+  }
+}
+
+class _Initials extends StatelessWidget {
+  const _Initials({required this.initials});
+
+  final String initials;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return initials.isEmpty
+        ? Icon(
+            Icons.person,
+            size: 40,
+            color: theme.colorScheme.onPrimaryContainer,
+          )
+        : Text(
+            initials,
+            style: theme.textTheme.headlineSmall?.copyWith(
+              fontWeight: FontWeight.bold,
+              color: theme.colorScheme.onPrimaryContainer,
+            ),
+          );
   }
 }
 

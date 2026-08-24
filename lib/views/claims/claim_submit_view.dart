@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../controllers/auth_controller.dart' show currentUserProvider;
 import '../../controllers/claim_controller.dart';
 import '../../core/label_format.dart';
 import '../../core/theme.dart';
@@ -26,6 +27,7 @@ class ClaimSubmitView extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final draft = ref.watch(claimDraftProvider);
     final quota = ref.watch(claimQuotaProvider);
+    final user = ref.watch(currentUserProvider).value;
     final theme = Theme.of(context);
 
     if (draft.submittedId != null) {
@@ -109,6 +111,7 @@ class ClaimSubmitView extends ConsumerWidget {
                     for (final type in ClaimActionType.values)
                       RadioListTile<ClaimActionType>(
                         value: type,
+                        enabled: !draft.isSubmitting,
                         title: Text(type.label),
                         subtitle: Text(
                           type.evidenceHint,
@@ -181,11 +184,142 @@ class ClaimSubmitView extends ConsumerWidget {
                   ),
                 ),
               ],
-              const SizedBox(height: 22),
+              const SizedBox(height: AppTheme.gapLg),
+              Text(
+                'Tell the story behind it',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: AppTheme.gapXs),
+              Text(
+                'Optional — a short, personal detail makes the action useful '
+                'and encouraging when it is shared.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: AppTheme.gapSm),
+              TextFormField(
+                key: const ValueKey('claim-story-field'),
+                initialValue: draft.story,
+                minLines: 3,
+                maxLines: 6,
+                maxLength: 800,
+                readOnly: draft.isSubmitting,
+                textCapitalization: TextCapitalization.sentences,
+                onChanged: ref.read(claimDraftProvider.notifier).setStory,
+                decoration: const InputDecoration(
+                  labelText: 'Your story',
+                  hintText:
+                      'What inspired you, who joined you, or what changed?',
+                  alignLabelWithHint: true,
+                  prefixIcon: Icon(Icons.auto_stories_outlined),
+                ),
+              ),
+              _Notice(
+                icon: Icons.privacy_tip_outlined,
+                tone: theme.colorScheme.onSurfaceVariant,
+                text:
+                    'If you choose anonymous sharing, avoid names, addresses, '
+                    'school or workplace details in the story and photo.',
+              ),
+              const SizedBox(height: AppTheme.gapLg),
+              Text(
+                'How may Chokro share this action?',
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: AppTheme.gapXs),
+              Text(
+                'Choose one before submitting. This choice is saved with this '
+                'action and controls the public photocard.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: AppTheme.gapSm),
+              RadioGroup<ClaimPublicationMode>(
+                groupValue: draft.publicationMode,
+                onChanged: (mode) {
+                  if (mode != null) {
+                    ref
+                        .read(claimDraftProvider.notifier)
+                        .setPublicationMode(mode);
+                  }
+                },
+                child: Column(
+                  children: [
+                    Card(
+                      margin: EdgeInsets.zero,
+                      child: RadioListTile<ClaimPublicationMode>(
+                        value: ClaimPublicationMode.anonymous,
+                        enabled: !draft.isSubmitting,
+                        secondary: const Icon(Icons.visibility_off_outlined),
+                        title: const Text('Share anonymously'),
+                        subtitle: const Text(
+                          'Chokro may share the action photo and story without '
+                          'your name or profile picture.',
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: AppTheme.gapSm),
+                    Card(
+                      margin: EdgeInsets.zero,
+                      child: RadioListTile<ClaimPublicationMode>(
+                        value: ClaimPublicationMode.named,
+                        enabled:
+                            !draft.isSubmitting &&
+                            (user?.hasProfilePhoto ?? false),
+                        secondary: const Icon(Icons.account_circle_outlined),
+                        title: const Text('Share with my name and picture'),
+                        subtitle: Text(
+                          user?.hasProfilePhoto ?? false
+                              ? 'Chokro may credit your saved name and current '
+                                    'profile picture on the public photocard.'
+                              : 'Add a profile picture first to use this option.',
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              if (!(user?.hasProfilePhoto ?? false)) ...[
+                const SizedBox(height: AppTheme.gapXs),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: draft.isSubmitting
+                        ? null
+                        : () => context.push('/profile'),
+                    icon: const Icon(Icons.add_a_photo_outlined),
+                    label: const Text('Add profile picture'),
+                  ),
+                ),
+              ],
+              if (draft.publicationMode == null) ...[
+                const SizedBox(height: AppTheme.gapXs),
+                Text(
+                  'Choose a public sharing option to continue.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+              const SizedBox(height: AppTheme.gapLg),
               FilledButton.icon(
                 onPressed:
                     draft.isReadyToSubmit && !draft.isSubmitting && !quotaSpent
-                    ? () => ref.read(claimDraftProvider.notifier).submit()
+                    ? () async {
+                        await ref.read(claimDraftProvider.notifier).submit();
+                        if (!context.mounted) return;
+                        final error = ref.read(claimDraftProvider).error;
+                        if (error == null) return;
+                        final messenger = ScaffoldMessenger.of(context);
+                        messenger.hideCurrentSnackBar();
+                        messenger.showSnackBar(SnackBar(content: Text(error)));
+                      }
                     : null,
                 icon: draft.isSubmitting
                     ? const SizedBox(
@@ -195,7 +329,7 @@ class ClaimSubmitView extends ConsumerWidget {
                       )
                     : const Icon(Icons.send_outlined),
                 label: Text(
-                  draft.isSubmitting ? 'Submitting…' : 'Submit claim',
+                  draft.isSubmitting ? 'Submitting…' : 'Submit eco-action',
                 ),
               ),
 
@@ -246,6 +380,11 @@ class _ClaimSubmitted extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final draft = ref.watch(claimDraftProvider);
+    final publication =
+        draft.submittedPublicationMode == ClaimPublicationMode.named
+        ? 'If approved, Chokro may share it with your saved name and profile picture.'
+        : 'If approved, Chokro may share it as an anonymous Champion story.';
     return AppShell(
       title: 'Claim submitted',
       child: Center(
@@ -265,7 +404,7 @@ class _ClaimSubmitted extends ConsumerWidget {
               Text(
                 'A reviewer will look at your photo. Points are added to your '
                 'wallet only if it is approved, and you will be told either '
-                'way.',
+                'way. $publication',
                 textAlign: TextAlign.center,
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: theme.colorScheme.onSurfaceVariant,
@@ -339,6 +478,7 @@ class ClaimHistoryList extends ConsumerWidget {
                 subtitle: Text(
                   [
                     claim.userFacingStatus,
+                    claim.publicationLabel,
                     formatAge(claim.createdAt),
                     if (claim.status.isRejected &&
                         claim.rejectionReason != null)

@@ -6,6 +6,7 @@ import '../../controllers/appeals_controller.dart';
 import '../../core/label_format.dart';
 import '../../core/theme.dart';
 import '../../models/appeal_model.dart';
+import '../shared/app_shell.dart';
 import '../shared/content_state.dart';
 import '../shared/error_retry.dart';
 
@@ -17,9 +18,18 @@ class AppealsView extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final appealsAsync = ref.watch(userAppealsProvider);
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('My appeals')),
-      body: appealsAsync.when(
+    // Inside `AppShell`, not a bare `Scaffold`.
+    //
+    // `/appeals` is not one of the Champion's four navigation destinations, so
+    // it carries no bottom bar either way — but the appeal-sent screen reaches
+    // it with `context.go`, which replaces the stack. With nothing to pop,
+    // `automaticallyImplyLeading` rendered no back button, and a bare Scaffold
+    // has no navigation of its own: a Champion who submitted an appeal and then
+    // tapped "My appeals" had no way off the screen at all short of killing the
+    // app. `AppShell` supplies its "Back to home" leading in exactly that case.
+    return AppShell(
+      title: 'My appeals',
+      child: appealsAsync.when(
         loading: () => const ContentLoading(label: 'Loading your appeals…'),
         error: (error, _) => ErrorRetry(
           error: error,

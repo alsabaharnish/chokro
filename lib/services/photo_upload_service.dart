@@ -45,6 +45,14 @@ class PhotoUploadService {
   Future<UploadedPhoto> uploadClaimPhoto(Uint8List bytes) =>
       _upload(bytes, endpoint: '/photos/claim');
 
+  /// Replaces the signed-in Champion's profile picture.
+  ///
+  /// Unlike evidence uploads, this endpoint also writes the returned URL and
+  /// public id into `users/{uid}` through the trusted service. Clients never get
+  /// permission to attach an arbitrary remote image to their identity.
+  Future<UploadedPhoto> uploadProfilePhoto(Uint8List bytes) =>
+      _upload(bytes, endpoint: '/photos/profile');
+
   /// Uploads a marketplace listing photograph (F4.1).
   ///
   /// A third folder rather than a shared one, for the same reason claims stopped

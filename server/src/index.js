@@ -6,6 +6,7 @@
  *   GET  /admin/ping          admin     — role gating
  *   POST /photos/disposal     auth      — upload a disposal photograph
  *   POST /photos/claim        auth      — upload claim evidence
+ *   POST /photos/profile      auth      — replace the Champion profile picture
  *   GET  /photos/limits       no auth   — the upload size ceiling
  *   POST /disposals/:id/review   admin  — approve or reject (F2.8)
  *   POST /disposals/:id/verify   auth   — the two-lane decision (F2.5, F2.10-12)
@@ -33,6 +34,7 @@ const cors = require('cors');
 const { initFirebase } = require('./firebase');
 const { requireAuth, requireAdmin, requireSeller } = require('./auth');
 const { uploadImage, MAX_BYTES } = require('./cloudinary');
+const { uploadAndSaveProfilePhoto } = require('./profilePhoto');
 const { approveDisposal, rejectDisposal } = require('./award');
 const policyModule = require('./pointsPolicy');
 const binsModule = require('./bins');
@@ -177,8 +179,8 @@ const writeLimit = rateLimit({ name: 'writes', windowMs: 60 * 1000, max: 30 });
 // everything, which meant an **unauthenticated** POST to any path — including
 // one that would 404 — made this free-tier instance buffer and parse up to 12 MB
 // before anything looked at who was asking. The ceiling has to be that high for
-// photo uploads (base64 inflates a payload by about a third), but only three
-// routes need it.
+// photo uploads (base64 inflates a payload by about a third), but only the
+// purpose-specific photo routes need it.
 //
 // So the token is verified first and the large limit is mounted only on
 // `/photos`. Everything else gets 64 KB, which is ample for a decision, a policy
@@ -242,16 +244,24 @@ app.get('/admin/ping', requireAuth, requireAdmin, (req, res) => {
  * Note the uid comes from the verified token, never from the request body. A
  * caller cannot upload into someone else's folder by asking nicely.
  */
-function photoUploadHandler(kind) {
+function photoUploadHandler(kind, { saveAsProfile = false } = {}) {
   return async (req, res) => {
     try {
       const { imageBase64 } = req.body || {};
 
-      const result = await uploadImage({
-        base64: imageBase64,
-        uid: req.user.uid,
-        kind,
-      });
+      // A profile reference is identity data, not claim evidence. Its helper
+      // persists through the Admin SDK and cleans up the just-uploaded public
+      // image if that write fails. Other kinds remain upload-only.
+      const result = saveAsProfile
+        ? await uploadAndSaveProfilePhoto({
+            base64: imageBase64,
+            uid: req.user.uid,
+          })
+        : await uploadImage({
+            base64: imageBase64,
+            uid: req.user.uid,
+            kind,
+          });
 
       res.json({
         photoUrl: result.url,
@@ -282,15 +292,19 @@ function photoUploadHandler(kind) {
 // second Firestore read on the hottest path in the app.
 app.post('/photos/disposal', photoLimit, photoUploadHandler('disposals'));
 app.post('/photos/claim', photoLimit, photoUploadHandler('claims'));
+app.post(
+  '/photos/profile',
+  photoLimit,
+  photoUploadHandler('profiles', { saveAsProfile: true }),
+);
 
 /**
  * A listing photograph (F4.1).
  *
- * Gated on the seller role as well as authentication, which the other two are
- * not — evidence uploads are open to every user because every user submits
- * evidence. Nobody who cannot list a product has any reason to fill the product
- * folder, and that folder is exactly what `firestore.rules` checks a stored
- * image URL against.
+ * Gated on the seller role as well as authentication, unlike the evidence and
+ * profile routes. Nobody who cannot list a product has any reason to fill the
+ * product folder, and that folder is exactly what `firestore.rules` checks a
+ * stored image URL against.
  *
  * Reachable from the web build as well as mobile: `image_picker` returns bytes
  * on both and nothing in this path touches `dart:io`. The seller console is

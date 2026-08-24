@@ -47,10 +47,9 @@ enum ClaimStatus {
 
 /// The closed action vocabulary (§7, FR-6).
 ///
-/// Fixed rather than free text for three reasons: it keeps an unmoderated text
-/// field out of the system, it makes claims sortable for review, and it gives
-/// an administrator a specific question to answer about the photograph rather
-/// than an open-ended one.
+/// Fixed even though a bounded optional story now adds personal context: it
+/// keeps claims sortable for review and gives an administrator a specific
+/// question to answer about the photograph rather than an open-ended category.
 enum ClaimActionType {
   treePlanting,
   composting,
@@ -98,6 +97,31 @@ enum ClaimActionType {
   }
 }
 
+/// How Chokro may credit this action in a public photocard.
+///
+/// Missing and unknown values always become [unspecified]. That is the privacy
+/// boundary for claims created before this choice existed and for malformed
+/// data: neither anonymous nor named publication is allowed without an explicit
+/// recognised choice.
+enum ClaimPublicationMode {
+  /// Legacy/malformed data for which no public sharing choice was recorded.
+  unspecified,
+  anonymous,
+  named;
+
+  static ClaimPublicationMode fromName(String? name) => switch (name) {
+    'anonymous' => ClaimPublicationMode.anonymous,
+    'named' => ClaimPublicationMode.named,
+    _ => ClaimPublicationMode.unspecified,
+  };
+
+  String get label => switch (this) {
+    ClaimPublicationMode.unspecified => 'No public sharing permission',
+    ClaimPublicationMode.anonymous => 'Anonymous public story',
+    ClaimPublicationMode.named => 'Name and profile picture permitted',
+  };
+}
+
 /// One self-reported action.
 class ClaimModel {
   /// Firestore document ID. Null before the document is written.
@@ -110,6 +134,19 @@ class ClaimModel {
 
   /// Cloudinary public id, for the server's perceptual hash.
   final String photoPublicId;
+
+  /// Optional first-person context written by the Champion.
+  final String story;
+
+  /// Per-claim publication permission. It is immutable because clients cannot
+  /// update claim documents after creation.
+  final ClaimPublicationMode publicationMode;
+
+  /// Identity snapshotted only for a named publication. Anonymous claims omit
+  /// both values, preventing the export path from accidentally consulting a
+  /// live user profile and revealing information that was never permitted.
+  final String? championName;
+  final String? championPhotoUrl;
 
   /// SERVER-WRITTEN ONLY. Null on the document the client creates.
   ///
@@ -141,6 +178,10 @@ class ClaimModel {
     required this.actionType,
     required this.photoUrl,
     this.photoPublicId = '',
+    this.story = '',
+    this.publicationMode = ClaimPublicationMode.unspecified,
+    this.championName,
+    this.championPhotoUrl,
     this.photoHash,
     this.status = ClaimStatus.pending,
     this.pointsAwarded,
@@ -159,6 +200,12 @@ class ClaimModel {
           ClaimActionType.reusableBagOrBottle,
       photoUrl: _string(json['photoUrl']),
       photoPublicId: _string(json['photoPublicId']),
+      story: _string(json['story']),
+      publicationMode: ClaimPublicationMode.fromName(
+        _nullableString(json['publicationMode']),
+      ),
+      championName: _nullableString(json['championName']),
+      championPhotoUrl: _nullableString(json['championPhotoUrl']),
       photoHash: _nullableString(json['photoHash']),
       status: ClaimStatus.fromName(_nullableString(json['status'])),
       pointsAwarded: _toNullableInt(json['pointsAwarded']),
@@ -175,13 +222,22 @@ class ClaimModel {
   /// enforce the same shape with `hasOnly`. This method exists so the client
   /// cannot accidentally send a field the rules would reject — it is not the
   /// security measure itself.
-  Map<String, dynamic> toCreateJson() => <String, dynamic>{
-    'userId': userId,
-    'actionType': actionType.name,
-    'photoUrl': photoUrl,
-    'photoPublicId': photoPublicId,
-    'status': ClaimStatus.pending.name,
-  };
+  Map<String, dynamic> toCreateJson() {
+    final trimmedStory = story.trim();
+    return <String, dynamic>{
+      'userId': userId,
+      'actionType': actionType.name,
+      'photoUrl': photoUrl,
+      'photoPublicId': photoPublicId,
+      if (trimmedStory.isNotEmpty) 'story': trimmedStory,
+      'publicationMode': publicationMode.name,
+      if (allowsIdentityPublication) ...{
+        'championName': championName!.trim(),
+        'championPhotoUrl': championPhotoUrl,
+      },
+      'status': ClaimStatus.pending.name,
+    };
+  }
 
   ClaimModel copyWith({
     String? id,
@@ -189,6 +245,10 @@ class ClaimModel {
     ClaimActionType? actionType,
     String? photoUrl,
     String? photoPublicId,
+    String? story,
+    ClaimPublicationMode? publicationMode,
+    String? championName,
+    String? championPhotoUrl,
     String? photoHash,
     ClaimStatus? status,
     int? pointsAwarded,
@@ -203,6 +263,10 @@ class ClaimModel {
       actionType: actionType ?? this.actionType,
       photoUrl: photoUrl ?? this.photoUrl,
       photoPublicId: photoPublicId ?? this.photoPublicId,
+      story: story ?? this.story,
+      publicationMode: publicationMode ?? this.publicationMode,
+      championName: championName ?? this.championName,
+      championPhotoUrl: championPhotoUrl ?? this.championPhotoUrl,
       photoHash: photoHash ?? this.photoHash,
       status: status ?? this.status,
       pointsAwarded: pointsAwarded ?? this.pointsAwarded,
@@ -214,6 +278,29 @@ class ClaimModel {
   }
 
   int get creditedPoints => status.isApproved ? (pointsAwarded ?? 0) : 0;
+
+  /// Identity may appear only when the permission and both snapshotted values
+  /// agree. A partially malformed named claim therefore fails closed.
+  bool get allowsIdentityPublication =>
+      publicationMode == ClaimPublicationMode.named &&
+      championName != null &&
+      championName!.trim().isNotEmpty &&
+      championPhotoUrl != null &&
+      championPhotoUrl!.trim().isNotEmpty;
+
+  /// True only after an explicit anonymous choice. Missing permission is not
+  /// silently upgraded into permission to publish the photo and story.
+  bool get isAnonymousPublication =>
+      publicationMode == ClaimPublicationMode.anonymous;
+
+  bool get hasPublicationPermission =>
+      isAnonymousPublication || allowsIdentityPublication;
+
+  String get publicationLabel {
+    if (allowsIdentityPublication) return 'Name & picture permitted';
+    if (isAnonymousPublication) return 'Saved name & profile picture hidden';
+    return 'No public sharing permission';
+  }
 
   String get userFacingStatus {
     switch (status) {
@@ -230,6 +317,18 @@ class ClaimModel {
     final problems = <String>[];
     if (userId.trim().isEmpty) problems.add('User is required.');
     if (photoUrl.trim().isEmpty) problems.add('A photograph is required.');
+    if (story.trim().length > 800) {
+      problems.add('The story must be 800 characters or fewer.');
+    }
+    if (publicationMode == ClaimPublicationMode.unspecified) {
+      problems.add('A public sharing choice is required.');
+    }
+    if (publicationMode == ClaimPublicationMode.named &&
+        !allowsIdentityPublication) {
+      problems.add(
+        'Named publication requires the Champion name and profile picture.',
+      );
+    }
     if (status.isRejected &&
         (rejectionReason == null || rejectionReason!.trim().isEmpty)) {
       problems.add('A rejection must record a reason.');

@@ -4,6 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../controllers/auth_controller.dart';
+import '../controllers/account_profile_controller.dart';
+import '../core/account_profile.dart';
 import '../models/appeal_model.dart';
 import '../models/user_model.dart';
 import '../views/auth/login_view.dart';
@@ -336,6 +338,18 @@ final routerProvider = Provider<GoRouter>((ref) {
     return activeRouteRedirect(resolve().user!);
   }
 
+  /// An active account currently working in its Champion profile.
+  ///
+  /// Admin and Greenpreneur roles both retain Champion capability, so this is
+  /// a workspace check rather than a `role == buyer` check.
+  String? requireChampion(BuildContext context, GoRouterState state) {
+    final active = requireActive(context, state);
+    if (active != null) return active;
+    return ref.read(activeAccountProfileProvider) == AccountProfile.champion
+        ? null
+        : '/home';
+  }
+
   return GoRouter(
     initialLocation: '/home',
     refreshListenable: refreshListenable,
@@ -434,7 +448,7 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/claims/new',
         builder: (context, state) => const ClaimSubmitView(),
-        redirect: requireActive,
+        redirect: requireChampion,
       ),
       GoRoute(
         path: '/profile',

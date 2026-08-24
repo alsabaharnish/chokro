@@ -13,7 +13,10 @@ import 'package:chokro/core/theme.dart';
 import 'package:chokro/models/appeal_model.dart';
 import 'package:chokro/models/disposal_model.dart';
 import 'package:chokro/models/user_model.dart';
+import 'package:chokro/controllers/orders_controller.dart';
 import 'package:chokro/views/admin/admin_appeals_view.dart';
+import 'package:chokro/views/appeals/appeals_view.dart';
+import 'package:chokro/views/orders/buyer_orders_view.dart';
 import 'package:chokro/views/history/submission_history_view.dart';
 import 'package:chokro/views/shared/action_card.dart';
 import 'package:chokro/views/shared/flow_progress.dart';
@@ -449,5 +452,71 @@ void main() {
           'splash, so ticking the confirmation looks like nothing happened',
     );
     expect(tester.takeException(), isNull);
+  });
+
+  group('a screen reached with go is never a dead end', () {
+    // `context.go` replaces the navigation stack, so `canPop` is false and
+    // `automaticallyImplyLeading` draws nothing. On a bare `Scaffold` with no
+    // navigation bar of its own, that leaves a screen with no way off it —
+    // which is what "My appeals" and "My orders" both were. Both are reached by
+    // `go`: from the appeal-sent screen, and from the checkout receipt.
+    Future<void> pumpAt(WidgetTester tester, String location, Widget screen) async {
+      tester.view.physicalSize = const Size(400, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+
+      final router = GoRouter(
+        // No initial stack beneath it — exactly what `go` leaves behind.
+        initialLocation: location,
+        routes: [
+          GoRoute(
+            path: '/home',
+            builder: (_, _) => const Scaffold(body: Text('Home destination')),
+          ),
+          GoRoute(path: location, builder: (_, _) => screen),
+        ],
+      );
+      addTearDown(router.dispose);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            currentUserProvider.overrideWith((ref) => Stream.value(_champion)),
+            activeAccountProfileProvider.overrideWithValue(
+              AccountProfile.champion,
+            ),
+            cartCountProvider.overrideWithValue(0),
+            adminWorkloadProvider.overrideWithValue(AdminWorkload.empty),
+            userAppealsProvider.overrideWith((ref) => Stream.value(const [])),
+            buyerOrdersProvider.overrideWith((ref) => Stream.value(const [])),
+          ],
+          child: MaterialApp.router(
+            theme: AppTheme.light(),
+            routerConfig: router,
+          ),
+        ),
+      );
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+
+    testWidgets('My appeals offers a way home', (tester) async {
+      await pumpAt(tester, '/appeals', const AppealsView());
+
+      expect(find.byTooltip('Back to home'), findsOneWidget);
+      await tester.tap(find.byTooltip('Back to home'));
+      await tester.pumpAndSettle();
+      expect(find.text('Home destination'), findsOneWidget);
+    });
+
+    testWidgets('My orders offers a way home', (tester) async {
+      await pumpAt(tester, '/orders', const BuyerOrdersView());
+
+      expect(find.byTooltip('Back to home'), findsOneWidget);
+      await tester.tap(find.byTooltip('Back to home'));
+      await tester.pumpAndSettle();
+      expect(find.text('Home destination'), findsOneWidget);
+    });
   });
 }

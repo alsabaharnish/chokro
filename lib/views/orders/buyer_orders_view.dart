@@ -6,6 +6,7 @@ import '../../controllers/orders_controller.dart';
 import '../../core/theme.dart';
 import '../../models/order_model.dart';
 import '../../services/order_service.dart';
+import '../shared/app_shell.dart';
 import '../shared/content_state.dart';
 import '../shared/error_retry.dart';
 import 'order_card.dart';
@@ -25,9 +26,13 @@ class BuyerOrdersView extends ConsumerWidget {
     final ordersAsync = ref.watch(buyerOrdersProvider);
     final awaiting = ref.watch(ordersAwaitingConfirmationProvider);
 
-    return Scaffold(
-      appBar: AppBar(title: const Text('My orders')),
-      body: ordersAsync.when(
+    // Inside `AppShell` — the same stranding as `/appeals`, and on a worse path.
+    // The checkout receipt's "View my orders" is a `context.go`, so a Champion
+    // who had just paid landed here with an empty stack, no back button and no
+    // navigation.
+    return AppShell(
+      title: 'My orders',
+      child: ordersAsync.when(
         loading: () => const ContentLoading(label: 'Loading your orders…'),
         error: (error, _) => ErrorRetry(
           error: error,

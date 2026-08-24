@@ -17,6 +17,22 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-08-24 19:15 (+06) — Fixed two navigation dead ends on the Champion path
+
+"My appeals" and "My orders" were bare `Scaffold`s reached with `context.go`,
+which replaces the stack — so no back button rendered and neither screen has a
+navigation bar, leaving no way off either one. The orders case is on the
+purchase path, straight from the checkout receipt. Both now sit inside
+`AppShell`, which supplies its "Back to home" affordance exactly when there is
+nothing to pop. Also corrected the README's local-run command, whose
+copy-pasteable block gave the Android-emulator address to every target.
+
+Files: `views/appeals/appeals_view.dart`, `views/orders/buyer_orders_view.dart`,
+`core/api_config.dart`, `services/server_warmup.dart`, `README.md`,
+`test/core/api_config_test.dart` (new).
+
+Checks: `flutter analyze` clean · `flutter test` 567 → **576**.
+
 ## 2026-08-24 18:40 (+06) — Greenpreneur sales report, and web fixes
 
 Added a sales report for the 3ZERO Greenpreneur — order value, cash collected,

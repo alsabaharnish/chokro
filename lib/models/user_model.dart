@@ -28,6 +28,14 @@ class UserModel {
   final String role;
   final String status;
 
+  /// The Champion's current public-facing portrait.
+  ///
+  /// Both values are stored together. The URL is what Flutter renders; the
+  /// public id lets Firestore prove the image belongs to this user's dedicated
+  /// Cloudinary folder rather than accepting an arbitrary remote image.
+  final String? profilePhotoUrl;
+  final String? profilePhotoPublicId;
+
   /// When the account was opened, as the *server* saw it.
   ///
   /// Nullable, and honestly so. It is written with
@@ -62,6 +70,8 @@ class UserModel {
     required this.email,
     required this.role,
     required this.status,
+    this.profilePhotoUrl,
+    this.profilePhotoPublicId,
     this.createdAt,
     this.suspendedUntil,
     this.suspendedAt,
@@ -69,6 +79,12 @@ class UserModel {
   });
 
   bool get isAdmin => role == AppConstants.roleAdmin;
+
+  bool get hasProfilePhoto =>
+      profilePhotoUrl != null &&
+      profilePhotoUrl!.isNotEmpty &&
+      profilePhotoPublicId != null &&
+      profilePhotoPublicId!.isNotEmpty;
 
   /// Higher tiers retain the profiles below them: every account is a Champion,
   /// and a 3ZERO Admin can also work as a Greenpreneur.
@@ -153,6 +169,8 @@ class UserModel {
       // upward here would hand out privileges on malformed data.
       role: _string(data['role'], fallback: AppConstants.roleBuyer),
       status: _string(data['status'], fallback: AppConstants.statusSuspended),
+      profilePhotoUrl: _nullableString(data['profilePhotoUrl']),
+      profilePhotoPublicId: _nullableString(data['profilePhotoPublicId']),
       createdAt: _date(data['createdAt']),
       suspendedUntil: _date(data['suspendedUntil']),
       suspendedAt: _date(data['suspendedAt']),
@@ -188,6 +206,9 @@ class UserModel {
     String? name,
     String? role,
     String? status,
+    String? profilePhotoUrl,
+    String? profilePhotoPublicId,
+    bool clearProfilePhoto = false,
     DateTime? suspendedUntil,
     bool clearSuspendedUntil = false,
   }) => UserModel(
@@ -196,6 +217,12 @@ class UserModel {
     email: email,
     role: role ?? this.role,
     status: status ?? this.status,
+    profilePhotoUrl: clearProfilePhoto
+        ? null
+        : (profilePhotoUrl ?? this.profilePhotoUrl),
+    profilePhotoPublicId: clearProfilePhoto
+        ? null
+        : (profilePhotoPublicId ?? this.profilePhotoPublicId),
     createdAt: createdAt,
     suspendedUntil: clearSuspendedUntil
         ? null
@@ -208,6 +235,9 @@ class UserModel {
 /// A string field, whatever Firestore actually returned.
 String _string(Object? value, {String fallback = ''}) =>
     value is String ? value : fallback;
+
+String? _nullableString(Object? value) =>
+    value is String && value.isNotEmpty ? value : null;
 
 /// A date field, tolerating both a resolved `Timestamp` and an unresolved
 /// `FieldValue.serverTimestamp()` that has not come back from the server yet.

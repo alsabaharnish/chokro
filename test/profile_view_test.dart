@@ -218,6 +218,7 @@ void main() {
   ) async {
     await _pump(tester, user: _user(role: AppConstants.roleBuyer));
     expect(find.text('Become a 3ZERO Greenpreneur'), findsOneWidget);
+    expect(find.text('Add profile picture'), findsOneWidget);
   });
 
   testWidgets('a Greenpreneur is not offered it again', (tester) async {
