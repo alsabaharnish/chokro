@@ -59,8 +59,14 @@ String formatDateTime(DateTime? value) {
 /// `2 Aug 2026`. Local time, no clock.
 ///
 /// For dates where the time of day is noise rather than information: a join
-/// date, a suspension expiry. The home screen and the profile screen had each
-/// grown a private copy of this, complete with its own duplicate month list.
+/// date, the day a listing was created. The home screen and the profile screen
+/// had each grown a private copy of this, complete with its own duplicate month
+/// list.
+///
+/// **Not** a suspension expiry, though this comment used to give that as the
+/// example. An admin sets `suspendedUntil` to an exact instant, so a bare date
+/// reads as "you are free on the 26th" to someone blocked until that evening.
+/// Those notices use [formatDateTime].
 String formatDate(DateTime? value) {
   if (value == null) return '';
   final local = value.toLocal();

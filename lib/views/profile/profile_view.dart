@@ -18,6 +18,7 @@ import '../../models/user_model.dart';
 import '../shared/account_profile_switcher.dart';
 import '../shared/app_shell.dart';
 import '../shared/content_state.dart';
+import '../shared/error_retry.dart';
 
 /// Profile management (F1.1).
 ///
@@ -176,11 +177,13 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
       title: 'Profile',
       child: async.when(
         loading: () => const ContentLoading(label: 'Loading your profile…'),
-        error: (error, _) => _Message(
-          icon: Icons.error_outline,
-          text:
-              'Your profile could not be loaded. Check your connection and '
-              'try again.',
+        // Told the user to "try again" on a screen that offered nothing to try
+        // it with, and never named the cause — a permission-denied after a role
+        // or suspension change looked identical to a flaky connection.
+        error: (error, _) => ErrorRetry(
+          error: error,
+          title: 'Your profile',
+          onRetry: () => ref.invalidate(currentUserProvider),
         ),
         data: (user) {
           if (user == null) {
@@ -303,10 +306,22 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
 
                   if (user.role == AppConstants.roleBuyer) ...[
                     const SizedBox(height: AppTheme.gapLg),
+                    // Gated like the donate button below it. Left enabled, the
+                    // tap was refused by `requireSeller` and landed the user on
+                    // /home — silently ejected from the screen they were on,
+                    // with three controls on one screen disagreeing about the
+                    // same suspension.
                     OutlinedButton.icon(
-                      onPressed: () => context.push('/apply-seller'),
+                      onPressed: user.isActive
+                          ? () => context.push('/apply-seller')
+                          : null,
                       icon: const Icon(Icons.storefront_outlined),
-                      label: const Text('Become a 3ZERO Greenpreneur'),
+                      label: Text(
+                        user.isActive
+                            ? 'Become a 3ZERO Greenpreneur'
+                            : 'Become a 3ZERO Greenpreneur — unavailable '
+                                  'while suspended',
+                      ),
                     ),
                   ],
                   const SizedBox(height: AppTheme.gapSm),
@@ -556,8 +571,11 @@ class _SuspensionNotice extends StatelessWidget {
                   until == null
                       ? 'Most actions are unavailable. Contact a 3ZERO Admin '
                             'to have this reviewed.'
+                      // The admin sets an exact time, so show one. A bare
+                      // date reads as "you are free on the 26th" when the
+                      // account is blocked until that evening.
                       : 'Most actions are unavailable until '
-                            '${formatDate(until)}.',
+                            '${formatDateTime(until)}.',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onErrorContainer,
                   ),

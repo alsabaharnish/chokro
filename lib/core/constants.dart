@@ -2,6 +2,15 @@ class AppConstants {
   // responsive breakpoint
   static const double webBreakpoint = 900.0;
 
+  /// Minimum height before the wide layout's navigation rail is used.
+  ///
+  /// Width alone was not enough. A large phone in landscape (932x430, 915x412)
+  /// clears 900 wide while being barely 430 tall, so it took the rail branch —
+  /// and a rail sized for a desktop window cannot fit five destinations in
+  /// 430 px, so the bottom ones were painted outside it and could not be
+  /// tapped. Rotating the phone lost navigation destinations.
+  static const double railMinHeight = 600.0;
+
   // user roles
   static const String roleAdmin = 'admin';
   static const String roleSeller = 'seller';

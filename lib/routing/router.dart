@@ -238,6 +238,16 @@ final routerProvider = Provider<GoRouter>((ref) {
   final refreshListenable = ref.watch(_authGateProvider);
   final pending = ref.watch(pendingDestinationProvider);
 
+  /// The gate the previous redirect pass resolved to.
+  ///
+  /// Held here, in the provider body that builds the router exactly once,
+  /// rather than on the listenable — the distinction that matters is only
+  /// visible where the redirect runs. It exists so the anonymous branch can
+  /// tell two cases apart that look identical to it: a visitor who was never
+  /// signed in (remember where they were going) and a session that has just
+  /// ended (forget it).
+  _Gate? previousGate;
+
   /// The signed-in account, or null. Read fresh on each redirect pass.
   ({_Gate gate, UserModel? user}) resolve() {
     final auth = ref.read(firebaseAuthStateProvider);
@@ -363,6 +373,8 @@ final routerProvider = Provider<GoRouter>((ref) {
       final isStartupError = location == startupErrorPath;
 
       final (gate: gate, user: _) = resolve();
+      final wasSignedIn = previousGate == _Gate.signedIn;
+      previousGate = gate;
 
       /// Whether [location] is somewhere worth returning to.
       ///
@@ -381,14 +393,27 @@ final routerProvider = Provider<GoRouter>((ref) {
           // Hold on the splash. Anywhere else would either flash the login
           // screen at a signed-in user or show a shell with no data in it.
           if (isSplash) return null;
-          if (isRealDestination()) pending.remember(location);
+          // `state.uri`, not `matchedLocation`: the latter drops the query
+          // string, and `/appeals/new?type=claim&id=abc` restored without it
+          // becomes a form with no subject attached — which the rules then
+          // refuse with a message naming two reasons that are both false.
+          if (isRealDestination()) pending.remember(state.uri.toString());
           return splashPath;
 
         case _Gate.anonymous:
           if (isAuthRoute) return null;
-          // Kept across sign-in too: someone who follows a link, is asked to
-          // sign in, and does so should arrive where the link pointed.
-          if (isRealDestination()) pending.remember(location);
+          // A session that has just ended is not an intention to return. The
+          // sign-out fired this very pass while the user was still standing on,
+          // say, `/wallet`, so remembering it meant the *next* person to sign in
+          // on a shared handset landed on the previous one's screen.
+          if (wasSignedIn) {
+            pending.consume();
+          } else if (isRealDestination()) {
+            // Kept across sign-in: someone who follows a link, is asked to sign
+            // in, and does so should arrive where the link pointed — query
+            // string included, which is where /appeals/new carries its subject.
+            pending.remember(state.uri.toString());
+          }
           return '/login';
 
         case _Gate.profileMissing:

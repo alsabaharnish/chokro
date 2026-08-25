@@ -60,10 +60,6 @@ class LocationResult {
   bool get hasFix =>
       outcome == LocationOutcome.fixed && latitude != null && longitude != null;
 
-  /// True when the fix is too imprecise to mean much against a typical geofence.
-  bool get isLowAccuracy =>
-      accuracyMeters != null && accuracyMeters! > 30;
-
   /// Message for the user. Distinguishes the cases the user can fix themselves
   /// from the ones they cannot.
   String get displayMessage {
@@ -85,7 +81,9 @@ class LocationResult {
         return 'Could not get a location fix. Step outside or away from tall '
             'buildings and try again.';
       case LocationOutcome.error:
-        return message ?? 'Could not get your location.';
+        return message ??
+            'Could not get your location. Check that location is switched on, '
+            'then try again.';
     }
   }
 }
@@ -143,7 +141,13 @@ class LocationService {
       if (text.toLowerCase().contains('time')) {
         return const LocationResult(outcome: LocationOutcome.timedOut);
       }
-      return LocationResult(outcome: LocationOutcome.error, message: text);
+      // Deliberately not `message: text`. That put a raw
+      // `PlatformException(channel-error, ...)` dump in a red card in front of
+      // a resident standing at a bin, on the screen that decides whether their
+      // disposal counts — with no remedy, and leaking internal plugin detail
+      // with it. `displayMessage` writes the sentence instead. `message` stays
+      // on the model for callers that genuinely have one worth showing.
+      return const LocationResult(outcome: LocationOutcome.error);
     }
   }
 

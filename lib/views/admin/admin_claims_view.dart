@@ -131,7 +131,7 @@ class _PendingClaims extends ConsumerWidget {
       loading: () => const Center(child: CircularProgressIndicator()),
       error: (error, _) => ErrorRetry(
         error: error,
-        title: 'The claim queue',
+        title: 'The eco-action queue',
         onRetry: () => ref.invalidate(pendingClaimsProvider),
       ),
       data: (claims) {

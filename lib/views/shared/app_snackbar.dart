@@ -55,13 +55,21 @@ class AppSnackBar {
 
   /// Something did not work. Longer on screen than a success, because it
   /// usually asks the reader to do something about it.
-  void failure(String message) => _show(
-    message,
-    background: _scheme.errorContainer,
-    foreground: _scheme.onErrorContainer,
-    icon: Icons.error_outline,
-    duration: const Duration(seconds: 6),
-  );
+  ///
+  /// [actionLabel] and [onAction] attach the remedy the message names. A
+  /// message that states a remedy and withholds it — "An account already
+  /// exists. Sign in instead." — leaves the reader to dismiss the bar, find a
+  /// small text link, and retype what they just entered.
+  void failure(String message, {String? actionLabel, VoidCallback? onAction}) =>
+      _show(
+        message,
+        background: _scheme.errorContainer,
+        foreground: _scheme.onErrorContainer,
+        icon: Icons.error_outline,
+        duration: const Duration(seconds: 6),
+        actionLabel: actionLabel,
+        onAction: onAction,
+      );
 
   /// Something worked, and the result is not otherwise visible on screen.
   void success(String message) => _show(
@@ -87,6 +95,8 @@ class AppSnackBar {
     required Color foreground,
     required IconData icon,
     required Duration duration,
+    String? actionLabel,
+    VoidCallback? onAction,
   }) {
     _messenger
       // Queued SnackBars are shown one after another, so without this an error
@@ -106,6 +116,17 @@ class AppSnackBar {
               ),
             ],
           ),
+          // `textColor` is not optional here. SnackBarAction defaults to
+          // `inversePrimary`, which against `errorContainer` repeats exactly
+          // the contrast mistake this class was written to end — so the colour
+          // is set here rather than left to each caller to remember.
+          action: (actionLabel != null && onAction != null)
+              ? SnackBarAction(
+                  label: actionLabel,
+                  textColor: foreground,
+                  onPressed: onAction,
+                )
+              : null,
           // The theme turns the close affordance on for every SnackBar; it
           // inherits `onSurface` unless it is told otherwise, which is the same
           // mismatch as the text.

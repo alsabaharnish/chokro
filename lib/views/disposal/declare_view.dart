@@ -9,6 +9,7 @@ import '../../core/label_format.dart';
 import '../../core/theme.dart';
 import '../../models/disposal_model.dart';
 import '../../services/verification_service.dart';
+import '../shared/content_state.dart';
 import '../shared/flow_progress.dart';
 
 /// Step 4 of the disposal flow (F2.9): declare what is being disposed of, review
@@ -127,7 +128,14 @@ class DisposalDeclareView extends ConsumerWidget {
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
                       children: [
+                        // Tooltips, not decoration: this is the one value the
+                        // automated check compares against the photograph, and
+                        // a mismatch costs the user their auto-approval. Two
+                        // icon buttons announced only as "button" left a screen
+                        // reader no way to tell which raised the count, and no
+                        // confirmation that it had moved.
                         IconButton.filledTonal(
+                          tooltip: 'One fewer item',
                           onPressed: draft.declaredItemCount > 1
                               ? () => controller.setItemCount(
                                   draft.declaredItemCount - 1,
@@ -135,13 +143,20 @@ class DisposalDeclareView extends ConsumerWidget {
                               : null,
                           icon: const Icon(Icons.remove),
                         ),
-                        Text(
-                          '${draft.declaredItemCount}',
-                          style: theme.textTheme.headlineMedium?.copyWith(
-                            fontWeight: FontWeight.bold,
+                        Semantics(
+                          liveRegion: true,
+                          label: itemCount(draft.declaredItemCount),
+                          child: ExcludeSemantics(
+                            child: Text(
+                              '${draft.declaredItemCount}',
+                              style: theme.textTheme.headlineMedium?.copyWith(
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                           ),
                         ),
                         IconButton.filledTonal(
+                          tooltip: 'One more item',
                           onPressed: draft.declaredItemCount < 100
                               ? () => controller.setItemCount(
                                   draft.declaredItemCount + 1,
@@ -250,18 +265,33 @@ class DisposalDeclareView extends ConsumerWidget {
 
                 const SizedBox(height: 24),
 
-                if (draft.isSubmitting)
-                  const Center(child: CircularProgressIndicator())
-                else
-                  FilledButton.icon(
-                    onPressed: () async {
-                      final user = userAsync.value;
-                      if (user == null) return;
-                      await controller.submit(uid: user.uid);
-                    },
-                    icon: const Icon(Icons.send),
-                    label: const Text('Submit disposal'),
+                // The button stays mounted and disabled rather than being
+                // swapped for a bare spinner. This is the most important action
+                // in the app and it runs against a cold-start host that
+                // `core/network_errors.dart` documents as taking 30-60 s to
+                // wake: an unlabelled spinner for that long reads as a freeze,
+                // and a user who backs out at that point loses the photograph
+                // and the GPS fix and has to redo the flow standing at the bin.
+                FilledButton.icon(
+                  onPressed: draft.isSubmitting
+                      ? null
+                      : () async {
+                          final user = userAsync.value;
+                          if (user == null) return;
+                          await controller.submit(uid: user.uid);
+                        },
+                  icon: draft.isSubmitting
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.send),
+                  label: Text(
+                    draft.isSubmitting ? 'Submitting…' : 'Submit disposal',
                   ),
+                ),
+                if (draft.isSubmitting) const SlowServerNote(),
                 const SizedBox(height: 32),
               ],
             ),
@@ -329,18 +359,24 @@ class _SubmittedView extends StatelessWidget {
 
                   const SizedBox(height: AppTheme.gapXl),
 
-                  // No buttons while the server is still deciding: leaving now
-                  // would not lose the submission, but the answer is seconds
-                  // away and it is worth waiting for.
+                  // "Done" is withheld while the server is still deciding —
+                  // the answer is seconds away on the warm path and it is worth
+                  // waiting for. The history exit is not withheld: on the cold
+                  // path this wait runs to 90 seconds, and a screen with no
+                  // control at all, at the emotional peak of the flow, left the
+                  // system back gesture as the only way off. That is safe to
+                  // offer — `submittedId` was set before `isVerifying` went
+                  // true, so the document already exists and the history stream
+                  // shows the real outcome whichever way verification lands.
                   if (!isVerifying) ...[
                     FilledButton(onPressed: onDone, child: const Text('Done')),
                     const SizedBox(height: AppTheme.gapSm),
-                    TextButton.icon(
-                      onPressed: onViewHistory,
-                      icon: const Icon(Icons.receipt_long_outlined, size: 18),
-                      label: const Text('See my submissions'),
-                    ),
                   ],
+                  TextButton.icon(
+                    onPressed: onViewHistory,
+                    icon: const Icon(Icons.receipt_long_outlined, size: 18),
+                    label: const Text('See my submissions'),
+                  ),
                 ],
               ),
             ),
@@ -370,6 +406,12 @@ class _SubmittedView extends StatelessWidget {
       style: theme.textTheme.bodyMedium?.copyWith(
         color: theme.colorScheme.onSurfaceVariant,
       ),
+    ),
+    // Self-reveals only after five seconds, so the warm path never sees it and
+    // the cold-start path gets the one honest reassurance the system has.
+    const SlowServerNote(
+      message: 'The server is taking a while. Your submission is already '
+          'saved — you can check your history in a moment.',
     ),
   ];
 

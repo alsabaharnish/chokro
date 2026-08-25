@@ -102,7 +102,16 @@ class DisposalLocationView extends ConsumerWidget {
                     withinRadius: withinRadius,
                     radius: bin.radiusMeters,
                     accuracy: location.accuracyMeters,
-                    lowAccuracy: location.isLowAccuracy,
+                    // Judged against *this* bin, not a fixed 30 m. The flat
+                    // threshold told a user at a 100 m bin to go hunting for
+                    // open sky when their fix was fine, and — the costly half —
+                    // told a user at a 20 m bin that nothing was wrong, so they
+                    // submitted, failed the server's geofence check, and had no
+                    // way to see why.
+                    lowAccuracy: isFixTooRoughForRadius(
+                      accuracyMeters: location.accuracyMeters,
+                      radiusMeters: bin.radiusMeters,
+                    ),
                   )
                 else
                   _LocationProblem(

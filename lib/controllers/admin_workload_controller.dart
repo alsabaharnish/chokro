@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/constants.dart';
 import '../services/admin_workload_service.dart';
 import 'admin_review_controller.dart';
 import 'appeals_controller.dart';
@@ -12,12 +13,29 @@ import 'seller_application_controller.dart';
 enum AdminTaskKind { disposal, claim, appeal, application }
 
 class AdminTaskProgress {
-  const AdminTaskProgress({this.pending = 0, this.completedToday = 0});
+  const AdminTaskProgress({
+    this.pending = 0,
+    this.completedToday = 0,
+    this.atCap = false,
+  });
 
   final int pending;
   final int completedToday;
 
+  /// True when [pending] is a floor rather than a total.
+  ///
+  /// Every queue this counts is read through `.limit(QueryLimits.reviewQueue)`,
+  /// so `pending` saturates at 50 and stops moving. Presented as a plain number
+  /// that is a lie the admin cannot detect: a 300-item backlog reads as "50",
+  /// the badge never falls as they work, and nothing hints that older items
+  /// exist. Surfacing the cap is what makes the truncation degrade visibly,
+  /// which is what `QueryLimits` was written for.
+  final bool atCap;
+
   bool get isVisible => pending > 0 || completedToday > 0;
+
+  /// The badge text: `50+` when the count is capped, the number otherwise.
+  String get badgeLabel => atCap ? '$pending+' : '$pending';
 }
 
 class AdminWorkload {
@@ -139,23 +157,22 @@ final adminWorkloadProvider = Provider.autoDispose<AdminWorkload>((ref) {
     doneApplications,
   ];
 
+  // Every one of these four queues is read with `.limit(QueryLimits.reviewQueue)`,
+  // so a length that has reached the limit means "at least this many".
+  AdminTaskProgress progress(AsyncValue<List<Object?>> queue, int? done) {
+    final pending = queue.value?.length ?? 0;
+    return AdminTaskProgress(
+      pending: pending,
+      atCap: pending >= QueryLimits.reviewQueue,
+      completedToday: done ?? 0,
+    );
+  }
+
   return AdminWorkload(
-    disposals: AdminTaskProgress(
-      pending: pendingDisposals.value?.length ?? 0,
-      completedToday: doneDisposals.value ?? 0,
-    ),
-    claims: AdminTaskProgress(
-      pending: pendingClaims.value?.length ?? 0,
-      completedToday: doneClaims.value ?? 0,
-    ),
-    appeals: AdminTaskProgress(
-      pending: pendingAppeals.value?.length ?? 0,
-      completedToday: doneAppeals.value ?? 0,
-    ),
-    applications: AdminTaskProgress(
-      pending: pendingApplications.value?.length ?? 0,
-      completedToday: doneApplications.value ?? 0,
-    ),
+    disposals: progress(pendingDisposals, doneDisposals.value),
+    claims: progress(pendingClaims, doneClaims.value),
+    appeals: progress(pendingAppeals, doneAppeals.value),
+    applications: progress(pendingApplications, doneApplications.value),
     isLoading: values.any((value) => value.isLoading && !value.hasValue),
     hasError: values.any((value) => value.hasError && !value.hasValue),
   );

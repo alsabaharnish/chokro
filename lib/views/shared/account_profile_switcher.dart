@@ -126,46 +126,55 @@ Future<void> showAccountProfilePicker(
           AppTheme.gapMd,
           AppTheme.gapLg,
         ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Text(
-              'Choose a profile',
-              style: Theme.of(
-                sheetContext,
-              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
-            ),
-            const SizedBox(height: AppTheme.gapXs),
-            Text(
-              'Your sign-in stays the same. Only the workspace and navigation change.',
-              style: Theme.of(sheetContext).textTheme.bodyMedium?.copyWith(
-                color: Theme.of(sheetContext).colorScheme.onSurfaceVariant,
+        // Scrollable, which is what `isScrollControlled: true` exists to
+        // enable. Without it, an Admin at an accessibility text size could not
+        // reach the third profile in the list — and since this picker is the
+        // only general way to switch, they were locked out of the Champion
+        // workspace (shopping, donating, eco-actions) entirely. Under the
+        // sheet's loose constraints this shrink-wraps when the content fits, so
+        // a short sheet is unchanged.
+        child: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Text(
+                'Choose a profile',
+                style: Theme.of(
+                  sheetContext,
+                ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
               ),
-            ),
-            const SizedBox(height: AppTheme.gapMd),
-            RadioGroup<AccountProfile>(
-              groupValue: active,
-              onChanged: (value) {
-                if (value != null) Navigator.of(sheetContext).pop(value);
-              },
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  for (final profile in accountProfilesForRole(user.role))
-                    Card(
-                      margin: const EdgeInsets.only(bottom: AppTheme.gapSm),
-                      child: RadioListTile<AccountProfile>(
-                        value: profile,
-                        secondary: Icon(accountProfileIcon(profile)),
-                        title: Text(profile.label),
-                        subtitle: Text(profile.description),
+              const SizedBox(height: AppTheme.gapXs),
+              Text(
+                'Your sign-in stays the same. Only the workspace and navigation change.',
+                style: Theme.of(sheetContext).textTheme.bodyMedium?.copyWith(
+                  color: Theme.of(sheetContext).colorScheme.onSurfaceVariant,
+                ),
+              ),
+              const SizedBox(height: AppTheme.gapMd),
+              RadioGroup<AccountProfile>(
+                groupValue: active,
+                onChanged: (value) {
+                  if (value != null) Navigator.of(sheetContext).pop(value);
+                },
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (final profile in accountProfilesForRole(user.role))
+                      Card(
+                        margin: const EdgeInsets.only(bottom: AppTheme.gapSm),
+                        child: RadioListTile<AccountProfile>(
+                          value: profile,
+                          secondary: Icon(accountProfileIcon(profile)),
+                          title: Text(profile.label),
+                          subtitle: Text(profile.description),
+                        ),
                       ),
-                    ),
-                ],
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     ),

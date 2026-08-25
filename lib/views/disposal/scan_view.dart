@@ -90,8 +90,22 @@ class _ScanViewState extends ConsumerState<ScanView> {
     if (bin == null) return;
 
     // Opens a fresh draft here rather than on the photo screen: backing out and
-    // scanning a different bin must not leave a photo attached to the old one.
-    ref.read(disposalDraftProvider.notifier).startForBin(bin);
+    // scanning a *different* bin must not leave a photo attached to the old one.
+    //
+    // Guarded on the bin actually changing, because the unguarded version also
+    // destroyed the work of the far more common case: backing out to the
+    // scanner to re-check the code, re-scanning the *same* bin, and tapping a
+    // button labelled "Continue". That silently threw away a photograph taken
+    // standing over the bin, the GPS fix and the declared count, with no
+    // warning and no undo.
+    //
+    // Compared on `qrPayload`, not `id`: `BinModel.id` is nullable for a bin
+    // not yet written, so a null-to-null comparison would report "same bin" in
+    // exactly the case that needs the reset.
+    final current = ref.read(disposalDraftProvider).bin;
+    if (current == null || current.qrPayload != bin.qrPayload) {
+      ref.read(disposalDraftProvider.notifier).startForBin(bin);
+    }
     await context.push('/dispose/photo');
 
     // Back from step 2, and this screen was kept alive underneath it the whole

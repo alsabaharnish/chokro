@@ -8,8 +8,10 @@ import '../../controllers/auth_controller.dart';
 import '../../controllers/cart_controller.dart';
 import '../../core/account_profile.dart';
 import '../../core/constants.dart';
+import '../../core/network_errors.dart';
 import '../../core/theme.dart';
 import 'account_profile_switcher.dart';
+import 'app_snackbar.dart';
 import 'brand_mark.dart';
 
 enum _AccountAction { switchProfile, profile, signOut }
@@ -59,6 +61,11 @@ class AppShell extends ConsumerWidget {
     // Watched at the shell rather than on the shop screen, so a buyer who adds
     // something and navigates away can still see they have a cart open.
     final cartCount = ref.watch(cartCountProvider);
+    // Signing out is not instant: it first unregisters the FCM token, which is
+    // a network round-trip. Without this the menu item stayed live throughout,
+    // so a user on a slow connection re-confirmed and fired a second signOut.
+    final isSigningOut = ref.watch(authControllerProvider).isLoading;
+    final suspended = user != null && !user.isActive;
     final adminWorkload =
         user?.isAdmin == true && activeProfile == AccountProfile.admin
         ? ref.watch(adminWorkloadProvider)
@@ -82,7 +89,16 @@ class AppShell extends ConsumerWidget {
           Icons.fact_check,
           'Disposals',
         ),
-        ShellDestination('/admin/claims', Icons.eco_outlined, Icons.eco, 'Eco'),
+        // Named for the screen it opens, like every other destination. 'Eco'
+        // was the only bare abbreviation in the bar and the only label that did
+        // not match its screen's title, so an admin could not tell which queue
+        // it was without tapping it.
+        ShellDestination(
+          '/admin/claims',
+          Icons.eco_outlined,
+          Icons.eco,
+          'Eco-actions',
+        ),
         ShellDestination(
           '/admin/appeals',
           Icons.gavel_outlined,
@@ -157,22 +173,52 @@ class AppShell extends ConsumerWidget {
     void onSelect(int i) {
       final target = destinations[i].path;
       if (target == location) return;
+
+      // Say why, rather than bouncing. `requireAdmin`/`requireSeller` in
+      // router.dart send a suspended user back to /home, which the shell then
+      // rendered as "nothing happened": the most prominent control on the
+      // screen was inert with no explanation, while the home cards two inches
+      // below explained themselves properly. The Champion destinations are all
+      // `requireSignedIn` and keep working, so only these two prefixes refuse.
+      if (suspended &&
+          (target.startsWith('/admin/') || target.startsWith('/seller/'))) {
+        AppSnackBar.of(context).info('Unavailable while suspended.');
+        return;
+      }
+
       // `go`, not `push`: these are peers, and pushing would grow a stack of
       // Home → Wallet → Home the back button then has to unwind.
       context.go(target);
     }
 
-    int badgeFor(String path) => switch (path) {
-      '/market' => cartCount,
-      '/admin/disposals' => adminWorkload.disposals.pending,
-      '/admin/claims' => adminWorkload.claims.pending,
-      '/admin/appeals' => adminWorkload.appeals.pending,
-      _ => 0,
+    // `atCap` travels with the count. The admin queues are read through
+    // `.limit(QueryLimits.reviewQueue)`, so a saturated badge is a floor, not a
+    // total — rendering it as a bare number told an admin working a 300-item
+    // backlog that they had 50, and the number never moved as they worked. The
+    // cart has no cap, so it is always exact.
+    ({int count, bool atCap}) badgeFor(String path) => switch (path) {
+      '/market' => (count: cartCount, atCap: false),
+      '/admin/disposals' => (
+        count: adminWorkload.disposals.pending,
+        atCap: adminWorkload.disposals.atCap,
+      ),
+      '/admin/claims' => (
+        count: adminWorkload.claims.pending,
+        atCap: adminWorkload.claims.atCap,
+      ),
+      '/admin/appeals' => (
+        count: adminWorkload.appeals.pending,
+        atCap: adminWorkload.appeals.atCap,
+      ),
+      _ => (count: 0, atCap: false),
     };
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final isWide = constraints.maxWidth >= AppConstants.webBreakpoint;
+        // Two-dimensional on purpose — see AppConstants.railMinHeight.
+        final isWide =
+            constraints.maxWidth >= AppConstants.webBreakpoint &&
+            constraints.maxHeight >= AppConstants.railMinHeight;
         final expandedRail = constraints.maxWidth >= 1280;
         final content = DecoratedBox(
           decoration: BoxDecoration(
@@ -262,11 +308,14 @@ class AppShell extends ConsumerWidget {
                           contentPadding: EdgeInsets.zero,
                         ),
                       ),
-                    const PopupMenuItem(
+                    PopupMenuItem(
+                      enabled: !isSigningOut,
                       value: _AccountAction.signOut,
                       child: ListTile(
-                        leading: Icon(Icons.logout),
-                        title: Text('Sign out'),
+                        leading: const Icon(Icons.logout),
+                        title: Text(
+                          isSigningOut ? 'Signing out…' : 'Sign out',
+                        ),
                         contentPadding: EdgeInsets.zero,
                       ),
                     ),
@@ -294,6 +343,10 @@ class AppShell extends ConsumerWidget {
                 ? Row(
                     children: [
                       NavigationRail(
+                        // Belt and braces with the height floor above: the rail
+                        // is never the only thing standing between a user and a
+                        // destination they cannot reach.
+                        scrollable: true,
                         extended: expandedRail,
                         selectedIndex: index,
                         onDestinationSelected: onSelect,
@@ -393,7 +446,17 @@ class AppShell extends ConsumerWidget {
     );
 
     if (confirmed != true || !context.mounted) return;
+
+    // Captured before the await: the route this was invoked from is gone by the
+    // time the answer arrives. A deliberate, security-relevant action that
+    // reports nothing on failure leaves the user believing they signed out on a
+    // handset the codebase itself describes as often shared or borrowed.
+    final notify = AppSnackBar.of(context);
     await ref.read(authControllerProvider.notifier).signOut();
+    final error = ref.read(authControllerProvider).error;
+    if (error != null) {
+      notify.failure('Could not sign out. ${friendlyErrorMessage(error)}');
+    }
   }
 }
 
@@ -406,12 +469,24 @@ class _DestinationIcon extends StatelessWidget {
   const _DestinationIcon({required this.icon, required this.badge});
 
   final IconData icon;
-  final int badge;
+  final ({int count, bool atCap}) badge;
 
   @override
   Widget build(BuildContext context) {
-    if (badge <= 0) return Icon(icon);
-    return Badge.count(count: badge, child: Icon(icon));
+    if (badge.count <= 0) return Icon(icon);
+    // `Badge.count` cannot say "50+", so a capped queue uses the general
+    // constructor. Semantics carries the same distinction in words, because the
+    // "+" is a single glyph a screen reader would otherwise drop.
+    if (!badge.atCap) {
+      return Badge.count(count: badge.count, child: Icon(icon));
+    }
+    return Semantics(
+      label: 'at least ${badge.count} waiting',
+      child: Badge(
+        label: ExcludeSemantics(child: Text('${badge.count}+')),
+        child: Icon(icon),
+      ),
+    );
   }
 }
 

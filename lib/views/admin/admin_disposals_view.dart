@@ -45,7 +45,7 @@ class AdminDisposalsView extends ConsumerWidget {
     });
 
     return AppShell(
-      title: 'Review queue',
+      title: 'Disposal review',
       child: pending.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (err, _) => ErrorRetry(

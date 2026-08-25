@@ -48,6 +48,18 @@ class DisposalDraft {
   final int? originalBytes;
   final int? compressedBytes;
 
+  /// The photo's upload receipt, cached once the trusted service has accepted
+  /// it, so a retried submit does not upload the same image again.
+  ///
+  /// Without this, every retry through a flaky connection abandoned a
+  /// permanently unreferenced image in the host *and* burned one of the user's
+  /// 40 hourly uploads — so a user retrying a failing submit could trip their
+  /// own rate limit and then be told the photo could not be uploaded when
+  /// nothing was wrong with it.
+  ///
+  /// Cleared whenever the bytes change, so a retake always re-uploads.
+  final UploadedPhoto? uploadedPhoto;
+
   final bool isCapturing;
 
   final LocationResult? location;
@@ -78,6 +90,7 @@ class DisposalDraft {
     this.photoBytes,
     this.originalBytes,
     this.compressedBytes,
+    this.uploadedPhoto,
     this.isCapturing = false,
     this.location,
     this.isLocating = false,
@@ -139,6 +152,7 @@ class DisposalDraft {
     Uint8List? photoBytes,
     int? originalBytes,
     int? compressedBytes,
+    UploadedPhoto? uploadedPhoto,
     bool? isCapturing,
     LocationResult? location,
     bool? isLocating,
@@ -160,6 +174,14 @@ class DisposalDraft {
       compressedBytes: clearPhoto
           ? null
           : (compressedBytes ?? this.compressedBytes),
+      // Tied to the bytes, not to `clearPhoto` alone. The retake path
+      // (`capturePhoto`) sets `photoBytes:` *without* `clearPhoto`, so keying
+      // this off the flag would let a stale receipt survive a retake — and the
+      // next submit would silently attach the previous photograph's URL to the
+      // new declaration. Any change of bytes invalidates the receipt.
+      uploadedPhoto: clearPhoto || photoBytes != null
+          ? uploadedPhoto
+          : (uploadedPhoto ?? this.uploadedPhoto),
       isCapturing: isCapturing ?? this.isCapturing,
       location: location ?? this.location,
       isLocating: isLocating ?? this.isLocating,
@@ -362,9 +384,17 @@ class DisposalDraftController extends Notifier<DisposalDraft> {
 
       // Uploads via the trusted service, not to a bucket. See
       // PhotoUploadService for why, and §4.3 of the brief.
-      final photo = await ref
-          .read(photoUploadServiceProvider)
-          .uploadDisposalPhoto(photoBytes);
+      //
+      // Reuses the receipt from an earlier attempt when there is one: a submit
+      // can fail after the upload succeeded (the Firestore create, or the
+      // verify call), and re-uploading on retry orphaned the first image and
+      // spent another of the user's hourly uploads for nothing.
+      final photo =
+          draft.uploadedPhoto ??
+          await ref
+              .read(photoUploadServiceProvider)
+              .uploadDisposalPhoto(photoBytes);
+      state = state.copyWith(uploadedPhoto: photo);
 
       final disposal = DisposalModel(
         userId: uid,

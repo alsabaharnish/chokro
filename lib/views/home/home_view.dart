@@ -510,11 +510,21 @@ class _Greeting extends StatelessWidget {
                               color: scheme.primary,
                             ),
                             const SizedBox(width: 6),
-                            Text(
-                              role,
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: scheme.onSurface,
-                                fontWeight: FontWeight.w800,
+                            // Flexible on the Text, not on the pill: in a
+                            // one-child Row the pill already gets the full
+                            // width, and ellipsis on an unbounded Text never
+                            // fires. The constraint has to reach this node, or
+                            // '3ZERO Greenpreneur' draws an overflow stripe
+                            // across the top of the hero at large text sizes.
+                            Flexible(
+                              child: Text(
+                                role,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: scheme.onSurface,
+                                  fontWeight: FontWeight.w800,
+                                ),
                               ),
                             ),
                           ],
@@ -664,12 +674,17 @@ class _BalanceValue extends StatelessWidget {
               color: AppTheme.reward,
             ),
             const SizedBox(width: 7),
-            Text(
-              'POINTS BALANCE',
-              style: theme.textTheme.labelSmall?.copyWith(
-                color: foreground.withValues(alpha: .8),
-                fontWeight: FontWeight.w800,
-                letterSpacing: 1.1,
+            // Matches what _BalanceValue's number Row already does.
+            Flexible(
+              child: Text(
+                'POINTS BALANCE',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: foreground.withValues(alpha: .8),
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.1,
+                ),
               ),
             ),
           ],
@@ -777,8 +792,10 @@ class _SuspendedNotice extends StatelessWidget {
 
     final detail = indefinite || until == null
         ? 'Submitting and claiming are unavailable. Contact a 3ZERO Admin.'
+        // The exact time the admin actually set, not just the date — a
+        // suspension that lifts at 18:40 read as "you are free on the 26th".
         : 'Submitting and claiming are unavailable until '
-              '${formatDate(until)}. You can still read your history.';
+              '${formatDateTime(until)}. You can still read your history.';
 
     return Card(
       color: scheme.errorContainer,

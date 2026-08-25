@@ -68,6 +68,17 @@ class AppealActions {
     final uid = _ref.read(currentUidProvider);
     if (uid == null) throw StateError('Not signed in.');
 
+    // An appeal with no subject is a rules refusal waiting to happen, and the
+    // refusal names ownership and rejection status — two things that are both
+    // true — so the user is sent to check exactly the wrong thing. Say what is
+    // actually wrong instead.
+    if (subjectId.trim().isEmpty) {
+      throw AppealValidationException(
+        'This appeal is not attached to a submission. Open it again from the '
+        'rejected disposal or eco-action.',
+      );
+    }
+
     final problem = AppealModel.validateMessage(message);
     if (problem != null) throw AppealValidationException(problem);
 

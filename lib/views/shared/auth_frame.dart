@@ -189,54 +189,61 @@ class _BrandPanel extends StatelessWidget {
               ),
               Padding(
                 padding: const EdgeInsets.all(48),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    BrandMark(
-                      size: 56,
-                      showWordmark: true,
-                      foregroundColor: scheme.onPrimary,
-                    ),
-                    const Spacer(),
-                    Text(
-                      'Every responsible action should count.',
-                      style: theme.textTheme.displaySmall?.copyWith(
-                        color: scheme.onPrimary,
-                        fontWeight: FontWeight.w800,
-                        height: 1.1,
-                        letterSpacing: -1,
+                // Scrollable, like the form half already is. In a short browser
+                // window this panel — the first thing every desktop visitor
+                // sees — clipped its three trust pills with no way to reach
+                // them. The `Spacer` has to go with it: `Expanded` under a
+                // scroll view's unbounded main axis asserts at runtime.
+                child: SingleChildScrollView(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      BrandMark(
+                        size: 56,
+                        showWordmark: true,
+                        foregroundColor: scheme.onPrimary,
                       ),
-                    ),
-                    const SizedBox(height: AppTheme.gapMd),
-                    Text(
-                      'Verify recycling, build a transparent impact record, '
-                      'and earn rewards you can trust.',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        color: scheme.onPrimary.withValues(alpha: .82),
-                        height: 1.5,
-                        fontWeight: FontWeight.w400,
+                      const SizedBox(height: AppTheme.gap2Xl),
+                      Text(
+                        'Every responsible action should count.',
+                        style: theme.textTheme.displaySmall?.copyWith(
+                          color: scheme.onPrimary,
+                          fontWeight: FontWeight.w800,
+                          height: 1.1,
+                          letterSpacing: -1,
+                        ),
                       ),
-                    ),
-                    const SizedBox(height: AppTheme.gapXl),
-                    const Wrap(
-                      spacing: 12,
-                      runSpacing: 12,
-                      children: [
-                        _TrustPill(
-                          icon: Icons.verified_user_outlined,
-                          label: 'Verified evidence',
+                      const SizedBox(height: AppTheme.gapMd),
+                      Text(
+                        'Verify recycling, build a transparent impact record, '
+                        'and earn rewards you can trust.',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          color: scheme.onPrimary.withValues(alpha: .82),
+                          height: 1.5,
+                          fontWeight: FontWeight.w400,
                         ),
-                        _TrustPill(
-                          icon: Icons.account_balance_wallet_outlined,
-                          label: 'Auditable rewards',
-                        ),
-                        _TrustPill(
-                          icon: Icons.storefront_outlined,
-                          label: 'Circular marketplace',
-                        ),
-                      ],
-                    ),
-                  ],
+                      ),
+                      const SizedBox(height: AppTheme.gapXl),
+                      const Wrap(
+                        spacing: 12,
+                        runSpacing: 12,
+                        children: [
+                          _TrustPill(
+                            icon: Icons.verified_user_outlined,
+                            label: 'Verified evidence',
+                          ),
+                          _TrustPill(
+                            icon: Icons.account_balance_wallet_outlined,
+                            label: 'Auditable rewards',
+                          ),
+                          _TrustPill(
+                            icon: Icons.storefront_outlined,
+                            label: 'Circular marketplace',
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
                 ),
               ),
             ],

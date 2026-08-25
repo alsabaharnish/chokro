@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -41,6 +42,14 @@ class _RegisterViewState extends ConsumerState<RegisterView> {
 
     if (!_formKey.currentState!.validate()) return;
 
+    // See login_view: a live region on a newly inserted node is not reliably
+    // announced on iOS, so the wait is spoken explicitly too.
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      'Creating your account…',
+      Directionality.of(context),
+    );
+
     await ref
         .read(authControllerProvider.notifier)
         .signUp(
@@ -62,9 +71,21 @@ class _RegisterViewState extends ConsumerState<RegisterView> {
     // Was a hand-built SnackBar with `backgroundColor: errorContainer` over
     // SnackBar's default `onInverseSurface` text: 1.70:1, i.e. unreadable. So
     // every registration failure reported itself invisibly.
-    AppSnackBar.of(
-      context,
-    ).failure(error is AuthFailure ? error.message : authErrorMessage(null));
+    //
+    // The already-registered case carries the remedy it names. It is the most
+    // common registration failure, and stating "Sign in instead" without
+    // offering it left the user to dismiss the bar, hunt for a small text link
+    // and retype the email they had just entered. `AuthFailure.code` is
+    // retained precisely so callers can branch without re-parsing the message.
+    final failure = error is AuthFailure ? error : null;
+    final router = GoRouter.of(context);
+    AppSnackBar.of(context).failure(
+      failure?.message ?? authErrorMessage(null),
+      actionLabel: failure?.code == 'email-already-in-use' ? 'Sign in' : null,
+      onAction: failure?.code == 'email-already-in-use'
+          ? () => router.go('/login')
+          : null,
+    );
   }
 
   @override
@@ -76,6 +97,11 @@ class _RegisterViewState extends ConsumerState<RegisterView> {
       child: AutofillGroup(
         child: Form(
           key: _formKey,
+          // Clears a stale validation message as the user fixes the field.
+          // Without it, '2 more characters' kept saying so after they were
+          // typed — a factually wrong instruction about the text currently in
+          // the field, on the app's first-run screen.
+          autovalidateMode: AutovalidateMode.onUserInteractionIfError,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -98,7 +124,13 @@ class _RegisterViewState extends ConsumerState<RegisterView> {
                 focusNode: _emailFocus,
                 keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.next,
-                autofillHints: const [AutofillHints.newUsername],
+                // Paired with `email` so iOS types the field as well: the
+                // sign-in screen hints `username` first, and the two halves of
+                // one credential have to agree for the manager to fill it back.
+                autofillHints: const [
+                  AutofillHints.newUsername,
+                  AutofillHints.email,
+                ],
                 autocorrect: false,
                 textCapitalization: TextCapitalization.none,
                 enabled: !isLoading,
@@ -144,16 +176,22 @@ class _RegisterViewState extends ConsumerState<RegisterView> {
               FilledButton(
                 onPressed: isLoading ? null : _submit,
                 child: isLoading
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                    ? Semantics(
+                        liveRegion: true,
+                        label: 'Creating your account…',
+                        child: const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
                       )
                     : const Text('Create account'),
               ),
               const SizedBox(height: 12),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+              // Wrap, not Row — see the sibling change in login_view.dart.
+              Wrap(
+                alignment: WrapAlignment.center,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   const Text('Already a member?'),
                   TextButton(

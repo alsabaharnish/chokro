@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../controllers/auth_controller.dart';
@@ -121,6 +122,15 @@ class _LoginViewState extends ConsumerState<LoginView> {
 
     if (!_formKey.currentState!.validate()) return;
 
+    // Spoken as well as marked `liveRegion`: a live region on a node that is
+    // newly *inserted*, rather than one whose label changes, is not reliably
+    // announced on iOS.
+    SemanticsService.sendAnnouncement(
+      View.of(context),
+      'Signing in…',
+      Directionality.of(context),
+    );
+
     await ref
         .read(authControllerProvider.notifier)
         .signIn(
@@ -159,6 +169,13 @@ class _LoginViewState extends ConsumerState<LoginView> {
         // password as one credential and offer to save it.
         child: Form(
           key: _formKey,
+          // Only re-validates a field that is *already* showing an error, so
+          // '2 more characters' clears as the user types them instead of
+          // standing there contradicting the field it describes — while
+          // nothing turns red before the first submit. `onUserInteraction`
+          // would be too eager: it paints "that does not look like an email
+          // address" under a half-typed address.
+          autovalidateMode: AutovalidateMode.onUserInteractionIfError,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -166,7 +183,15 @@ class _LoginViewState extends ConsumerState<LoginView> {
                 controller: _emailController,
                 keyboardType: TextInputType.emailAddress,
                 textInputAction: TextInputAction.next,
-                autofillHints: const [AutofillHints.email],
+                // `username` first: iOS maps only the *first* hint to a
+                // UITextContentType, and hinting this field as `email` alone
+                // meant the saved Chokro credential was never offered back —
+                // registration saved it, sign-in could not fill it. Android
+                // reads the whole list and keeps the email classification.
+                autofillHints: const [
+                  AutofillHints.username,
+                  AutofillHints.email,
+                ],
                 autocorrect: false,
                 // Email addresses are case-insensitive and never
                 // capitalised; the default sentence-case keyboard made
@@ -229,16 +254,29 @@ class _LoginViewState extends ConsumerState<LoginView> {
               FilledButton(
                 onPressed: isLoading ? null : _submit,
                 child: isLoading
-                    ? const SizedBox(
-                        height: 20,
-                        width: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                    // Named, because the button loses its own label while it
+                    // spins. Against a cold-start host that can take 30-60 s
+                    // to wake, a screen-reader user otherwise gets pure silence
+                    // and taps again.
+                    ? Semantics(
+                        liveRegion: true,
+                        label: 'Signing in…',
+                        child: const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        ),
                       )
                     : const Text('Sign in'),
               ),
               const SizedBox(height: 12),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+              // Wrap, not Row — the idiom auth_frame.dart already uses. As a
+              // Row this clipped at large text sizes and the overflowing half
+              // of 'Create account' was dead to touch, on the first screen of
+              // the app and the only route to registration.
+              Wrap(
+                alignment: WrapAlignment.center,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
                   const Text('New to Chokro?'),
                   TextButton(
