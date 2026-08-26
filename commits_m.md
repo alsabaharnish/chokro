@@ -17,6 +17,81 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-08-26 09:30 (+06) — Verified the outstanding UX audit, then fixed it
+
+`UX_AUDIT_OUTSTANDING.md` opened by saying its own verification stage never
+ran, and that roughly one in ten of its findings would dissolve on contact with
+the code. That stage was run: all 44 leads read against the real source. 43
+confirmed or partly confirmed, 1 dissolved (`market-buyer-9` — the catalogue's
+Search key does work). Two of the doc's *suggested fixes* were also wrong and
+would have shipped new bugs: comparing bins by the nullable `id` skips the
+reset in exactly the case that needs it, and clearing the cached photo upload
+on `clearPhoto` would have attached a stale photo URL to a retaken photograph.
+Both corrections are recorded in the code where they were made.
+
+Highlights: the eco-action form opened onto a stale "Sent for review" with no
+form for anyone who had ever left it by the back button; a suspended user's
+navigation tabs were silently inert; the quota banner said "3 claims left this
+week" when the number counts *approvals*; the profile picker could not be
+scrolled at accessibility text sizes, locking an Admin out of the Champion
+workspace; and signing out recorded the current screen, so the next person to
+sign in on a shared handset landed there.
+
+Also consolidated three divergent private `_Notice` widgets into one shared
+tone-based `NoticeCard`.
+
+Files: 30 modified, 2 added (`views/shared/notice_card.dart`, and the corrected
+quota expectations in `test/claim_quota_status_test.dart`).
+
+Checks: `flutter analyze` clean · `flutter test` 594 → **598**.
+
+## 2026-08-26 09:31 (+06) — Performance: image decode and list virtualisation
+
+Two costs shipped for the life of the project, neither visible in a screenshot.
+
+Every photograph was delivered at upload resolution — the compressor targets
+1600 px — and painted into 40 px avatars and 76 px thumbnails. Flutter decodes
+to uncompressed RGBA regardless of the box, so each was ~10 MB of cache: a
+twenty-item catalogue held ~200 MB of bitmaps and pulled ~8 MB over the wire to
+draw twenty thumbnails. `core/image_delivery.dart` now asks Cloudinary for the
+size actually being painted and caps the decode either way. Stored URLs are
+never rewritten, so `isTrustedImageReference` is unaffected, and admin review
+surfaces keep their full-resolution request — an admin judges evidence from
+that image and there is no zoom viewer — taking only the decode bound.
+
+`ListView(children: [Center(child: Column(...))])` gives the list a single
+child, so nothing virtualises: all forty order cards and every listing were
+laid out and painted every frame. The width constraint moved to the viewport
+and the rows now build lazily.
+
+Files: `core/image_delivery.dart` (new), 8 views, `test/core/image_delivery_test.dart`
+and `test/performance_regression_test.dart` (new).
+
+Checks: `flutter analyze` clean · `flutter test` 598 → **611**.
+
+## 2026-08-26 09:32 (+06) — Wallet and donation audit, and a gap the disposal fix opened
+
+Neither area had ever been audited. The wallet header rendered
+`balance?.toString() ?? '0'`, so a newest ledger entry with no `balanceAfter`
+showed a Champion with points a balance of **zero**, beside a ledger full of
+credits — `ledgerBalanceProvider`'s own doc comment already promised a fallback
+to `wallets/{uid}` and now has one. The donation screen stranded its receipt
+the same way the eco-action form did. A suspended Greenpreneur could open the
+listing editor and upload photos before the save was refused, though
+`firestore.rules:860` requires `isActiveSeller()` to create a listing at all.
+
+The gap: guarding `startForBin` on the bin changing — so re-scanning the same
+bin stops destroying the photograph — also reused a *submitted* draft, marching
+the user through photo and location to land on a receipt from ten minutes ago.
+A submitted draft is now never reused, and both halves are pinned against each
+other in `test/disposal_draft_reuse_test.dart`.
+
+Files: `controllers/ledger_controller.dart`, `views/donations/donation_view.dart`,
+`views/disposal/scan_view.dart`, `views/seller/seller_products_view.dart`,
+`test/disposal_draft_reuse_test.dart` (new).
+
+Checks: `flutter analyze` clean · `flutter test` 611 → **619**.
+
 ## 2026-08-24 19:15 (+06) — Fixed two navigation dead ends on the Champion path
 
 "My appeals" and "My orders" were bare `Scaffold`s reached with `context.go`,

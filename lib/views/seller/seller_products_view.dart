@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../controllers/auth_controller.dart';
 import '../../controllers/seller_products_controller.dart';
 import '../../core/network_errors.dart';
 import '../../core/theme.dart';
@@ -23,6 +24,13 @@ class SellerProductsView extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final productsAsync = ref.watch(sellerProductsProvider);
+    // `firestore.rules:860` allows a product create only for `isActiveSeller()`.
+    // Left enabled, "New listing" walked a suspended Greenpreneur through the
+    // whole editor — title, description, price, stock and, expensively, photo
+    // uploads that count against their hourly limit and orphan themselves —
+    // before refusing the save. The editor's own message names the suspension,
+    // but only after all that work is done.
+    final active = ref.watch(accountActivityProvider);
 
     // Inside `AppShell`, like every other navigation destination. As a bare
     // `Scaffold` this screen removed the navigation bar the moment it was
@@ -33,9 +41,9 @@ class SellerProductsView extends ConsumerWidget {
     return AppShell(
       title: 'Your listings',
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => context.push('/seller/products/new'),
+        onPressed: active ? () => context.push('/seller/products/new') : null,
         icon: const Icon(Icons.add),
-        label: const Text('New listing'),
+        label: Text(active ? 'New listing' : 'Unavailable while suspended'),
       ),
       child: productsAsync.when(
         loading: () => const ContentLoading(label: 'Loading your listings…'),
