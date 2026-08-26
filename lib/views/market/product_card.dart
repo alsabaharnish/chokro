@@ -2,6 +2,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
 import '../../core/label_format.dart';
+import '../../core/image_delivery.dart';
 import '../../core/theme.dart';
 import '../../models/product_model.dart';
 
@@ -144,8 +145,14 @@ class ProductThumbnail extends StatelessWidget {
                   size: size * .38,
                 ),
               )
+            // Asks the host for a thumbnail rather than the 1600 px
+            // original, and caps the decode either way. A twenty-item
+            // catalogue was pulling ~8 MB over the wire and putting ~200 MB of
+            // decoded bitmaps into the image cache to paint twenty 76 px
+            // squares.
             : CachedNetworkImage(
-                imageUrl: address,
+                imageUrl: thumbnailUrl(address, width: size),
+                memCacheWidth: decodeWidthFor(size),
                 fit: BoxFit.cover,
                 placeholder: (context, _) =>
                     Container(color: scheme.surfaceContainerHighest),

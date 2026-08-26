@@ -52,41 +52,47 @@ class BuyerOrdersView extends ConsumerWidget {
             );
           }
 
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(
-              AppTheme.gapMd,
-              AppTheme.gapMd,
-              AppTheme.gapMd,
-              AppTheme.gapXl,
-            ),
-            children: [
-              Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    maxWidth: AppTheme.maxContentWidth,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (awaiting.isNotEmpty) ...[
-                        _AwaitingBanner(count: awaiting.length),
-                        const SizedBox(height: AppTheme.gapMd),
-                      ],
-                      for (final order in orders) ...[
-                        OrderCard(
-                          order: order,
-                          viewerIsSeller: false,
-                          action: order.status == OrderStatus.delivered
-                              ? _ConfirmButton(order: order)
-                              : null,
-                        ),
-                        const SizedBox(height: AppTheme.gapMd),
-                      ],
-                    ],
-                  ),
-                ),
+          // The width constraint is on the viewport, not on a single giant
+          // child. Written the other way round — one `Center` holding a
+          // `Column` of every order — the ListView had exactly one child, so
+          // nothing was virtualised: all forty order cards were laid out and
+          // painted on every frame, including the thirty-odd off screen.
+          final banner = awaiting.isNotEmpty;
+
+          return Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                maxWidth: AppTheme.maxContentWidth,
               ),
-            ],
+              child: ListView.builder(
+                padding: const EdgeInsets.fromLTRB(
+                  AppTheme.gapMd,
+                  AppTheme.gapMd,
+                  AppTheme.gapMd,
+                  AppTheme.gapXl,
+                ),
+                itemCount: orders.length + (banner ? 1 : 0),
+                itemBuilder: (context, index) {
+                  if (banner && index == 0) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: AppTheme.gapMd),
+                      child: _AwaitingBanner(count: awaiting.length),
+                    );
+                  }
+                  final order = orders[index - (banner ? 1 : 0)];
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: AppTheme.gapMd),
+                    child: OrderCard(
+                      order: order,
+                      viewerIsSeller: false,
+                      action: order.status == OrderStatus.delivered
+                          ? _ConfirmButton(order: order)
+                          : null,
+                    ),
+                  );
+                },
+              ),
+            ),
           );
         },
       ),

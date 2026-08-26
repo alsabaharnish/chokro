@@ -127,6 +127,13 @@ class _DisposalCard extends ConsumerWidget {
           AspectRatio(
             aspectRatio: 4 / 3,
             child: CachedNetworkImage(
+              // `memCacheWidth` only, and generously — the URL is deliberately
+              // not rewritten. This card *is* the review surface: an admin
+              // decides whether evidence is genuine from it, and there is no
+              // zoom viewer to fall back on. Capping the decode bounds the
+              // 10 MB-per-image cost of a fifty-item queue without asking the
+              // host for fewer pixels than a reviewer might need.
+              memCacheWidth: 1600,
               imageUrl: disposal.photoUrl,
               fit: BoxFit.cover,
               placeholder: (_, _) => ColoredBox(

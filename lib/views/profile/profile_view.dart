@@ -10,6 +10,7 @@ import '../../controllers/auth_controller.dart';
 import '../../controllers/account_profile_controller.dart';
 import '../../controllers/profile_controller.dart';
 import '../../core/account_profile.dart';
+import '../../core/image_delivery.dart';
 import '../../core/constants.dart';
 import '../../core/label_format.dart';
 import '../../core/theme.dart';
@@ -394,7 +395,8 @@ class _Avatar extends StatelessWidget {
             child: photoUrl == null
                 ? _Initials(initials: initials)
                 : CachedNetworkImage(
-                    imageUrl: photoUrl,
+                    imageUrl: thumbnailUrl(photoUrl, width: 88),
+                    memCacheWidth: decodeWidthFor(88),
                     width: 88,
                     height: 88,
                     fit: BoxFit.cover,
@@ -442,11 +444,14 @@ class _Avatar extends StatelessWidget {
     );
   }
 
+  /// Compiled once rather than on each call.
+  static final RegExp _whitespace = RegExp(r'\s+');
+
   /// First letters of the first and last words, upper-cased.
   static String _initials(String name) {
     final words = name
         .trim()
-        .split(RegExp(r'\s+'))
+        .split(_whitespace)
         .where((w) => w.isNotEmpty)
         .toList();
     if (words.isEmpty) return '';

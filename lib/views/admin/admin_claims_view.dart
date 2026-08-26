@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../controllers/claim_controller.dart';
+import '../../core/image_delivery.dart';
 import '../../core/label_format.dart';
 import '../../models/claim_model.dart';
 import 'eco_action_photocard_dialog.dart';
@@ -312,6 +313,9 @@ class _ApprovedClaimCard extends StatelessWidget {
               fit: StackFit.expand,
               children: [
                 CachedNetworkImage(
+                  // Review surface — see admin_disposals_view for why the URL
+                  // is left alone and only the decode is bounded.
+                  memCacheWidth: 1600,
                   imageUrl: claim.photoUrl,
                   fit: BoxFit.cover,
                   placeholder: (_, _) => ColoredBox(
@@ -505,7 +509,8 @@ class _ClaimCard extends ConsumerWidget {
                 ClipRRect(
                   borderRadius: BorderRadius.circular(10),
                   child: CachedNetworkImage(
-                    imageUrl: claim.photoUrl,
+                    imageUrl: thumbnailUrl(claim.photoUrl, width: 110),
+                    memCacheWidth: decodeWidthFor(110),
                     width: 110,
                     height: 110,
                     fit: BoxFit.cover,
@@ -673,7 +678,8 @@ class _PreviousClaims extends ConsumerWidget {
                         ClipRRect(
                           borderRadius: BorderRadius.circular(6),
                           child: CachedNetworkImage(
-                            imageUrl: claim.photoUrl,
+                            imageUrl: thumbnailUrl(claim.photoUrl, width: 58),
+                            memCacheWidth: decodeWidthFor(58),
                             width: 58,
                             height: 58,
                             fit: BoxFit.cover,

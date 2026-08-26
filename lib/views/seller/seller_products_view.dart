@@ -61,41 +61,46 @@ class SellerProductsView extends ConsumerWidget {
               .where((product) => product.hiddenBySuspension)
               .length;
 
-          return ListView(
-            padding: const EdgeInsets.fromLTRB(
-              AppTheme.gapMd,
-              AppTheme.gapMd,
-              AppTheme.gapMd,
-              AppTheme.gap2Xl,
-            ),
-            children: [
-              Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(
-                    maxWidth: AppTheme.maxContentWidth,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (hidden > 0) ...[
-                        _SuspensionNotice(count: hidden),
-                        const SizedBox(height: AppTheme.gapMd),
-                      ],
-                      for (final product in products) ...[
-                        ProductCard(
-                          product: product,
-                          showSellerState: true,
-                          onTap: () =>
-                              context.push('/seller/products/${product.id}'),
-                          trailing: _ListingMenu(product: product),
-                        ),
-                        const SizedBox(height: AppTheme.gapSm),
-                      ],
-                    ],
-                  ),
-                ),
+          // Constrain the viewport, build the rows lazily. See the same change
+          // in buyer_orders_view: a single `Center`-wrapped `Column` gave the
+          // ListView one child, so every listing — each with a network
+          // thumbnail — was laid out and painted on every frame.
+          final notice = hidden > 0;
+
+          return Center(
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(
+                maxWidth: AppTheme.maxContentWidth,
               ),
-            ],
+              child: ListView.builder(
+                padding: const EdgeInsets.fromLTRB(
+                  AppTheme.gapMd,
+                  AppTheme.gapMd,
+                  AppTheme.gapMd,
+                  AppTheme.gap2Xl,
+                ),
+                itemCount: products.length + (notice ? 1 : 0),
+                itemBuilder: (context, index) {
+                  if (notice && index == 0) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: AppTheme.gapMd),
+                      child: _SuspensionNotice(count: hidden),
+                    );
+                  }
+                  final product = products[index - (notice ? 1 : 0)];
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: AppTheme.gapSm),
+                    child: ProductCard(
+                      product: product,
+                      showSellerState: true,
+                      onTap: () =>
+                          context.push('/seller/products/${product.id}'),
+                      trailing: _ListingMenu(product: product),
+                    ),
+                  );
+                },
+              ),
+            ),
           );
         },
       ),

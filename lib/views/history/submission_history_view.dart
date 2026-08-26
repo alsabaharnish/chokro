@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../controllers/submission_history_controller.dart';
 import '../../controllers/disposal_controller.dart'
     show verificationServiceProvider;
+import '../../core/image_delivery.dart';
 import '../../core/label_format.dart';
 import '../../models/disposal_model.dart';
 import '../shared/app_shell.dart';
@@ -251,8 +252,12 @@ class _Thumbnail extends StatelessWidget {
       borderRadius: BorderRadius.circular(10),
       child: url.isEmpty
           ? placeholder
+          // A history screen is fifty rows of evidence photographs. Full
+          // size, that is half a gigabyte of decoded bitmaps to draw fifty
+          // 64 px squares.
           : CachedNetworkImage(
-              imageUrl: url,
+              imageUrl: thumbnailUrl(url, width: 64),
+              memCacheWidth: decodeWidthFor(64),
               width: 64,
               height: 64,
               fit: BoxFit.cover,

@@ -73,11 +73,14 @@ class AdminApplicationsView extends ConsumerWidget {
     notify.success(success);
   }
 
+  /// Built once. `DateFormat` parses its pattern in the constructor, and this
+  /// was being reconstructed on every rebuild of the screen.
+  static final DateFormat _dateFormat = DateFormat('d MMM y, h:mm a');
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final pendingAsync = ref.watch(pendingApplicationsProvider);
     final theme = Theme.of(context);
-    final dateFormat = DateFormat('d MMM y, h:mm a');
 
     return AppShell(
       title: 'Greenpreneur applications',
@@ -129,7 +132,7 @@ class AdminApplicationsView extends ConsumerWidget {
                           Text(
                             // Null for one round trip after the write, now that
                             // `createdAt` comes from the server per §6.
-                            'Submitted ${app.createdAt == null ? 'just now' : dateFormat.format(app.createdAt!)}',
+                            'Submitted ${app.createdAt == null ? 'just now' : _dateFormat.format(app.createdAt!)}',
                             style: theme.textTheme.bodySmall?.copyWith(
                               color: theme.colorScheme.onSurfaceVariant,
                             ),

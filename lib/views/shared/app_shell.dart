@@ -7,6 +7,7 @@ import '../../controllers/admin_workload_controller.dart';
 import '../../controllers/auth_controller.dart';
 import '../../controllers/cart_controller.dart';
 import '../../core/account_profile.dart';
+import '../../core/image_delivery.dart';
 import '../../core/constants.dart';
 import '../../core/network_errors.dart';
 import '../../core/theme.dart';
@@ -493,6 +494,11 @@ class _DestinationIcon extends StatelessWidget {
 class _AccountAvatar extends StatelessWidget {
   const _AccountAvatar({required this.name, required this.photoUrl});
 
+  /// Compiled once. This avatar sits in the app bar of every screen and
+  /// rebuilds whenever the cart count or an admin badge moves, so building a
+  /// fresh `RegExp` inside `build` recompiled the pattern on each of those.
+  static final RegExp _whitespace = RegExp(r'\s+');
+
   final String? name;
   final String? photoUrl;
 
@@ -501,7 +507,7 @@ class _AccountAvatar extends StatelessWidget {
     final scheme = Theme.of(context).colorScheme;
     final words = (name ?? '')
         .trim()
-        .split(RegExp(r'\s+'))
+        .split(_whitespace)
         .where((word) => word.isNotEmpty)
         .toList();
     final initials = words.isEmpty
@@ -537,8 +543,12 @@ class _AccountAvatar extends StatelessWidget {
       ),
       child: photoUrl == null || photoUrl!.isEmpty
           ? fallback
+          // The avatar is on every screen in the app, so an unbounded
+          // decode here cost 10 MB of cache for a 38 px circle on every
+          // session.
           : CachedNetworkImage(
-              imageUrl: photoUrl!,
+              imageUrl: thumbnailUrl(photoUrl!, width: 38),
+              memCacheWidth: decodeWidthFor(38),
               width: 38,
               height: 38,
               fit: BoxFit.cover,
