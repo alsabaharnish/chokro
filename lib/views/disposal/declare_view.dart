@@ -410,7 +410,8 @@ class _SubmittedView extends StatelessWidget {
     // Self-reveals only after five seconds, so the warm path never sees it and
     // the cold-start path gets the one honest reassurance the system has.
     const SlowServerNote(
-      message: 'The server is taking a while. Your submission is already '
+      message:
+          'The server is taking a while. Your submission is already '
           'saved — you can check your history in a moment.',
     ),
   ];

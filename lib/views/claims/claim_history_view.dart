@@ -41,15 +41,17 @@ class ClaimHistoryView extends ConsumerWidget {
             children: [
               Text(
                 'Your eco-actions',
-                style: theme.textTheme.titleMedium
-                    ?.copyWith(fontWeight: FontWeight.bold),
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(height: AppTheme.gapXs),
               Text(
                 'Every action you have logged, with its status and — where one '
                 'was given — the reason it was not approved.',
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
               ),
               const SizedBox(height: AppTheme.gapMd),
 

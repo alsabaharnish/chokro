@@ -46,7 +46,8 @@ const List<PolicyField> policyFields = <PolicyField>[
     key: 'disposalAward',
     label: 'Disposal award',
     suffix: 'points',
-    help: 'Credited for one approved disposal. The strongest verification '
+    help:
+        'Credited for one approved disposal. The strongest verification '
         'route — geofenced, time-locked and hash-checked — so it pays most.',
     read: _readDisposalAward,
     write: _writeDisposalAward,
@@ -55,7 +56,8 @@ const List<PolicyField> policyFields = <PolicyField>[
     key: 'claimAward',
     label: 'Claim award',
     suffix: 'points',
-    help: 'Credited for one approved self-reported action. Must stay strictly '
+    help:
+        'Credited for one approved self-reported action. Must stay strictly '
         'below the disposal award: the weaker route must pay less, or users '
         'optimise into it.',
     read: _readClaimAward,
@@ -65,7 +67,8 @@ const List<PolicyField> policyFields = <PolicyField>[
     key: 'purchaseAwardPercent',
     label: 'Purchase award',
     suffix: '% of payable',
-    help: 'Computed in points, not taka value. At 5%, a BDT 1000 order earns '
+    help:
+        'Computed in points, not taka value. At 5%, a BDT 1000 order earns '
         '50 points — worth BDT 5. A light loyalty bonus, not an earn route.',
     read: _readPurchaseAwardPercent,
     write: _writePurchaseAwardPercent,
@@ -74,7 +77,8 @@ const List<PolicyField> policyFields = <PolicyField>[
     key: 'redemptionPointsPerBlock',
     label: 'Redemption block — points',
     suffix: 'points',
-    help: 'With the taka figure below, sets the exchange rate. 100 points to '
+    help:
+        'With the taka figure below, sets the exchange rate. 100 points to '
         'BDT 10 means 10 points buys BDT 1.',
     read: _readRedemptionPoints,
     write: _writeRedemptionPoints,
@@ -83,7 +87,8 @@ const List<PolicyField> policyFields = <PolicyField>[
     key: 'redemptionTakaPerBlock',
     label: 'Redemption block — taka',
     suffix: 'BDT',
-    help: 'Points are spent in whole-taka multiples, so a remainder stays in '
+    help:
+        'Points are spent in whole-taka multiples, so a remainder stays in '
         'the wallet rather than leaving the ledger unable to reconcile.',
     read: _readRedemptionTaka,
     write: _writeRedemptionTaka,
@@ -92,7 +97,8 @@ const List<PolicyField> policyFields = <PolicyField>[
     key: 'maxRedemptionPercentOfSubtotal',
     label: 'Maximum redemption',
     suffix: '% of subtotal',
-    help: 'Ceiling on how much of an order may be paid with points. Points '
+    help:
+        'Ceiling on how much of an order may be paid with points. Points '
         'supplement payment; they do not replace it.',
     read: _readMaxRedemption,
     write: _writeMaxRedemption,
@@ -101,7 +107,8 @@ const List<PolicyField> policyFields = <PolicyField>[
     key: 'lockoutHours',
     label: 'Lockout window',
     suffix: 'hours',
-    help: 'How long a user is blocked from re-submitting at the same bin. '
+    help:
+        'How long a user is blocked from re-submitting at the same bin. '
         'Blocks trivial farming while permitting genuine twice-daily disposal.',
     read: _readLockoutHours,
     write: _writeLockoutHours,
@@ -110,7 +117,8 @@ const List<PolicyField> policyFields = <PolicyField>[
     key: 'dailyDisposalCap',
     label: 'Daily disposal cap',
     suffix: 'per day',
-    help: 'Approved submissions per user per day. Second line of defence '
+    help:
+        'Approved submissions per user per day. Second line of defence '
         'against farming across several bins.',
     read: _readDailyCap,
     write: _writeDailyCap,
@@ -119,7 +127,8 @@ const List<PolicyField> policyFields = <PolicyField>[
     key: 'claimQuotaPerWeek',
     label: 'Claim quota',
     suffix: 'per ISO week',
-    help: 'Approved claims per user per week. For the self-reported route the '
+    help:
+        'Approved claims per user per week. For the self-reported route the '
         'rate limit is the safeguard, since nothing mechanical can verify it.',
     read: _readClaimQuota,
     write: _writeClaimQuota,

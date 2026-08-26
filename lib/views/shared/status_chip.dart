@@ -23,32 +23,36 @@ class StatusChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
 
-    final (Color foreground, Color background, IconData icon, String label) =
-        switch (status) {
+    final (
+      Color foreground,
+      Color background,
+      IconData icon,
+      String label,
+    ) = switch (status) {
       DisposalStatus.pending => (
-          scheme.onSurfaceVariant,
-          scheme.surfaceContainerHighest,
-          Icons.hourglass_empty_outlined,
-          'Waiting for review',
-        ),
+        scheme.onSurfaceVariant,
+        scheme.surfaceContainerHighest,
+        Icons.hourglass_empty_outlined,
+        'Waiting for review',
+      ),
       DisposalStatus.autoApproved => (
-          scheme.onTertiaryContainer,
-          scheme.tertiaryContainer,
-          Icons.bolt_outlined,
-          'Approved automatically',
-        ),
+        scheme.onTertiaryContainer,
+        scheme.tertiaryContainer,
+        Icons.bolt_outlined,
+        'Approved automatically',
+      ),
       DisposalStatus.manualApproved => (
-          scheme.onSecondaryContainer,
-          scheme.secondaryContainer,
-          Icons.verified_outlined,
-          'Verified by a reviewer',
-        ),
+        scheme.onSecondaryContainer,
+        scheme.secondaryContainer,
+        Icons.verified_outlined,
+        'Verified by a reviewer',
+      ),
       DisposalStatus.rejected => (
-          scheme.onErrorContainer,
-          scheme.errorContainer,
-          Icons.cancel_outlined,
-          'Rejected',
-        ),
+        scheme.onErrorContainer,
+        scheme.errorContainer,
+        Icons.cancel_outlined,
+        'Rejected',
+      ),
     };
 
     return Container(
@@ -82,10 +86,14 @@ class StatusChip extends StatelessWidget {
           Flexible(
             child: Text(
               label,
-              style: (dense
-                      ? Theme.of(context).textTheme.labelSmall
-                      : Theme.of(context).textTheme.labelMedium)
-                  ?.copyWith(color: foreground, fontWeight: FontWeight.w600),
+              style:
+                  (dense
+                          ? Theme.of(context).textTheme.labelSmall
+                          : Theme.of(context).textTheme.labelMedium)
+                      ?.copyWith(
+                        color: foreground,
+                        fontWeight: FontWeight.w600,
+                      ),
             ),
           ),
         ],

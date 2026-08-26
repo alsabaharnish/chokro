@@ -81,9 +81,15 @@ class NoticeCard extends StatelessWidget {
         scheme.surfaceContainerHighest,
         scheme.onSurfaceVariant,
       ),
-      NoticeTone.warning => (scheme.warningContainer, scheme.onWarningContainer),
+      NoticeTone.warning => (
+        scheme.warningContainer,
+        scheme.onWarningContainer,
+      ),
       NoticeTone.error => (scheme.errorContainer, scheme.onErrorContainer),
-      NoticeTone.success => (scheme.successContainer, scheme.onSuccessContainer),
+      NoticeTone.success => (
+        scheme.successContainer,
+        scheme.onSuccessContainer,
+      ),
     };
 
     final heading = title;

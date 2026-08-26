@@ -10,15 +10,14 @@ void main() {
     required int price,
     int qty = 1,
     String? productId,
-  }) =>
-      CartLine(
-        productId: productId ?? '$seller-$price-$qty',
-        sellerId: seller,
-        shopName: 'Shop $seller',
-        title: 'Item at $price',
-        unitPrice: price,
-        qty: qty,
-      );
+  }) => CartLine(
+    productId: productId ?? '$seller-$price-$qty',
+    sellerId: seller,
+    shopName: 'Shop $seller',
+    title: 'Item at $price',
+    unitPrice: price,
+    qty: qty,
+  );
 
   group('allocateDiscount', () {
     test('gives everything to a single group', () {
@@ -167,10 +166,14 @@ void main() {
         pointsRequested: 500,
       );
 
-      final groupPoints =
-          quote.groups.fold<int>(0, (sum, g) => sum + g.pointsApplied);
-      final groupDiscount =
-          quote.groups.fold<int>(0, (sum, g) => sum + g.discount);
+      final groupPoints = quote.groups.fold<int>(
+        0,
+        (sum, g) => sum + g.pointsApplied,
+      );
+      final groupDiscount = quote.groups.fold<int>(
+        0,
+        (sum, g) => sum + g.discount,
+      );
 
       expect(groupPoints, quote.pointsApplied);
       expect(groupDiscount, quote.discount);
@@ -187,8 +190,10 @@ void main() {
         pointsRequested: 490,
       );
 
-      final groupPayable =
-          quote.groups.fold<int>(0, (sum, g) => sum + g.payable);
+      final groupPayable = quote.groups.fold<int>(
+        0,
+        (sum, g) => sum + g.payable,
+      );
       expect(groupPayable, quote.payable);
     });
 

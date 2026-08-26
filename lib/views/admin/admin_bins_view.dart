@@ -620,7 +620,6 @@ class _FixNote extends StatelessWidget {
   }
 }
 
-
 class _BinCard extends StatelessWidget {
   const _BinCard({
     required this.bin,

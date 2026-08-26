@@ -30,7 +30,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 /// this only if the service is genuinely down.
 String get unreachableServerMessage => kIsWeb
     ? 'Could not reach the server. It may be offline, or it may be refusing '
-        'requests from this address.'
+          'requests from this address.'
     : 'Could not reach the server. Check your connection.';
 
 /// What to say when the server was reached but took too long.

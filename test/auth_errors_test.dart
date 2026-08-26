@@ -38,7 +38,11 @@ void main() {
     });
 
     test('every message is a complete sentence', () {
-      for (final code in <String?>['invalid-credential', 'weak-password', null]) {
+      for (final code in <String?>[
+        'invalid-credential',
+        'weak-password',
+        null,
+      ]) {
         final message = authErrorMessage(code);
         expect(message.endsWith('.'), isTrue, reason: 'for $code: $message');
         expect(message[0], message[0].toUpperCase(), reason: 'for $code');

@@ -34,7 +34,10 @@ void main() {
       // against. Rewriting the delivered path here must never reach into it.
       final result = thumbnailUrl(delivery(), width: 40);
 
-      expect(result, contains('/v1712345678/chokro/disposals/uid123/abc123.jpg'));
+      expect(
+        result,
+        contains('/v1712345678/chokro/disposals/uid123/abc123.jpg'),
+      );
       expect(result, endsWith('abc123.jpg'));
     });
 

@@ -204,16 +204,14 @@ class PushService {
   /// carrying a `notification` block while the app is in the foreground, so
   /// nothing appears unless we render it. See `pushMessageProvider` for what the
   /// app does with these.
-  Stream<RemoteMessage> get onMessage =>
-      isSupported
-          ? FirebaseMessaging.onMessage
-          : const Stream<RemoteMessage>.empty();
+  Stream<RemoteMessage> get onMessage => isSupported
+      ? FirebaseMessaging.onMessage
+      : const Stream<RemoteMessage>.empty();
 
   /// Fires when a tray notification is tapped and the app was in the background.
-  Stream<RemoteMessage> get onMessageOpenedApp =>
-      isSupported
-          ? FirebaseMessaging.onMessageOpenedApp
-          : const Stream<RemoteMessage>.empty();
+  Stream<RemoteMessage> get onMessageOpenedApp => isSupported
+      ? FirebaseMessaging.onMessageOpenedApp
+      : const Stream<RemoteMessage>.empty();
 
   /// The notification that launched the app from a terminated state, if any.
   ///

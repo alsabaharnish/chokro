@@ -752,9 +752,7 @@ class _Receipt extends ConsumerWidget {
                         // that promise is kept.
                         if (outcome.appliedLessThan(pointsRequested))
                           Padding(
-                            padding: const EdgeInsets.only(
-                              top: AppTheme.gapXs,
-                            ),
+                            padding: const EdgeInsets.only(top: AppTheme.gapXs),
                             child: Text(
                               'Prices changed while you were checking out, so '
                               'only ${outcome.pointsApplied} of the '

@@ -34,36 +34,36 @@ final salesPeriodProvider =
 /// One subscription serves all five periods: the windows are applied in Dart, so
 /// tapping between "Today" and "All time" re-totals what is already in memory
 /// and costs no Firestore read.
-final sellerReportOrdersProvider =
-    StreamProvider.autoDispose<SellerOrderPage>((ref) {
-      final uid = ref.watch(currentUidProvider);
-      if (uid == null) {
-        return Stream<SellerOrderPage>.value(
-          const SellerOrderPage(orders: <OrderModel>[], truncated: false),
-        );
-      }
-      return ref.watch(orderServiceProvider).watchSellerOrdersForReport(uid);
-    });
+final sellerReportOrdersProvider = StreamProvider.autoDispose<SellerOrderPage>((
+  ref,
+) {
+  final uid = ref.watch(currentUidProvider);
+  if (uid == null) {
+    return Stream<SellerOrderPage>.value(
+      const SellerOrderPage(orders: <OrderModel>[], truncated: false),
+    );
+  }
+  return ref.watch(orderServiceProvider).watchSellerOrdersForReport(uid);
+});
 
 /// The report for the currently selected period.
 ///
 /// `DateTime.now()` is read here rather than inside [SellerSalesReport], so the
 /// arithmetic stays a pure function of its inputs and the tests can pin "now"
 /// instead of working around the clock.
-final sellerSalesReportProvider = Provider.autoDispose<AsyncValue<SellerSalesReport>>(
-  (ref) {
-    final period = ref.watch(salesPeriodProvider);
-    return ref
-        .watch(sellerReportOrdersProvider)
-        .whenData(
-          (page) => SellerSalesReport.from(
-            page.orders,
-            period: period,
-            now: DateTime.now(),
-            // A fact from the query, not an inference from the row count — the
-            // service reads one document past the cap to establish it.
-            truncated: page.truncated,
-          ),
-        );
-  },
-);
+final sellerSalesReportProvider =
+    Provider.autoDispose<AsyncValue<SellerSalesReport>>((ref) {
+      final period = ref.watch(salesPeriodProvider);
+      return ref
+          .watch(sellerReportOrdersProvider)
+          .whenData(
+            (page) => SellerSalesReport.from(
+              page.orders,
+              period: period,
+              now: DateTime.now(),
+              // A fact from the query, not an inference from the row count — the
+              // service reads one document past the cap to establish it.
+              truncated: page.truncated,
+            ),
+          );
+    });

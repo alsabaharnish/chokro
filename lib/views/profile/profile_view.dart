@@ -211,8 +211,7 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
                 children: [
                   _Avatar(
                     user: user,
-                    canEdit:
-                        activeProfile == AccountProfile.champion && active,
+                    canEdit: activeProfile == AccountProfile.champion && active,
                     isBusy: saving,
                     onUpload: _chooseProfilePhoto,
                   ),

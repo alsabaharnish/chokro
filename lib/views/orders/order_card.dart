@@ -281,11 +281,7 @@ class _Row extends StatelessWidget {
           const SizedBox(width: AppTheme.gapSm),
           Flexible(
             child: selectable
-                ? SelectableText(
-                    value,
-                    textAlign: TextAlign.end,
-                    style: style,
-                  )
+                ? SelectableText(value, textAlign: TextAlign.end, style: style)
                 : Text(value, textAlign: TextAlign.end, style: style),
           ),
         ],

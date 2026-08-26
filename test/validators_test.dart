@@ -71,9 +71,12 @@ void main() {
       expect(validateNewPassword(null), 'Choose a password');
     });
 
-    test('does not trim — leading and trailing spaces are valid password characters', () {
-      expect(validateNewPassword('   a  '), isNull);
-    });
+    test(
+      'does not trim — leading and trailing spaces are valid password characters',
+      () {
+        expect(validateNewPassword('   a  '), isNull);
+      },
+    );
   });
 
   group('validateName', () {
@@ -113,8 +116,10 @@ void main() {
     });
 
     test('counts the shortfall on trimmed length', () {
-      expect(validateMinLength('  abc  ', 5, 'a description'),
-          '2 more characters');
+      expect(
+        validateMinLength('  abc  ', 5, 'a description'),
+        '2 more characters',
+      );
     });
 
     test('accepts text at exactly the maximum', () {

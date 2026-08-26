@@ -30,7 +30,9 @@ String enumName(Object? value) {
 String humanise(Object? value) {
   final raw = enumName(value).trim();
   if (raw.isEmpty) return '';
-  final spaced = raw.replaceAll('_', ' ').replaceAllMapped(
+  final spaced = raw
+      .replaceAll('_', ' ')
+      .replaceAllMapped(
         RegExp(r'([a-z0-9])([A-Z])'),
         (m) => '${m[1]} ${m[2]!.toLowerCase()}',
       );
@@ -38,8 +40,18 @@ String humanise(Object? value) {
 }
 
 const List<String> _months = <String>[
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
+  'Jan',
+  'Feb',
+  'Mar',
+  'Apr',
+  'May',
+  'Jun',
+  'Jul',
+  'Aug',
+  'Sep',
+  'Oct',
+  'Nov',
+  'Dec',
 ];
 
 /// `2 Aug 2026, 14:05`. Local time.

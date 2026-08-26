@@ -28,10 +28,8 @@ Future<String?> showRejectionReasonDialog(
 }) {
   return showDialog<String>(
     context: context,
-    builder: (context) => _RejectionReasonDialog(
-      title: title,
-      hintText: hintText,
-    ),
+    builder: (context) =>
+        _RejectionReasonDialog(title: title, hintText: hintText),
   );
 }
 

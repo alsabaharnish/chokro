@@ -12,16 +12,15 @@ void main() {
     String status = 'active',
     DateTime? suspendedUntil,
     String role = 'buyer',
-  }) =>
-      UserModel(
-        uid: 'u1',
-        name: 'Test',
-        email: 'test@example.com',
-        role: role,
-        status: status,
-        createdAt: DateTime(2026, 1, 1),
-        suspendedUntil: suspendedUntil,
-      );
+  }) => UserModel(
+    uid: 'u1',
+    name: 'Test',
+    email: 'test@example.com',
+    role: role,
+    status: status,
+    createdAt: DateTime(2026, 1, 1),
+    suspendedUntil: suspendedUntil,
+  );
 
   group('isActiveAt', () {
     test('an active account is active', () {
@@ -114,8 +113,10 @@ void main() {
 
     test('suspendedUntil round-trips when set', () {
       final until = DateTime(2026, 8, 5, 9, 30);
-      final map = user(status: 'suspended', suspendedUntil: until)
-          .toFirestore();
+      final map = user(
+        status: 'suspended',
+        suspendedUntil: until,
+      ).toFirestore();
       expect(map.containsKey('suspendedUntil'), isTrue);
     });
   });
@@ -126,8 +127,7 @@ void main() {
         status: 'suspended',
         suspendedUntil: now.add(const Duration(days: 1)),
       );
-      final lifted =
-          u.copyWith(status: 'active', clearSuspendedUntil: true);
+      final lifted = u.copyWith(status: 'active', clearSuspendedUntil: true);
 
       expect(lifted.suspendedUntil, isNull);
       expect(lifted.isActiveAt(now), isTrue);

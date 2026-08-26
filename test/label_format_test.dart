@@ -65,17 +65,25 @@ void main() {
     });
 
     test('under a minute reads as just now', () {
-      expect(formatAge(now.subtract(const Duration(seconds: 20)), now: now),
-          'just now');
+      expect(
+        formatAge(now.subtract(const Duration(seconds: 20)), now: now),
+        'just now',
+      );
     });
 
     test('minutes, hours and days', () {
-      expect(formatAge(now.subtract(const Duration(minutes: 14)), now: now),
-          '14m ago');
       expect(
-          formatAge(now.subtract(const Duration(hours: 3)), now: now), '3h ago');
+        formatAge(now.subtract(const Duration(minutes: 14)), now: now),
+        '14m ago',
+      );
       expect(
-          formatAge(now.subtract(const Duration(days: 5)), now: now), '5d ago');
+        formatAge(now.subtract(const Duration(hours: 3)), now: now),
+        '3h ago',
+      );
+      expect(
+        formatAge(now.subtract(const Duration(days: 5)), now: now),
+        '5d ago',
+      );
     });
 
     test('beyond a week falls back to the absolute date', () {
@@ -84,7 +92,10 @@ void main() {
     });
 
     test('a clock-skewed future timestamp does not read as negative', () {
-      expect(formatAge(now.add(const Duration(hours: 2)), now: now), 'just now');
+      expect(
+        formatAge(now.add(const Duration(hours: 2)), now: now),
+        'just now',
+      );
     });
   });
 

@@ -102,8 +102,16 @@ class _ScanViewState extends ConsumerState<ScanView> {
     // Compared on `qrPayload`, not `id`: `BinModel.id` is nullable for a bin
     // not yet written, so a null-to-null comparison would report "same bin" in
     // exactly the case that needs the reset.
-    final current = ref.read(disposalDraftProvider).bin;
-    if (current == null || current.qrPayload != bin.qrPayload) {
+    //
+    // A draft that has already been *submitted* is never reused, same bin or
+    // not. The draft outlives the flow (`ref.keepAlive()`), and the declaration
+    // screen renders its confirmation on `submittedId != null` — so without
+    // this a Champion who submitted for a bin, walked to it again and re-scanned
+    // the same code would be marched through photo and location only to land on
+    // the receipt for the submission they made ten minutes ago.
+    final draft = ref.read(disposalDraftProvider);
+    final sameBin = draft.bin?.qrPayload == bin.qrPayload;
+    if (!sameBin || draft.submittedId != null) {
       ref.read(disposalDraftProvider.notifier).startForBin(bin);
     }
     await context.push('/dispose/photo');

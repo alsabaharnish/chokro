@@ -10,20 +10,12 @@ class AuthService {
   Future<UserCredential> signUp({
     required String email,
     required String password,
-  }) =>
-      _auth.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
+  }) => _auth.createUserWithEmailAndPassword(email: email, password: password);
 
   Future<UserCredential> signIn({
     required String email,
     required String password,
-  }) =>
-      _auth.signInWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
+  }) => _auth.signInWithEmailAndPassword(email: email, password: password);
 
   Future<void> signOut() => _auth.signOut();
 

@@ -50,7 +50,10 @@ void main() {
 
     test('hours and minutes', () {
       expect(
-        formatCountdown(now.add(const Duration(hours: 4, minutes: 12)), now: now),
+        formatCountdown(
+          now.add(const Duration(hours: 4, minutes: 12)),
+          now: now,
+        ),
         '4h 12m',
       );
     });

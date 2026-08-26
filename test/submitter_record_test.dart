@@ -21,7 +21,8 @@ DisposalModel _disposal({required String id, required DisposalStatus status}) {
     capturedLng: 90.4,
     distanceMeters: 10,
     status: status,
-    pointsAwarded: status == DisposalStatus.autoApproved ||
+    pointsAwarded:
+        status == DisposalStatus.autoApproved ||
             status == DisposalStatus.manualApproved
         ? 50
         : 0,
@@ -63,13 +64,10 @@ void main() {
       // The card's own disposal is in the query result and is itself pending.
       // Counting it would add one to `pending` on every card in the queue and
       // make the record describe the present instead of the past.
-      final record = SubmitterRecord.from(
-        [
-          _disposal(id: 'current', status: DisposalStatus.pending),
-          _disposal(id: 'old', status: DisposalStatus.autoApproved),
-        ],
-        excludeId: 'current',
-      );
+      final record = SubmitterRecord.from([
+        _disposal(id: 'current', status: DisposalStatus.pending),
+        _disposal(id: 'old', status: DisposalStatus.autoApproved),
+      ], excludeId: 'current');
 
       expect(record.considered, 1);
       expect(record.pending, 0);
@@ -84,10 +82,9 @@ void main() {
     });
 
     test('excluding the only entry is still a first submission', () {
-      final record = SubmitterRecord.from(
-        [_disposal(id: 'current', status: DisposalStatus.pending)],
-        excludeId: 'current',
-      );
+      final record = SubmitterRecord.from([
+        _disposal(id: 'current', status: DisposalStatus.pending),
+      ], excludeId: 'current');
 
       expect(record.isFirstSubmission, isTrue);
     });

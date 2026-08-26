@@ -10,12 +10,12 @@ import 'disposal_controller.dart' show disposalServiceProvider;
 /// decision and only the server writes one.
 final submissionHistoryProvider =
     StreamProvider.autoDispose<List<DisposalModel>>((ref) {
-  final uid = ref.watch(currentUidProvider);
-  if (uid == null) {
-    return Stream<List<DisposalModel>>.value(const <DisposalModel>[]);
-  }
-  return ref.watch(disposalServiceProvider).watchUserDisposals(uid);
-});
+      final uid = ref.watch(currentUidProvider);
+      if (uid == null) {
+        return Stream<List<DisposalModel>>.value(const <DisposalModel>[]);
+      }
+      return ref.watch(disposalServiceProvider).watchUserDisposals(uid);
+    });
 
 /// How many submissions are waiting on a human decision. Drives the badge on
 /// the history entry point so a user does not have to open the screen to find

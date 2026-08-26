@@ -351,4 +351,3 @@ class _BuyRowState extends ConsumerState<_BuyRow> {
     }
   }
 }
-

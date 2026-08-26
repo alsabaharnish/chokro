@@ -98,7 +98,9 @@ class PushRegistrar {
       // retried on later sign-ins within the same install.
       final granted = await push.requestPermission();
       if (!granted) {
-        debugPrint('[push] Notifications not permitted; skipping registration.');
+        debugPrint(
+          '[push] Notifications not permitted; skipping registration.',
+        );
         return;
       }
 

@@ -57,10 +57,7 @@ OrderModel _order({
   createdAt: createdAt ?? DateTime.now(),
 );
 
-Widget _app({
-  required List<OrderModel> orders,
-  bool truncated = false,
-}) {
+Widget _app({required List<OrderModel> orders, bool truncated = false}) {
   final router = GoRouter(
     initialLocation: '/seller/sales',
     routes: [
@@ -89,9 +86,8 @@ Widget _app({
       cartCountProvider.overrideWithValue(0),
       adminWorkloadProvider.overrideWithValue(AdminWorkload.empty),
       sellerReportOrdersProvider.overrideWith(
-        (ref) => Stream.value(
-          SellerOrderPage(orders: orders, truncated: truncated),
-        ),
+        (ref) =>
+            Stream.value(SellerOrderPage(orders: orders, truncated: truncated)),
       ),
     ],
     child: MaterialApp.router(theme: AppTheme.light(), routerConfig: router),
@@ -161,13 +157,14 @@ void main() {
     tester,
   ) async {
     _sizeAs(tester, width: 400);
-    await tester.pumpWidget(
-      _app(orders: [_order(id: 'a', subtotal: 100)]),
-    );
+    await tester.pumpWidget(_app(orders: [_order(id: 'a', subtotal: 100)]));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
-    expect(find.textContaining('Chokro does not hold this money'), findsOneWidget);
+    expect(
+      find.textContaining('Chokro does not hold this money'),
+      findsOneWidget,
+    );
     // Simulated money is labelled as such wherever it is shown.
     expect(find.textContaining('No real money moved'), findsOneWidget);
   });
@@ -246,9 +243,7 @@ void main() {
         addTearDown(tester.view.resetPhysicalSize);
         addTearDown(tester.view.resetDevicePixelRatio);
 
-        await tester.pumpWidget(
-          _app(orders: [_order(id: 'a', subtotal: 500)]),
-        );
+        await tester.pumpWidget(_app(orders: [_order(id: 'a', subtotal: 500)]));
         await tester.pump();
         await tester.pump(const Duration(milliseconds: 100));
 

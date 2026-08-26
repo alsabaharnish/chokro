@@ -52,7 +52,9 @@ class AppealButton extends ConsumerWidget {
           size: 18,
         ),
         label: Text(
-          alreadyAppealed == true ? 'You appealed this' : 'Appeal this decision',
+          alreadyAppealed == true
+              ? 'You appealed this'
+              : 'Appeal this decision',
         ),
       ),
     );

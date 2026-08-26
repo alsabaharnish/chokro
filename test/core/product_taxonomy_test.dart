@@ -47,8 +47,9 @@ void main() {
 
   group('normalizeTags', () {
     test('de-duplicates values that normalise to the same key', () {
-      expect(normalizeTags(['Eco Friendly', 'eco-friendly', 'ECO  FRIENDLY']),
-          ['eco-friendly']);
+      expect(normalizeTags(['Eco Friendly', 'eco-friendly', 'ECO  FRIENDLY']), [
+        'eco-friendly',
+      ]);
     });
 
     test('drops tags that normalise to nothing', () {
@@ -56,7 +57,10 @@ void main() {
     });
 
     test('sorts, so the same set typed in any order stores identically', () {
-      expect(normalizeTags(['zero', 'alpha']), normalizeTags(['alpha', 'zero']));
+      expect(
+        normalizeTags(['zero', 'alpha']),
+        normalizeTags(['alpha', 'zero']),
+      );
     });
 
     test('caps at the documented maximum', () {
@@ -150,8 +154,11 @@ void main() {
       );
 
       for (final token in tokenizeQuery('bamboo TOOTHBRUSH')) {
-        expect(indexed, contains(token),
-            reason: 'a query token must be findable in the index');
+        expect(
+          indexed,
+          contains(token),
+          reason: 'a query token must be findable in the index',
+        );
       }
     });
 

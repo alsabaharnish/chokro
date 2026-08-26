@@ -177,8 +177,10 @@ void main() {
       expect(report.outstanding, 400);
       expect(report.settled, 1000);
       // Everything is accounted for exactly once.
-      expect(report.collected + report.simulated + report.outstanding,
-          report.net);
+      expect(
+        report.collected + report.simulated + report.outstanding,
+        report.net,
+      );
     });
 
     test('a discounted order settles at payable, not at subtotal', () {
@@ -228,8 +230,13 @@ void main() {
       );
 
       expect(report.orderCount, 1);
-      expect(report.gross, 100, reason: 'the undated order must not be guessed '
-          'into today just because it arrived while today was on screen');
+      expect(
+        report.gross,
+        100,
+        reason:
+            'the undated order must not be guessed '
+            'into today just because it arrived while today was on screen',
+      );
       expect(report.undated, 1);
     });
 
@@ -277,22 +284,25 @@ void main() {
       );
     });
 
-    test('a capped query DOES flag a window it could not reach the start of', () {
-      final report = SellerSalesReport.from(
-        [
-          _order(id: 'a', subtotal: 100, createdAt: now),
-          _order(id: 'b', subtotal: 100, createdAt: DateTime(2026, 8, 22)),
-        ],
-        period: SalesPeriod.month,
-        now: now,
-        truncated: true,
-      );
+    test(
+      'a capped query DOES flag a window it could not reach the start of',
+      () {
+        final report = SellerSalesReport.from(
+          [
+            _order(id: 'a', subtotal: 100, createdAt: now),
+            _order(id: 'b', subtotal: 100, createdAt: DateTime(2026, 8, 22)),
+          ],
+          period: SalesPeriod.month,
+          now: now,
+          truncated: true,
+        );
 
-      // The 30-day window starts 26 July; the oldest order read is 22 August,
-      // so orders between those dates were cut off and the total is a floor.
-      expect(report.truncated, isTrue);
-      expect(report.oldestOrder, DateTime(2026, 8, 22));
-    });
+        // The 30-day window starts 26 July; the oldest order read is 22 August,
+        // so orders between those dates were cut off and the total is a floor.
+        expect(report.truncated, isTrue);
+        expect(report.oldestOrder, DateTime(2026, 8, 22));
+      },
+    );
 
     test('an uncapped query never flags any window', () {
       for (final period in SalesPeriod.values) {
@@ -350,9 +360,24 @@ void main() {
   test('orders are tallied by status', () {
     final report = SellerSalesReport.from(
       [
-        _order(id: 'a', subtotal: 10, status: OrderStatus.pending, createdAt: now),
-        _order(id: 'b', subtotal: 10, status: OrderStatus.pending, createdAt: now),
-        _order(id: 'c', subtotal: 10, status: OrderStatus.confirmed, createdAt: now),
+        _order(
+          id: 'a',
+          subtotal: 10,
+          status: OrderStatus.pending,
+          createdAt: now,
+        ),
+        _order(
+          id: 'b',
+          subtotal: 10,
+          status: OrderStatus.pending,
+          createdAt: now,
+        ),
+        _order(
+          id: 'c',
+          subtotal: 10,
+          status: OrderStatus.confirmed,
+          createdAt: now,
+        ),
       ],
       period: SalesPeriod.today,
       now: now,

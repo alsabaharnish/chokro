@@ -314,9 +314,7 @@ class AppShell extends ConsumerWidget {
                       value: _AccountAction.signOut,
                       child: ListTile(
                         leading: const Icon(Icons.logout),
-                        title: Text(
-                          isSigningOut ? 'Signing out…' : 'Sign out',
-                        ),
+                        title: Text(isSigningOut ? 'Signing out…' : 'Sign out'),
                         contentPadding: EdgeInsets.zero,
                       ),
                     ),

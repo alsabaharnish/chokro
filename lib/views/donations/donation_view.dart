@@ -34,6 +34,27 @@ class _DonationViewState extends ConsumerState<DonationView> {
   DonationMode _mode = DonationMode.points;
 
   @override
+  void initState() {
+    super.initState();
+    // Neither donation controller is `autoDispose`, deliberately — holding the
+    // idempotency key across a rebuild is what makes "Try again" safe after a
+    // lost response. But it also means a completed outcome outlives the route:
+    // a Champion who donated, read the receipt, and left with the back button
+    // instead of "Done" found `/donate` reopening straight onto that old
+    // receipt, with no form and no way to donate again except to notice the
+    // "Donate again" button and press it.
+    //
+    // Deferred a frame because this runs during build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (ref.read(donationControllerProvider).value != null ||
+          ref.read(prototypeDonationControllerProvider).value != null) {
+        _resetDrafts();
+      }
+    });
+  }
+
+  @override
   void dispose() {
     _points.dispose();
     _amountTaka.dispose();

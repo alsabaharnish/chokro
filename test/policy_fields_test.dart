@@ -7,9 +7,13 @@ void main() {
     test('covers every key in the serialised policy', () {
       final serialisedKeys = PointsPolicy.defaults.toJson().keys.toSet();
       final fieldKeys = policyFields.map((f) => f.key).toSet();
-      expect(fieldKeys, serialisedKeys,
-          reason: 'a parameter without a descriptor is not editable, and a '
-              'descriptor without a parameter writes nothing');
+      expect(
+        fieldKeys,
+        serialisedKeys,
+        reason:
+            'a parameter without a descriptor is not editable, and a '
+            'descriptor without a parameter writes nothing',
+      );
     });
 
     test('keys are unique', () {
@@ -21,8 +25,11 @@ void main() {
       const policy = PointsPolicy.defaults;
       final json = policy.toJson();
       for (final field in policyFields) {
-        expect(field.read(policy), json[field.key],
-            reason: 'field ${field.key} reads the wrong value');
+        expect(
+          field.read(policy),
+          json[field.key],
+          reason: 'field ${field.key} reads the wrong value',
+        );
       }
     });
 
@@ -34,8 +41,11 @@ void main() {
 
         for (final other in policyFields) {
           if (other.key == field.key) continue;
-          expect(other.read(changed), other.read(base),
-              reason: 'writing ${field.key} disturbed ${other.key}');
+          expect(
+            other.read(changed),
+            other.read(base),
+            reason: 'writing ${field.key} disturbed ${other.key}',
+          );
         }
       }
     });
@@ -50,8 +60,10 @@ void main() {
 
   group('diffPolicies', () {
     test('identical policies produce no changes', () {
-      expect(diffPolicies(PointsPolicy.defaults, PointsPolicy.defaults),
-          isEmpty);
+      expect(
+        diffPolicies(PointsPolicy.defaults, PointsPolicy.defaults),
+        isEmpty,
+      );
     });
 
     test('reports a single changed parameter', () {
@@ -68,12 +80,18 @@ void main() {
 
     test('reports several changes in form order', () {
       const before = PointsPolicy.defaults;
-      final after =
-          before.copyWith(lockoutHours: 12, disposalAward: 60, claimAward: 20);
+      final after = before.copyWith(
+        lockoutHours: 12,
+        disposalAward: 60,
+        claimAward: 20,
+      );
 
       final changes = diffPolicies(before, after);
-      expect(changes.map((c) => c.field.key).toList(),
-          ['disposalAward', 'claimAward', 'lockoutHours']);
+      expect(changes.map((c) => c.field.key).toList(), [
+        'disposalAward',
+        'claimAward',
+        'lockoutHours',
+      ]);
     });
 
     test('is directional', () {
@@ -94,13 +112,16 @@ void main() {
       expect(base.copyWith(claimAward: 49).validate(), isEmpty);
     });
 
-    test('lowering the disposal award below the claim award is refused too', () {
-      // The same invariant approached from the other side — an administrator
-      // is at least as likely to reduce the disposal award as to raise the
-      // claim award.
-      const base = PointsPolicy.defaults;
-      expect(base.copyWith(disposalAward: 10).validate(), isNotEmpty);
-    });
+    test(
+      'lowering the disposal award below the claim award is refused too',
+      () {
+        // The same invariant approached from the other side — an administrator
+        // is at least as likely to reduce the disposal award as to raise the
+        // claim award.
+        const base = PointsPolicy.defaults;
+        expect(base.copyWith(disposalAward: 10).validate(), isNotEmpty);
+      },
+    );
 
     test('a policy built through the field writers still validates', () {
       var draft = PointsPolicy.defaults;

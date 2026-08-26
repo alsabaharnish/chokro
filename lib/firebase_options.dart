@@ -68,7 +68,8 @@ class DefaultFirebaseOptions {
     messagingSenderId: '430187570326',
     projectId: 'chokro-30887',
     storageBucket: 'chokro-30887.firebasestorage.app',
-    iosClientId: '430187570326-3mpquf925jubtvr86bd86oto8h4jqt79.apps.googleusercontent.com',
+    iosClientId:
+        '430187570326-3mpquf925jubtvr86bd86oto8h4jqt79.apps.googleusercontent.com',
     iosBundleId: 'com.arnish.chokro',
   );
 }

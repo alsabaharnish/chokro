@@ -460,7 +460,11 @@ void main() {
     // navigation bar of its own, that leaves a screen with no way off it —
     // which is what "My appeals" and "My orders" both were. Both are reached by
     // `go`: from the appeal-sent screen, and from the checkout receipt.
-    Future<void> pumpAt(WidgetTester tester, String location, Widget screen) async {
+    Future<void> pumpAt(
+      WidgetTester tester,
+      String location,
+      Widget screen,
+    ) async {
       tester.view.physicalSize = const Size(400, 900);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);

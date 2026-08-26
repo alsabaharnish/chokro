@@ -9,7 +9,7 @@ import '../models/transaction_model.dart';
 /// the same transaction as the balance it explains (§5.1, NFR-4).
 class TransactionService {
   TransactionService({FirebaseFirestore? firestore})
-      : _db = firestore ?? FirebaseFirestore.instance;
+    : _db = firestore ?? FirebaseFirestore.instance;
 
   final FirebaseFirestore _db;
 
@@ -47,13 +47,17 @@ class TransactionService {
     return _mapSnapshot(snapshot);
   }
 
-  List<TransactionModel> _mapSnapshot(QuerySnapshot<Map<String, dynamic>> snap) {
-    return snap.docs.map((doc) {
-      final data = Map<String, dynamic>.from(doc.data());
-      // Timestamp -> DateTime happens here, never in the model.
-      final created = data['createdAt'];
-      data['createdAt'] = created is Timestamp ? created.toDate() : null;
-      return TransactionModel.fromMap(doc.id, data);
-    }).toList(growable: false);
+  List<TransactionModel> _mapSnapshot(
+    QuerySnapshot<Map<String, dynamic>> snap,
+  ) {
+    return snap.docs
+        .map((doc) {
+          final data = Map<String, dynamic>.from(doc.data());
+          // Timestamp -> DateTime happens here, never in the model.
+          final created = data['createdAt'];
+          data['createdAt'] = created is Timestamp ? created.toDate() : null;
+          return TransactionModel.fromMap(doc.id, data);
+        })
+        .toList(growable: false);
   }
 }

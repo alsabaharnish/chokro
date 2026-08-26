@@ -83,7 +83,7 @@ class LocationResult {
       case LocationOutcome.error:
         return message ??
             'Could not get your location. Check that location is switched on, '
-            'then try again.';
+                'then try again.';
     }
   }
 }

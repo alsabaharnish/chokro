@@ -12,7 +12,12 @@ void main() {
   group('haversine distance', () {
     test('is zero for an identical point', () {
       expect(
-        haversineDistance(lat1: binLat, lng1: binLng, lat2: binLat, lng2: binLng),
+        haversineDistance(
+          lat1: binLat,
+          lng1: binLng,
+          lat2: binLat,
+          lng2: binLng,
+        ),
         0.0,
       );
     });
@@ -95,8 +100,7 @@ void main() {
       );
       // Antipodal points: half the circumference, and no NaN from a rounding
       // error pushing the term above 1.
-      final antipodal =
-          haversineDistance(lat1: 0, lng1: 0, lat2: 0, lng2: 180);
+      final antipodal = haversineDistance(lat1: 0, lng1: 0, lat2: 0, lng2: 180);
       expect(antipodal.isNaN, isFalse);
       expect(antipodal, closeTo(20015086.8, 1.0));
     });

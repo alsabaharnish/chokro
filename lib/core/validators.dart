@@ -18,7 +18,9 @@ library;
 /// enough to be "correct" rejects valid ones. The only authority on whether an
 /// address works is whether mail reaches it. This catches typing mistakes,
 /// which is all a form field should try to do.
-final RegExp _emailPattern = RegExp(r'^[^@\s]+@[^@\s.]+(\.[^@\s.]+)*\.[^@\s.]{2,}$');
+final RegExp _emailPattern = RegExp(
+  r'^[^@\s]+@[^@\s.]+(\.[^@\s.]+)*\.[^@\s.]{2,}$',
+);
 
 String? validateEmail(String? value) {
   final email = value?.trim() ?? '';

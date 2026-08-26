@@ -16,12 +16,7 @@ import '../../core/theme.dart';
 /// `[cloud_firestore/permission-denied] Missing or insufficient permissions.`,
 /// which names a vendor, a class and no next step.
 class ErrorRetry extends StatelessWidget {
-  const ErrorRetry({
-    super.key,
-    required this.error,
-    this.onRetry,
-    this.title,
-  });
+  const ErrorRetry({super.key, required this.error, this.onRetry, this.title});
 
   /// Whatever landed in the error branch. Interpreted, never printed raw.
   final Object? error;
@@ -55,16 +50,18 @@ class ErrorRetry extends StatelessWidget {
               Text(
                 '$title could not be loaded',
                 textAlign: TextAlign.center,
-                style: theme.textTheme.titleSmall
-                    ?.copyWith(fontWeight: FontWeight.bold),
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
               ),
               const SizedBox(height: AppTheme.gapXs),
             ],
             Text(
               friendlyErrorMessage(error),
               textAlign: TextAlign.center,
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
             if (onRetry != null) ...[
               const SizedBox(height: AppTheme.gapMd),

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/transaction_model.dart';
 import '../services/transaction_service.dart';
 import 'current_user_provider.dart';
+import 'wallet_controller.dart';
 
 final transactionServiceProvider = Provider<TransactionService>((ref) {
   return TransactionService();
@@ -12,8 +13,9 @@ final transactionServiceProvider = Provider<TransactionService>((ref) {
 ///
 /// Emits an empty list rather than an error when signed out, so a sign-out
 /// mid-session tears the screen down cleanly instead of flashing an error.
-final ledgerProvider =
-    StreamProvider.autoDispose<List<TransactionModel>>((ref) {
+final ledgerProvider = StreamProvider.autoDispose<List<TransactionModel>>((
+  ref,
+) {
   final uid = ref.watch(currentUidProvider);
   if (uid == null) {
     return Stream<List<TransactionModel>>.value(const <TransactionModel>[]);
@@ -28,13 +30,27 @@ final ledgerProvider =
 /// user a number that comes out of the history is that property made visible,
 /// and it means this screen has exactly one data dependency.
 ///
-/// Null when the ledger is empty, still loading, or when the newest entry
-/// predates `balanceAfter` — the view falls back to the wallet figure in the
-/// first case and hides the header in the others.
+/// Null only while the ledger is still loading. An empty ledger, or a newest
+/// entry that carries no `balanceAfter`, falls back to `wallets/{uid}`.
+///
+/// The fallback is not decoration. This doc comment used to promise it and the
+/// screen did not have it: `_BalanceHeader` rendered `balance?.toString() ??
+/// '0'`, so a single newest entry without a `balanceAfter` — a legacy row, or
+/// a document that failed to parse — showed a Champion with points a balance
+/// of **0**, next to a ledger visibly full of credits. Of everything in this
+/// app, the balance is the number a user is least willing to see wrong, and
+/// the authoritative figure was one provider away the whole time.
 final ledgerBalanceProvider = Provider.autoDispose<int?>((ref) {
-  final entries = ref.watch(ledgerProvider).asData?.value;
-  if (entries == null || entries.isEmpty) return null;
-  return entries.first.balanceAfter;
+  final ledger = ref.watch(ledgerProvider);
+  if (ledger.isLoading && !ledger.hasValue) return null;
+
+  final entries = ledger.asData?.value;
+  final fromLedger = (entries == null || entries.isEmpty)
+      ? null
+      : entries.first.balanceAfter;
+  if (fromLedger != null) return fromLedger;
+
+  return ref.watch(walletProvider).asData?.value?.balance;
 });
 
 /// Lifetime points earned — credits only, debits excluded.
