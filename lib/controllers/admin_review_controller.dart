@@ -57,57 +57,88 @@ final binForReviewProvider = FutureProvider.family<BinModel?, String>((
   return ref.watch(binServiceProvider).getBin(binId);
 });
 
-/// Which row is currently being decided, and any error from the last attempt.
+/// Which rows are currently being decided, and any error from the last attempt.
+///
+/// `busyIds` is a **set**, not a single id. It held one id, and every entry
+/// point replaced the whole state — so an admin who approved one disposal and,
+/// during the 90-second timeout window, approved a second, watched the first
+/// row's spinner vanish and its Approve and Reject buttons come back to life
+/// while that decision was still in flight. Pressing them again sent a second
+/// decision for a submission already being decided.
 class ReviewUiState {
-  final String? busyDisposalId;
+  final Set<String> busyIds;
   final String? error;
   final String? lastMessage;
 
-  const ReviewUiState({this.busyDisposalId, this.error, this.lastMessage});
+  const ReviewUiState({
+    this.busyIds = const <String>{},
+    this.error,
+    this.lastMessage,
+  });
 
-  bool isBusy(String disposalId) => busyDisposalId == disposalId;
+  bool isBusy(String disposalId) => busyIds.contains(disposalId);
+
+  /// Adds a row to the in-flight set, leaving the messages alone.
+  ReviewUiState busy(String id) =>
+      ReviewUiState(busyIds: {...busyIds, id}, error: error);
+
+  /// Removes a row and states the outcome. Other in-flight rows keep their
+  /// spinners, which is the whole point of the set.
+  ReviewUiState done(String id, {String? message, String? failure}) =>
+      ReviewUiState(
+        busyIds: busyIds.where((each) => each != id).toSet(),
+        lastMessage: message,
+        error: failure,
+      );
 }
 
 class AdminReviewController extends Notifier<ReviewUiState> {
   @override
   ReviewUiState build() => const ReviewUiState();
 
-  void clearMessages() =>
-      state = ReviewUiState(busyDisposalId: state.busyDisposalId);
+  void clearMessages() => state = ReviewUiState(busyIds: state.busyIds);
 
   Future<void> approve(String disposalId) async {
-    state = ReviewUiState(busyDisposalId: disposalId);
+    state = state.busy(disposalId);
     try {
       final outcome = await ref.read(reviewServiceProvider).approve(disposalId);
-      state = ReviewUiState(
-        lastMessage:
-            'Approved — ${outcome.pointsAwarded ?? 0} points credited.',
+      state = state.done(
+        disposalId,
+        message: 'Approved — ${outcome.pointsAwarded ?? 0} points credited.',
       );
     } on ReviewException catch (err) {
-      state = ReviewUiState(error: err.message);
+      state = state.done(disposalId, failure: err.message);
     } catch (_) {
-      state = const ReviewUiState(error: 'Something went wrong. Try again.');
+      state = state.done(
+        disposalId,
+        failure: 'Something went wrong. Try again.',
+      );
     }
   }
 
   Future<void> reject(String disposalId, String reason) async {
     if (reason.trim().isEmpty) {
-      state = const ReviewUiState(
+      state = ReviewUiState(
+        busyIds: state.busyIds,
         error: 'A rejection needs a reason — the user is shown it.',
       );
       return;
     }
 
-    state = ReviewUiState(busyDisposalId: disposalId);
+    state = state.busy(disposalId);
     try {
       await ref.read(reviewServiceProvider).reject(disposalId, reason.trim());
-      state = const ReviewUiState(
-        lastMessage: 'Rejected, and the user told why.',
+      state = state.done(
+        disposalId,
+        message: 'Rejected, and the user told why.',
       );
     } on ReviewException catch (err) {
-      state = ReviewUiState(error: err.message);
+      state = state.done(disposalId, failure: err.message);
     } catch (_) {
-      state = const ReviewUiState(error: 'Something went wrong. Try again.');
+      state = state.done(
+        disposalId,
+        failure: 'Something went wrong. Try again.',
+      );
     }
   }
 }

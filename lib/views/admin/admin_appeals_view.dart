@@ -66,7 +66,20 @@ class AdminAppealsView extends ConsumerWidget {
                       _QueueNotice(count: appeals.length),
                       const SizedBox(height: AppTheme.gapMd),
                       for (final appeal in appeals) ...[
-                        _AdminAppealCard(appeal: appeal),
+                        // Keyed by appeal id, and that is load-bearing rather
+                        // than tidiness. `_AdminAppealCardState` holds the
+                        // whole safety gate in local state — `_photoLoaded`
+                        // and the "I reviewed the photograph" `_confirmed`
+                        // tick. Resolving an appeal removes it from this
+                        // stream, so every later appeal shifts up one
+                        // position, and unkeyed reconciliation matches State
+                        // objects by index: the tick an admin gave to appeal
+                        // #1 was reused for appeal #2, arming Uphold and
+                        // Decline on evidence nobody had looked at.
+                        _AdminAppealCard(
+                          key: ValueKey(appeal.id),
+                          appeal: appeal,
+                        ),
                         const SizedBox(height: AppTheme.gapMd),
                       ],
                     ],
@@ -82,7 +95,7 @@ class AdminAppealsView extends ConsumerWidget {
 }
 
 class _AdminAppealCard extends ConsumerStatefulWidget {
-  const _AdminAppealCard({required this.appeal});
+  const _AdminAppealCard({super.key, required this.appeal});
 
   final AppealModel appeal;
 
@@ -106,6 +119,21 @@ class _AdminAppealCardState extends ConsumerState<_AdminAppealCard> {
       _photoLoaded = loaded;
       if (!loaded) _confirmed = false;
     });
+  }
+
+  @override
+  void didUpdateWidget(_AdminAppealCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // Belt and braces with the ValueKey above. If this State is ever handed a
+    // different appeal — a key collision, or someone removing the key — the
+    // gate must close rather than carry a confirmation across.
+    if (oldWidget.appeal.id != widget.appeal.id) {
+      setState(() {
+        _photoLoaded = false;
+        _confirmed = false;
+        _imageAttempt = 0;
+      });
+    }
   }
 
   Future<void> _retryPhoto(String url) async {

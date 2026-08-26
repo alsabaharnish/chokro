@@ -349,22 +349,38 @@ final claimDraftProvider = NotifierProvider<ClaimDraftController, ClaimDraft>(
 // Admin review
 // ---------------------------------------------------------------------------
 
+/// Which rows are being decided. A **set**, for the reason `ReviewUiState`
+/// documents: one id meant a second decision cleared the first row's spinner
+/// and re-armed its buttons while that decision was still in flight.
 class ClaimReviewUiState {
-  const ClaimReviewUiState({this.busyClaimId, this.error, this.lastMessage});
+  const ClaimReviewUiState({
+    this.busyIds = const <String>{},
+    this.error,
+    this.lastMessage,
+  });
 
-  final String? busyClaimId;
+  final Set<String> busyIds;
   final String? error;
   final String? lastMessage;
 
-  bool isBusy(String claimId) => busyClaimId == claimId;
+  bool isBusy(String claimId) => busyIds.contains(claimId);
+
+  ClaimReviewUiState busy(String id) =>
+      ClaimReviewUiState(busyIds: {...busyIds, id}, error: error);
+
+  ClaimReviewUiState done(String id, {String? message, String? failure}) =>
+      ClaimReviewUiState(
+        busyIds: busyIds.where((each) => each != id).toSet(),
+        lastMessage: message,
+        error: failure,
+      );
 }
 
 class ClaimReviewController extends Notifier<ClaimReviewUiState> {
   @override
   ClaimReviewUiState build() => const ClaimReviewUiState();
 
-  void clearMessages() =>
-      state = ClaimReviewUiState(busyClaimId: state.busyClaimId);
+  void clearMessages() => state = ClaimReviewUiState(busyIds: state.busyIds);
 
   // Both actions below need a bare `catch` as well as the typed one.
   //
@@ -376,18 +392,19 @@ class ClaimReviewController extends Notifier<ClaimReviewUiState> {
   // the two are otherwise the same shape.
 
   Future<void> approve(String claimId) async {
-    state = ClaimReviewUiState(busyClaimId: claimId);
+    state = state.busy(claimId);
     try {
       final outcome = await ref.read(claimServiceProvider).approve(claimId);
-      state = ClaimReviewUiState(
-        lastMessage:
-            'Approved — ${outcome.pointsAwarded ?? 0} points credited.',
+      state = state.done(
+        claimId,
+        message: 'Approved — ${outcome.pointsAwarded ?? 0} points credited.',
       );
     } on ClaimException catch (err) {
-      state = ClaimReviewUiState(error: err.message);
+      state = state.done(claimId, failure: err.message);
     } catch (_) {
-      state = const ClaimReviewUiState(
-        error:
+      state = state.done(
+        claimId,
+        failure:
             'Could not approve this claim. Check your connection and try '
             'again.',
       );
@@ -396,23 +413,23 @@ class ClaimReviewController extends Notifier<ClaimReviewUiState> {
 
   Future<void> reject(String claimId, String reason) async {
     if (reason.trim().isEmpty) {
-      state = const ClaimReviewUiState(
+      state = ClaimReviewUiState(
+        busyIds: state.busyIds,
         error: 'A rejection needs a reason — the user is shown it.',
       );
       return;
     }
 
-    state = ClaimReviewUiState(busyClaimId: claimId);
+    state = state.busy(claimId);
     try {
       await ref.read(claimServiceProvider).reject(claimId, reason.trim());
-      state = const ClaimReviewUiState(
-        lastMessage: 'Rejected, and the user told why.',
-      );
+      state = state.done(claimId, message: 'Rejected, and the user told why.');
     } on ClaimException catch (err) {
-      state = ClaimReviewUiState(error: err.message);
+      state = state.done(claimId, failure: err.message);
     } catch (_) {
-      state = const ClaimReviewUiState(
-        error:
+      state = state.done(
+        claimId,
+        failure:
             'Could not reject this claim. Check your connection and try '
             'again.',
       );

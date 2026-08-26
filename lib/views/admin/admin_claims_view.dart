@@ -3,11 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../controllers/claim_controller.dart';
-import '../../core/image_delivery.dart';
 import '../../core/label_format.dart';
 import '../../models/claim_model.dart';
 import 'eco_action_photocard_dialog.dart';
 import '../shared/app_shell.dart';
+import '../shared/evidence_viewer.dart';
 import '../shared/rejection_reason_dialog.dart';
 import '../shared/error_retry.dart';
 
@@ -506,26 +506,16 @@ class _ClaimCard extends ConsumerWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(10),
-                  child: CachedNetworkImage(
-                    imageUrl: thumbnailUrl(claim.photoUrl, width: 110),
-                    memCacheWidth: decodeWidthFor(110),
-                    width: 110,
-                    height: 110,
-                    fit: BoxFit.cover,
-                    placeholder: (_, _) => Container(
-                      width: 110,
-                      height: 110,
-                      color: theme.colorScheme.surfaceContainerHighest,
-                    ),
-                    errorWidget: (_, _, _) => Container(
-                      width: 110,
-                      height: 110,
-                      color: theme.colorScheme.surfaceContainerHighest,
-                      child: const Icon(Icons.broken_image_outlined),
-                    ),
-                  ),
+                // A decision surface, not a thumbnail. This is the image an
+                // admin approves or rejects a Champion's eco-action from, and
+                // it was a 110 px square with no way to enlarge it — while the
+                // appeals queue one tab away has had a zoomable viewer all
+                // along.
+                EvidenceThumbnail(
+                  url: claim.photoUrl,
+                  size: 110,
+                  semanticLabel: 'Eco-action photograph',
+                  caption: claim.actionType.label,
                 ),
                 const SizedBox(width: 14),
                 Expanded(
@@ -675,25 +665,11 @@ class _PreviousClaims extends ConsumerWidget {
                         '${formatAge(claim.createdAt)}',
                     child: Stack(
                       children: [
-                        ClipRRect(
-                          borderRadius: BorderRadius.circular(6),
-                          child: CachedNetworkImage(
-                            imageUrl: thumbnailUrl(claim.photoUrl, width: 58),
-                            memCacheWidth: decodeWidthFor(58),
-                            width: 58,
-                            height: 58,
-                            fit: BoxFit.cover,
-                            placeholder: (_, _) => Container(
-                              width: 58,
-                              height: 58,
-                              color: theme.colorScheme.surfaceContainerHighest,
-                            ),
-                            errorWidget: (_, _, _) => Container(
-                              width: 58,
-                              height: 58,
-                              color: theme.colorScheme.surfaceContainerHighest,
-                            ),
-                          ),
+                        EvidenceThumbnail(
+                          url: claim.photoUrl,
+                          size: 58,
+                          semanticLabel: 'Earlier eco-action photograph',
+                          caption: 'Earlier claim — ${claim.actionType.label}',
                         ),
                         Positioned(
                           right: 2,

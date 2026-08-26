@@ -17,11 +17,49 @@ class DonationController extends AsyncNotifier<DonationOutcome?> {
   @override
   Future<DonationOutcome?> build() async => null;
 
-  /// A changed amount or initiative is a new intent and needs a fresh key.
+  /// Whether the outcome now held has been shown to the user.
+  ///
+  /// The controller is not `autoDispose`, so a `donate()` that is still in
+  /// flight when the user leaves the screen finishes and stores its receipt
+  /// with nobody watching. Re-entering must tell that apart from a receipt the
+  /// user has already read: the first has to be shown, the second cleared.
+  bool _seen = false;
+
+  bool get outcomeWasSeen => _seen;
+
+  /// Marks the held receipt as read. Called by the success screen as it builds.
+  void markOutcomeSeen() => _seen = true;
+
+  /// Clears the displayed outcome, leaving the idempotency key alone.
+  ///
+  /// **Does not mint a new key**, and that is the whole point. This used to
+  /// null `_requestId`, and the screen calls it from six ordinary-interaction
+  /// callbacks — every keystroke in the amount field, every suggested-amount
+  /// chip, the initiative radio, the mode switch. So a donation that failed
+  /// with the response lost in flight, followed by the user tapping the same
+  /// 100-point chip and pressing send again, minted a *second* key: the server
+  /// keys idempotency on `${uid}_${donationId}`, so it committed a second
+  /// debit for what the user experienced as one retry.
+  ///
+  /// [donate] already mints a key whenever the intent genuinely changes, by
+  /// comparing the fingerprint. That check is sufficient and this method was
+  /// actively defeating it.
   void resetDraft() {
+    _seen = false;
+    state = const AsyncData(null);
+  }
+
+  /// Deliberately begins a *new* donation, discarding the previous key.
+  ///
+  /// For "Support another initiative" and for re-entering the screen after the
+  /// last receipt was read — the two places where the user has genuinely
+  /// finished with the previous donation and a repeat of the same amount to the
+  /// same initiative must be a second donation rather than an idempotent
+  /// replay of the first.
+  void startNewDonation() {
     _requestId = null;
     _fingerprint = null;
-    state = const AsyncData(null);
+    resetDraft();
   }
 
   /// Keeps one id for retries of the same intent. If the first response is lost
@@ -71,10 +109,25 @@ class PrototypeDonationController
   @override
   Future<PrototypeDonationOutcome?> build() async => null;
 
+  /// See [DonationController.outcomeWasSeen].
+  bool _seen = false;
+
+  bool get outcomeWasSeen => _seen;
+
+  void markOutcomeSeen() => _seen = true;
+
+  /// Clears the displayed outcome only — see [DonationController.resetDraft]
+  /// for why this must not touch the idempotency key.
   void resetDraft() {
+    _seen = false;
+    state = const AsyncData(null);
+  }
+
+  /// See [DonationController.startNewDonation].
+  void startNewDonation() {
     _requestId = null;
     _fingerprint = null;
-    state = const AsyncData(null);
+    resetDraft();
   }
 
   Future<void> donate({

@@ -47,9 +47,21 @@ class _DonationViewState extends ConsumerState<DonationView> {
     // Deferred a frame because this runs during build.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      if (ref.read(donationControllerProvider).value != null ||
-          ref.read(prototypeDonationControllerProvider).value != null) {
-        _resetDrafts();
+      // Only a receipt the user has already *read* is cleared. The controllers
+      // are not autoDispose, so a `donate()` still in flight when the screen
+      // was popped finishes and stores its receipt with nobody watching —
+      // clearing that one would throw away the only record the Champion has
+      // that their points went somewhere, along with the idempotency key that
+      // makes a retry safe.
+      final points = ref.read(donationControllerProvider.notifier);
+      final prototype = ref.read(prototypeDonationControllerProvider.notifier);
+      if (ref.read(donationControllerProvider).value != null &&
+          points.outcomeWasSeen) {
+        points.startNewDonation();
+      }
+      if (ref.read(prototypeDonationControllerProvider).value != null &&
+          prototype.outcomeWasSeen) {
+        prototype.startNewDonation();
       }
     });
   }
@@ -136,21 +148,29 @@ class _DonationViewState extends ConsumerState<DonationView> {
 
     Widget child;
     if (_mode == DonationMode.points && pointOutcome != null) {
+      // Reading the receipt is what makes it safe to clear on a later visit.
+      ref.read(donationControllerProvider.notifier).markOutcomeSeen();
       child = _PointDonationSuccess(
         outcome: pointOutcome,
         onViewWallet: () => context.go('/wallet'),
+        // `startNewDonation`, not `resetDraft`: this is a deliberate second
+        // donation, so the same amount to the same initiative must debit
+        // again rather than replay the first receipt idempotently.
         onDonateAgain: () {
           _points.text = '100';
-          ref.read(donationControllerProvider.notifier).resetDraft();
+          ref.read(donationControllerProvider.notifier).startNewDonation();
         },
       );
     } else if (_mode == DonationMode.prototypeOnline &&
         prototypeOutcome != null) {
+      ref.read(prototypeDonationControllerProvider.notifier).markOutcomeSeen();
       child = _PrototypeDonationSuccess(
         outcome: prototypeOutcome,
         onDonateAgain: () {
           _amountTaka.text = '500';
-          ref.read(prototypeDonationControllerProvider.notifier).resetDraft();
+          ref
+              .read(prototypeDonationControllerProvider.notifier)
+              .startNewDonation();
         },
       );
     } else {
@@ -446,6 +466,10 @@ class _PointEditor extends StatelessWidget {
                   : const Icon(Icons.volunteer_activism_outlined),
               label: Text(state.isLoading ? 'Donating…' : 'Review donation'),
             ),
+            // `DonationService` posts with `ApiConfig.coldStartTimeout`, which
+            // is 90 seconds. An 18 px spinner saying "Donating…" for a minute
+            // and a half is the exact case SlowServerNote was written for.
+            if (state.isLoading) const SlowServerNote(),
           ],
         );
       },
@@ -578,6 +602,7 @@ class _PrototypePaymentEditor extends StatelessWidget {
                 : 'Review prototype payment',
           ),
         ),
+        if (state.isLoading) const SlowServerNote(),
       ],
     );
   }

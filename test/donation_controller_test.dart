@@ -95,7 +95,48 @@ void main() {
     expect(container.read(donationControllerProvider).value?.balanceAfter, 350);
   });
 
-  test('changing the draft creates a different request key', () async {
+  test('editing the amount after a lost response does not mint a second key '
+      'for the same intent', () async {
+    // The double-debit path. `resetDraft()` used to null the idempotency key,
+    // and the screen calls it from six ordinary-interaction callbacks — every
+    // keystroke in the amount field, every suggested-amount chip, the
+    // initiative radio, the mode switch. So a Champion whose donation failed
+    // with the response lost in flight, who then tapped the same 100-point
+    // chip and pressed send again, sent a *new* key. The server keys
+    // idempotency on `{uid}_{donationId}`, so it committed a second debit for
+    // what the user experienced as one retry.
+    final service = _RecordingDonationService();
+    final container = ProviderContainer(
+      overrides: [donationServiceProvider.overrideWithValue(service)],
+    );
+    addTearDown(container.dispose);
+    await container.read(donationControllerProvider.future);
+    final controller = container.read(donationControllerProvider.notifier);
+
+    service.failNext = true;
+    await controller.donate(
+      initiative: GreenInitiative.wasteRecovery,
+      points: 100,
+    );
+    expect(container.read(donationControllerProvider).hasError, isTrue);
+
+    // What the screen does on any field or chip interaction.
+    controller.resetDraft();
+
+    await controller.donate(
+      initiative: GreenInitiative.wasteRecovery,
+      points: 100,
+    );
+
+    expect(service.requestIds, hasLength(2));
+    expect(
+      service.requestIds.first,
+      service.requestIds.last,
+      reason: 'the same intent must retry under the same idempotency key',
+    );
+  });
+
+  test('a genuinely changed amount still mints a new key', () async {
     final service = _RecordingDonationService();
     final container = ProviderContainer(
       overrides: [donationServiceProvider.overrideWithValue(service)],
@@ -109,6 +150,49 @@ void main() {
       points: 50,
     );
     controller.resetDraft();
+    await controller.donate(
+      initiative: GreenInitiative.wasteRecovery,
+      points: 75,
+    );
+
+    expect(service.requestIds.first, isNot(service.requestIds.last));
+  });
+
+  test('a receipt is only clearable once it has been seen', () async {
+    final service = _RecordingDonationService();
+    final container = ProviderContainer(
+      overrides: [donationServiceProvider.overrideWithValue(service)],
+    );
+    addTearDown(container.dispose);
+    await container.read(donationControllerProvider.future);
+    final controller = container.read(donationControllerProvider.notifier);
+
+    await controller.donate(
+      initiative: GreenInitiative.treePlanting,
+      points: 50,
+    );
+
+    // A donation that landed while the user was away from the screen.
+    expect(controller.outcomeWasSeen, isFalse);
+
+    controller.markOutcomeSeen();
+    expect(controller.outcomeWasSeen, isTrue);
+  });
+
+  test('starting a new donation creates a different request key', () async {
+    final service = _RecordingDonationService();
+    final container = ProviderContainer(
+      overrides: [donationServiceProvider.overrideWithValue(service)],
+    );
+    addTearDown(container.dispose);
+    await container.read(donationControllerProvider.future);
+    final controller = container.read(donationControllerProvider.notifier);
+
+    await controller.donate(
+      initiative: GreenInitiative.wasteRecovery,
+      points: 50,
+    );
+    controller.startNewDonation();
     await controller.donate(
       initiative: GreenInitiative.treePlanting,
       points: 100,

@@ -5,8 +5,10 @@ import '../../controllers/admin_users_controller.dart';
 import '../../controllers/current_user_provider.dart';
 import '../../core/constants.dart';
 import '../../core/label_format.dart';
+import '../../core/theme.dart';
 import '../../models/user_model.dart';
 import '../shared/app_shell.dart';
+import '../shared/app_snackbar.dart';
 import '../shared/error_retry.dart';
 import '../../core/network_errors.dart';
 
@@ -117,6 +119,7 @@ class _AdminUsersViewState extends ConsumerState<AdminUsersView> {
         : DateTime.now().add(choice);
 
     await _run(
+      user.uid,
       () => ref
           .read(adminUserActionsProvider)
           .suspend(user.uid, until: until, isSeller: user.isSeller),
@@ -129,6 +132,7 @@ class _AdminUsersViewState extends ConsumerState<AdminUsersView> {
 
   Future<void> _reinstate(UserModel user) async {
     await _run(
+      user.uid,
       () => ref
           .read(adminUserActionsProvider)
           .reinstate(user.uid, isSeller: user.isSeller),
@@ -144,11 +148,23 @@ class _AdminUsersViewState extends ConsumerState<AdminUsersView> {
   /// other an HTTP call — so a partial result is possible and is stated rather
   /// than smoothed over. "Suspended, but their shop is still open" is precisely
   /// the sentence an administrator needs, and it comes with a way to retry.
+  /// The account whose suspend/reinstate is still in flight.
+  ///
+  /// The action is two operations — a Firestore write, then an HTTP catalogue
+  /// sweep bounded by `ApiConfig.coldStartTimeout` (90 s). The Firestore half
+  /// echoes straight back through `allUsersProvider`, so without this the card
+  /// flipped to the opposite state and offered the *opposite* button while the
+  /// sweep was still running: an admin could press Reinstate on an account
+  /// whose listings were still being hidden.
+  String? _busyUid;
+
   Future<void> _run(
+    String uid,
     Future<SuspensionOutcome> Function() action, {
     required String success,
     required bool hiding,
   }) async {
+    setState(() => _busyUid = uid);
     try {
       final outcome = await action();
       if (!mounted) return;
@@ -181,9 +197,12 @@ class _AdminUsersViewState extends ConsumerState<AdminUsersView> {
       );
     } catch (error) {
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(friendlyErrorMessage(error))));
+      // `failure`, not a neutral bar: this reports that a security-relevant
+      // action did not happen, and the plain SnackBar said so in the same tone
+      // as the successes above it.
+      AppSnackBar.of(context).failure(friendlyErrorMessage(error));
+    } finally {
+      if (mounted) setState(() => _busyUid = null);
     }
   }
 
@@ -241,6 +260,7 @@ class _AdminUsersViewState extends ConsumerState<AdminUsersView> {
                             separatorBuilder: (_, _) =>
                                 const SizedBox(height: 8),
                             itemBuilder: (context, index) => _UserCard(
+                              isBusy: visible[index].uid == _busyUid,
                               user: visible[index],
                               isSelf: visible[index].uid == currentUid,
                               onSuspend: () => _suspend(visible[index]),
@@ -318,12 +338,17 @@ class _UserCard extends StatelessWidget {
   const _UserCard({
     required this.user,
     required this.isSelf,
+    required this.isBusy,
     required this.onSuspend,
     required this.onReinstate,
   });
 
   final UserModel user;
   final bool isSelf;
+
+  /// True while this account's suspend or reinstate is still running.
+  final bool isBusy;
+
   final VoidCallback onSuspend;
   final VoidCallback onReinstate;
 
@@ -406,6 +431,23 @@ class _UserCard extends StatelessWidget {
                   Icons.block,
                   size: 18,
                   color: theme.colorScheme.onSurfaceVariant,
+                ),
+              )
+            else if (isBusy)
+              // Named, not a bare spinner: the sweep can run for 90 seconds and
+              // the admin needs to know the account write already landed.
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: AppTheme.gapSm),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox.square(
+                      dimension: 14,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                    SizedBox(width: AppTheme.gapSm),
+                    Text('Updating…'),
+                  ],
                 ),
               )
             else if (blocked)
