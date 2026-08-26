@@ -29,6 +29,21 @@ void main() {
       expect(validateEmail('a@b.c'), isNotNull);
     });
 
+    test('refuses what firestore.rules would refuse, and names the field', () {
+      // `validString(u.email, 3, 254)` in firestore.rules. Unbounded here, an
+      // over-long address passed the form and came back as a bare
+      // permission-denied that could not say which field was at fault.
+      final local = 'a' * 250;
+      final tooLong = '$local@example.com';
+      expect(tooLong.length, greaterThan(TextLimits.emailMax));
+      expect(validateEmail(tooLong), contains('${TextLimits.emailMax}'));
+
+      final atLimit =
+          '${'a' * (TextLimits.emailMax - '@example.com'.length)}@example.com';
+      expect(atLimit.length, TextLimits.emailMax);
+      expect(validateEmail(atLimit), isNull);
+    });
+
     test('asks for the field rather than complaining when it is empty', () {
       expect(validateEmail(''), 'Enter your email address');
       expect(validateEmail(null), 'Enter your email address');

@@ -1,14 +1,21 @@
+import 'dart:math' as math;
+
+import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../controllers/auth_controller.dart';
 import '../../controllers/cart_controller.dart';
 import '../../core/checkout_math.dart';
 import '../../core/label_format.dart';
 import '../../core/network_errors.dart';
 import '../../core/theme.dart';
+import '../../models/cart_model.dart';
 import '../shared/content_state.dart';
+import '../shared/app_snackbar.dart';
 import '../shared/error_retry.dart';
+import '../shared/notice_card.dart';
 import 'product_card.dart';
 
 /// The cart (F4.3).
@@ -31,6 +38,13 @@ class CartView extends ConsumerWidget {
     // The footer's total comes from the lines, not the quote, so a wallet or
     // policy read failing does not take the subtotal down with it.
     final subtotal = ref.watch(cartSubtotalProvider);
+    // A suspended buyer got two misleading dead ends on this screen — Checkout
+    // teleported them to /home via `requireSignedIn`'s sibling guards, and
+    // Remove failed as "you do not have permission to view this", advice that
+    // cannot work — while the one fact that explains both was stated only on
+    // the product screen one tap away.
+    final user = ref.watch(currentUserProvider).value;
+    final suspended = user != null && !user.isActive;
 
     return Scaffold(
       appBar: AppBar(
@@ -91,6 +105,18 @@ class CartView extends ConsumerWidget {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.stretch,
                             children: [
+                              if (suspended) ...[
+                                const NoticeCard(
+                                  icon: Icons.pause_circle_outline,
+                                  tone: NoticeTone.warning,
+                                  title: 'Your account is suspended',
+                                  message:
+                                      'You cannot check out or change this '
+                                      'cart until the suspension lifts. '
+                                      'Everything in it is kept.',
+                                ),
+                                const SizedBox(height: AppTheme.gapLg),
+                              ],
                               if (problems.isNotEmpty) ...[
                                 _ProblemsCard(problems: problems),
                                 const SizedBox(height: AppTheme.gapLg),
@@ -114,7 +140,10 @@ class CartView extends ConsumerWidget {
                   _CartFooter(
                     subtotal: subtotal,
                     sellerCount: quote?.orderCount,
-                    blocked: problems.isNotEmpty,
+                    blocked: problems.isNotEmpty || suspended,
+                    // "Fix items first" is the wrong sentence for a suspension:
+                    // there is nothing on this screen to fix.
+                    blockedLabel: suspended ? 'Account suspended' : null,
                   ),
               ],
             ),
@@ -137,9 +166,18 @@ class CartView extends ConsumerWidget {
             onPressed: () => Navigator.of(context).pop(false),
             child: const Text('Keep it'),
           ),
+          // Styled destructive, like rejection_reason_dialog.dart. Muscle
+          // memory for "the filled button is the safe one" emptied a cart the
+          // buyer spent time building, and nothing in the app restores it. The
+          // label is spelled out too, so the confirm no longer reads
+          // identically to the app-bar button that opened this dialog.
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Empty'),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(context).colorScheme.error,
+              foregroundColor: Theme.of(context).colorScheme.onError,
+            ),
+            child: const Text('Empty the cart'),
           ),
         ],
       ),
@@ -215,9 +253,18 @@ class _CartLineTile extends ConsumerWidget {
                 final stackControls =
                     constraints.maxWidth < 280 ||
                     MediaQuery.textScalerOf(context).scale(1) > 1.3;
+                // Two ceilings apply, and the stepper only knew about one.
+                // `CartItem.setQuantity` clamps at `CartItem.maxQty`, so past
+                // 20 the "+" stayed enabled, wrote an unchanged cart document
+                // to Firestore, and changed nothing on screen — an enabled
+                // control that reports no error and produces no change reads as
+                // a broken app, and the tooltip said "One more" at the exact
+                // point where one more was impossible.
+                final stockLimit = line.stock ?? line.qty;
                 final stepper = _QuantityStepper(
                   qty: line.qty,
-                  max: line.stock ?? line.qty,
+                  max: math.min(stockLimit, CartItem.maxQty),
+                  atStockLimit: line.qty >= stockLimit,
                   onChanged: (qty) async {
                     await _runCartAction(
                       context,
@@ -251,11 +298,17 @@ class _QuantityStepper extends StatelessWidget {
   const _QuantityStepper({
     required this.qty,
     required this.max,
+    required this.atStockLimit,
     required this.onChanged,
   });
 
   final int qty;
   final int max;
+
+  /// Which of the two ceilings [max] came from, so the disabled tooltip can
+  /// name the real reason rather than always blaming stock.
+  final bool atStockLimit;
+
   final ValueChanged<int> onChanged;
 
   @override
@@ -283,7 +336,11 @@ class _QuantityStepper extends StatelessWidget {
             ),
           ),
           IconButton(
-            tooltip: qty >= max ? 'No more in stock' : 'One more',
+            tooltip: qty < max
+                ? 'One more'
+                : (atStockLimit
+                      ? 'No more in stock'
+                      : 'Most you can order is ${CartItem.maxQty}'),
             visualDensity: VisualDensity.compact,
             onPressed: qty >= max ? null : () => onChanged(qty + 1),
             icon: const Icon(Icons.add),
@@ -377,10 +434,17 @@ Future<void> _runCartAction(
     await action();
   } catch (error) {
     if (!context.mounted) return;
-    final messenger = ScaffoldMessenger.of(context);
-    messenger
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(friendlyErrorMessage(error))));
+    // The cart is the only screen where a *write* denial is user-reachable, and
+    // `friendlyErrorMessage` answers for a read: it tells the user to sign out
+    // and back in, which cannot help when the real cause is a suspension.
+    final denied =
+        error is FirebaseException && error.code == 'permission-denied';
+    AppSnackBar.of(context).failure(
+      denied
+          ? 'Your cart cannot be changed right now. If your account is '
+                'suspended, that is why.'
+          : friendlyErrorMessage(error),
+    );
   }
 }
 
@@ -426,6 +490,7 @@ class _CartFooter extends StatelessWidget {
     required this.subtotal,
     required this.sellerCount,
     required this.blocked,
+    this.blockedLabel,
   });
 
   final int subtotal;
@@ -435,6 +500,10 @@ class _CartFooter extends StatelessWidget {
   final int? sellerCount;
 
   final bool blocked;
+
+  /// What the disabled button should say. Null falls back to the cart-problem
+  /// wording, which is what [blocked] originally only ever meant.
+  final String? blockedLabel;
 
   @override
   Widget build(BuildContext context) {
@@ -479,7 +548,11 @@ class _CartFooter extends StatelessWidget {
                   final checkout = FilledButton.icon(
                     onPressed: blocked ? null : () => context.push('/checkout'),
                     icon: const Icon(Icons.lock_outline),
-                    label: Text(blocked ? 'Fix items first' : 'Checkout'),
+                    label: Text(
+                      blocked
+                          ? (blockedLabel ?? 'Fix items first')
+                          : 'Checkout',
+                    ),
                   );
 
                   if (stack) {

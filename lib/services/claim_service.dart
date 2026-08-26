@@ -212,6 +212,7 @@ class ClaimQuotaStatus {
     required this.weekKey,
     required this.approvedThisWeek,
     required this.limit,
+    required this.claimAward,
   });
 
   /// Reads the body of `GET /claims/quota`.
@@ -232,12 +233,22 @@ class ClaimQuotaStatus {
       weekKey: wireString(json['weekKey']) ?? '',
       approvedThisWeek: wireInt(json['used']) ?? 0,
       limit: wireInt(json['limit']) ?? 3,
+      // Sent on this same response (`server/src/claims.js:263`) and previously
+      // parsed away, so the submission form asked the user to photograph and
+      // describe an eco-action without ever telling them what one is worth.
+      // `ClaimModel.creditedPoints` only shows the figure *after* approval,
+      // which is days after the decision to bother.
+      claimAward: wireInt(json['claimAward']) ?? 0,
     );
   }
 
   final String weekKey;
   final int approvedThisWeek;
   final int limit;
+
+  /// Points an approved eco-action is worth, per the live policy. Zero when the
+  /// server did not say.
+  final int claimAward;
 
   int get remaining {
     final left = limit - approvedThisWeek;
@@ -246,11 +257,23 @@ class ClaimQuotaStatus {
 
   bool get isExhausted => remaining == 0;
 
+  /// What the number actually counts, said out loud.
+  ///
+  /// This used to read "$remaining claims left this week", which on a
+  /// submission form is read as a submission budget — so a Champion submitted
+  /// five, was told each was under review, and later collected two rejections
+  /// they had no way to anticipate. The counter is incremented in
+  /// `approveClaim`, not on create: it limits what pays out, not what may be
+  /// sent. That is the surprise F6.4 exists to prevent, so the wording names
+  /// approvals and names the reset the server already works to.
   String get summary {
-    if (isExhausted) return 'You have used all $limit claims for this week.';
+    if (isExhausted) {
+      return 'All $limit approved eco-actions for this week are used. '
+          'The count resets on Monday.';
+    }
     return remaining == 1
-        ? '1 claim left this week.'
-        : '$remaining claims left this week.';
+        ? '1 more eco-action can be approved this week.'
+        : '$remaining more eco-actions can be approved this week.';
   }
 }
 

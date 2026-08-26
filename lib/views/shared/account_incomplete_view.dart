@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../controllers/auth_controller.dart';
+import '../../core/network_errors.dart';
 import '../../core/theme.dart';
+import 'app_snackbar.dart';
 
 /// Firebase has a session, but Firestore has no `users/{uid}` for it.
 ///
@@ -18,13 +20,63 @@ import '../../core/theme.dart';
 /// exactly what the security rules refuse — so it does the two things it can:
 /// retry, in case the read simply failed, and sign out, so the user is not
 /// trapped.
-class AccountIncompleteView extends ConsumerWidget {
+class AccountIncompleteView extends ConsumerStatefulWidget {
   const AccountIncompleteView({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<AccountIncompleteView> createState() =>
+      _AccountIncompleteViewState();
+}
+
+class _AccountIncompleteViewState extends ConsumerState<AccountIncompleteView> {
+  bool _checking = false;
+
+  /// Re-reads the profile and says what it found.
+  ///
+  /// Both buttons on this screen used to be fire-and-forget, so the app's
+  /// designated escape hatch from a broken account could fail twice over in
+  /// silence — returning the user to exactly the trapped state this screen
+  /// exists to end, with no evidence anything had been attempted. Repeated taps
+  /// then read as a frozen screen.
+  Future<void> _retry() async {
+    final notify = AppSnackBar.of(context);
+    setState(() => _checking = true);
+    try {
+      final user = await ref.refresh(currentUserProvider.future);
+      if (!mounted) return;
+      // On success the router's gate moves on by itself and this screen is
+      // gone, so there is only ever a message to show in the failing case.
+      if (user == null) {
+        notify.failure(
+          'Your profile is still missing. Sign out and register again, or ask '
+          'a 3ZERO Admin to check the account.',
+        );
+      }
+    } catch (error) {
+      if (!mounted) return;
+      notify.failure(
+        'The account could not be checked. ${friendlyErrorMessage(error)}',
+      );
+    } finally {
+      if (mounted) setState(() => _checking = false);
+    }
+  }
+
+  Future<void> _signOut() async {
+    final notify = AppSnackBar.of(context);
+    await ref.read(authControllerProvider.notifier).signOut();
+    if (!mounted) return;
+    final error = ref.read(authControllerProvider).error;
+    if (error != null) {
+      notify.failure('Could not sign out. ${friendlyErrorMessage(error)}');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final isSigningOut = ref.watch(authControllerProvider).isLoading;
+    final busy = isSigningOut || _checking;
 
     return Scaffold(
       body: SafeArea(
@@ -64,23 +116,23 @@ class AccountIncompleteView extends ConsumerWidget {
                   const SizedBox(height: AppTheme.gapLg),
                   FilledButton.icon(
                     // The profile stream may simply have failed to read.
-                    // Invalidating re-subscribes, and if the document is there
+                    // Refreshing re-subscribes, and if the document is there
                     // after all the router's gate moves on by itself.
-                    onPressed: isSigningOut
-                        ? null
-                        : () => ref.invalidate(currentUserProvider),
-                    icon: const Icon(Icons.refresh),
-                    label: const Text('Try again'),
+                    onPressed: busy ? null : _retry,
+                    icon: _checking
+                        ? const SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.refresh),
+                    label: Text(_checking ? 'Checking…' : 'Try again'),
                   ),
                   const SizedBox(height: AppTheme.gapSm),
                   OutlinedButton.icon(
-                    onPressed: isSigningOut
-                        ? null
-                        : () => ref
-                              .read(authControllerProvider.notifier)
-                              .signOut(),
+                    onPressed: busy ? null : _signOut,
                     icon: const Icon(Icons.logout),
-                    label: const Text('Sign out'),
+                    label: Text(isSigningOut ? 'Signing out…' : 'Sign out'),
                   ),
                   const SizedBox(height: AppTheme.gapMd),
                   Text(

@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../controllers/auth_controller.dart';
+import '../../core/network_errors.dart';
 import '../../core/theme.dart';
+import 'app_snackbar.dart';
 
 /// Recovery UI when Auth or the signed-in profile cannot be read.
 ///
@@ -66,13 +68,29 @@ class StartupErrorView extends ConsumerWidget {
                   if (auth.value != null) ...[
                     const SizedBox(height: AppTheme.gapSm),
                     OutlinedButton.icon(
+                      // Awaited and reported. Fire-and-forget left a user on
+                      // the app's recovery screen believing they had signed
+                      // out on a handset the codebase itself describes as
+                      // often shared or borrowed.
                       onPressed: isSigningOut
                           ? null
-                          : () => ref
-                                .read(authControllerProvider.notifier)
-                                .signOut(),
+                          : () async {
+                              final notify = AppSnackBar.of(context);
+                              await ref
+                                  .read(authControllerProvider.notifier)
+                                  .signOut();
+                              final error = ref
+                                  .read(authControllerProvider)
+                                  .error;
+                              if (error != null) {
+                                notify.failure(
+                                  'Could not sign out. '
+                                  '${friendlyErrorMessage(error)}',
+                                );
+                              }
+                            },
                       icon: const Icon(Icons.logout),
-                      label: const Text('Sign out'),
+                      label: Text(isSigningOut ? 'Signing out…' : 'Sign out'),
                     ),
                   ],
                 ],

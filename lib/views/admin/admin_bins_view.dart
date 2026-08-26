@@ -16,6 +16,7 @@ import '../../services/bin_admin_service.dart';
 import '../../services/location_service.dart';
 import '../shared/content_state.dart';
 import '../shared/app_shell.dart';
+import '../shared/notice_card.dart';
 
 /// Bin registration and printable QR generation (F2.1).
 ///
@@ -570,22 +571,18 @@ class _FixNote extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-
     if (!fix.hasFix) {
       final needsAppSettings = fix.outcome == LocationOutcome.deniedForever;
       final needsLocationSettings =
           fix.outcome == LocationOutcome.serviceDisabled;
 
-      return _Notice(
+      return NoticeCard(
         icon: Icons.location_off_outlined,
-        background: scheme.errorContainer,
-        foreground: scheme.onErrorContainer,
+        tone: NoticeTone.error,
         title: fix.displayMessage,
-        body: 'You can still type the coordinates in by hand.',
+        message: 'You can still type the coordinates in by hand.',
         action: needsAppSettings || needsLocationSettings
-            ? _NoticeAction(
+            ? NoticeAction(
                 label: 'Open settings',
                 onPressed: needsAppSettings
                     ? onOpenAppSettings
@@ -601,12 +598,11 @@ class _FixNote extends StatelessWidget {
         : 'accurate to ±${accuracy.round()} m';
 
     if (tooRoughForRadius) {
-      return _Notice(
+      return NoticeCard(
         icon: Icons.gps_not_fixed,
-        background: scheme.errorContainer,
-        foreground: scheme.onErrorContainer,
+        tone: NoticeTone.error,
         title: 'This fix is too rough for a ${radius?.round()} m radius',
-        body:
+        message:
             'The fix is $accuracyText, so the recorded centre could sit '
             'further from the bin than half the geofence. Residents standing '
             'at the bin would be refused, and nothing in their submission '
@@ -615,84 +611,15 @@ class _FixNote extends StatelessWidget {
       );
     }
 
-    return _Notice(
+    return NoticeCard(
       icon: Icons.gps_fixed,
-      background: scheme.successContainer,
-      foreground: scheme.onSuccessContainer,
+      tone: NoticeTone.success,
       title: 'Position captured, $accuracyText',
-      body: 'Check the label names this bin, then register it.',
+      message: 'Check the label names this bin, then register it.',
     );
   }
 }
 
-class _NoticeAction {
-  const _NoticeAction({required this.label, required this.onPressed});
-  final String label;
-  final VoidCallback onPressed;
-}
-
-class _Notice extends StatelessWidget {
-  const _Notice({
-    required this.icon,
-    required this.background,
-    required this.foreground,
-    required this.title,
-    required this.body,
-    this.action,
-  });
-
-  final IconData icon;
-  final Color background;
-  final Color foreground;
-  final String title;
-  final String body;
-  final _NoticeAction? action;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Container(
-      padding: const EdgeInsets.all(AppTheme.gapMd),
-      decoration: BoxDecoration(
-        color: background,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(icon, color: foreground, size: 20),
-          const SizedBox(width: AppTheme.gapSm),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: foreground,
-                  ),
-                ),
-                const SizedBox(height: AppTheme.gapXs),
-                Text(
-                  body,
-                  style: theme.textTheme.bodySmall?.copyWith(color: foreground),
-                ),
-                if (action != null) ...[
-                  const SizedBox(height: AppTheme.gapSm),
-                  OutlinedButton(
-                    onPressed: action!.onPressed,
-                    child: Text(action!.label),
-                  ),
-                ],
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 class _BinCard extends StatelessWidget {
   const _BinCard({

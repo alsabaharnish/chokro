@@ -12,6 +12,7 @@ import '../../core/theme.dart';
 import '../../models/order_model.dart';
 import '../../services/order_service.dart';
 import '../shared/content_state.dart';
+import '../shared/notice_card.dart';
 import '../shared/prototype_payment_dialog.dart';
 
 /// Checkout (F4.4, F4.5, F4.8).
@@ -41,11 +42,24 @@ class CheckoutView extends ConsumerStatefulWidget {
 class _CheckoutViewState extends ConsumerState<CheckoutView> {
   bool _placing = false;
   CheckoutOutcome? _receipt;
+
+  /// How many points the buyer asked for, kept so the receipt can say when the
+  /// server applied fewer. Without it, `CheckoutOutcome.appliedLessThan` — a
+  /// helper written for exactly this — had no caller, and a buyer who redeemed
+  /// the maximum saw a smaller discount than the screen had quoted with no
+  /// explanation.
+  int _pointsRequested = 0;
   SettlementMethod _settlementMethod = SettlementMethod.cashOnDelivery;
 
   @override
   Widget build(BuildContext context) {
     final quote = ref.watch(checkoutQuoteProvider);
+    // Watched here as well as on the cart screen. Without it, a listing
+    // withdrawn or sold out while the buyer was on this screen silently dropped
+    // out of the totals — so they committed to a total computed over a
+    // different basket, pressed "Simulate successful payment", and only then
+    // met a server refusal this screen gave them no way to act on.
+    final problems = ref.watch(unavailableCartItemsProvider);
     final policyAsync = ref.watch(pointsPolicyProvider);
     final balanceAsync = ref.watch(spendableBalanceProvider);
 
@@ -57,7 +71,7 @@ class _CheckoutViewState extends ConsumerState<CheckoutView> {
         automaticallyImplyLeading: receipt == null,
       ),
       body: receipt != null
-          ? _Receipt(outcome: receipt)
+          ? _Receipt(outcome: receipt, pointsRequested: _pointsRequested)
           : policyAsync.when(
               loading: () => const ContentLoading(
                 label: 'Reading the points policy…',
@@ -95,6 +109,10 @@ class _CheckoutViewState extends ConsumerState<CheckoutView> {
                   return const ContentLoading(label: 'Reading your balance…');
                 }
 
+                if (problems.isNotEmpty) {
+                  return _BlockedByCartProblems(problems: problems);
+                }
+
                 if (quote.isEmpty) {
                   return ContentEmpty(
                     icon: Icons.shopping_cart_outlined,
@@ -130,6 +148,7 @@ class _CheckoutViewState extends ConsumerState<CheckoutView> {
     }
 
     setState(() => _placing = true);
+    _pointsRequested = quote.pointsApplied;
     try {
       final outcome = await ref
           .read(orderActionsProvider)
@@ -667,9 +686,12 @@ class _TotalsCard extends StatelessWidget {
 /// Reports the server's figures rather than the ones the buyer was shown. They
 /// are almost always the same; when they are not, the difference is the point.
 class _Receipt extends ConsumerWidget {
-  const _Receipt({required this.outcome});
+  const _Receipt({required this.outcome, required this.pointsRequested});
 
   final CheckoutOutcome outcome;
+
+  /// What the buyer asked to spend, which is not always what was spent.
+  final int pointsRequested;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -724,6 +746,24 @@ class _Receipt extends ConsumerWidget {
                             value:
                                 '${outcome.pointsApplied} pts '
                                 '(-${formatTaka(outcome.discount)})',
+                          ),
+                        // The screen promises the buyer will be told if fewer
+                        // points could be spent than they chose. This is where
+                        // that promise is kept.
+                        if (outcome.appliedLessThan(pointsRequested))
+                          Padding(
+                            padding: const EdgeInsets.only(
+                              top: AppTheme.gapXs,
+                            ),
+                            child: Text(
+                              'Prices changed while you were checking out, so '
+                              'only ${outcome.pointsApplied} of the '
+                              '$pointsRequested points you chose could be '
+                              'spent. The rest are still in your balance.',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
                           ),
                         const Divider(),
                         _ReceiptRow(
@@ -890,6 +930,63 @@ class _CheckoutUnavailable extends StatelessWidget {
           ),
         ),
       ),
+    );
+  }
+}
+
+/// Stands in for the whole checkout body while any cart line is unbuyable.
+///
+/// Blocking rather than warning, deliberately. The server refuses the whole
+/// transaction if a line has been withdrawn or has gone short of stock, so
+/// there is no version of this screen where the buyer can usefully continue —
+/// and letting them reach the payment step first means the refusal arrives
+/// after they have approved a payment.
+class _BlockedByCartProblems extends StatelessWidget {
+  const _BlockedByCartProblems({required this.problems});
+
+  final List<UnavailableCartItem> problems;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+
+    return ListView(
+      padding: const EdgeInsets.all(AppTheme.gapMd),
+      children: [
+        Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: AppTheme.maxFormWidth),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                NoticeCard(
+                  icon: Icons.error_outline,
+                  tone: NoticeTone.error,
+                  title: problems.length == 1
+                      ? 'One item can no longer be ordered'
+                      : '${problems.length} items can no longer be ordered',
+                  message: problems
+                      .map((problem) => '${problem.title} — ${problem.reason}')
+                      .join('\n'),
+                  action: NoticeAction(
+                    label: 'Back to cart',
+                    onPressed: () => context.go('/cart'),
+                  ),
+                ),
+                const SizedBox(height: AppTheme.gapLg),
+                Text(
+                  'Nothing has been ordered or charged. Remove or reduce those '
+                  'lines in the cart and come back.',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
     );
   }
 }

@@ -26,26 +26,33 @@ class AppealButton extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final alreadyAppealed = ref
-        .watch(appealedSubjectIdsProvider)
-        .contains('${subjectType.name}:$subjectId');
+    // Null until the user's appeals have actually loaded. While it is null the
+    // button cannot know which of its two jobs it has, so it does neither —
+    // offering "Appeal this decision" on a guess sent the user to write a
+    // duplicate the rules then refused.
+    final appealed = ref.watch(appealedSubjectIdsProvider);
+    final alreadyAppealed = appealed?.contains(
+      '${subjectType.name}:$subjectId',
+    );
 
     return Align(
       alignment: Alignment.centerLeft,
       child: TextButton.icon(
-        onPressed: () => alreadyAppealed
-            ? context.push('/appeals')
-            : context.push(
-                '/appeals/new?type=${subjectType.name}&id=$subjectId',
-              ),
+        onPressed: alreadyAppealed == null
+            ? null
+            : () => alreadyAppealed
+                  ? context.push('/appeals')
+                  : context.push(
+                      '/appeals/new?type=${subjectType.name}&id=$subjectId',
+                    ),
         icon: Icon(
-          alreadyAppealed
+          alreadyAppealed == true
               ? Icons.mark_email_read_outlined
               : Icons.gavel_outlined,
           size: 18,
         ),
         label: Text(
-          alreadyAppealed ? 'You appealed this' : 'Appeal this decision',
+          alreadyAppealed == true ? 'You appealed this' : 'Appeal this decision',
         ),
       ),
     );

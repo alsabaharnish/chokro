@@ -305,7 +305,7 @@ class ClaimModel {
   String get userFacingStatus {
     switch (status) {
       case ClaimStatus.pending:
-        return 'Pending review';
+        return 'Waiting for review';
       case ClaimStatus.approved:
         return 'Approved';
       case ClaimStatus.rejected:

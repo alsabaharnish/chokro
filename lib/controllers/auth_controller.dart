@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../services/auth_service.dart';
@@ -175,6 +177,42 @@ class AuthController extends AsyncNotifier<void> {
     });
   }
 }
+
+/// Whether the signed-in account can act, re-evaluated when a timed suspension
+/// lapses.
+///
+/// Nothing server-side rewrites `users.status` when `suspendedUntil` passes —
+/// [UserModel.isActiveAt] compares the stored instant against the clock, and
+/// `firestore.rules` does the same against `request.time`. So a user whose
+/// 24-hour suspension expired while they had the app open kept seeing the red
+/// "Account suspended" card and every earning action greyed out, with the app
+/// insisting the suspension was still in force. On Home a pull-to-refresh
+/// cleared it; on Profile there is no refresh gesture, so it persisted for the
+/// rest of the session and the remedy was undiscoverable.
+///
+/// Mirrors the [adminWorkdayProvider] idiom: schedule one timer on the
+/// boundary, cancel it on dispose.
+final accountActivityProvider = Provider.autoDispose<bool>((ref) {
+  final user = ref.watch(currentUserProvider).value;
+  if (user == null) return false;
+
+  final until = user.suspendedUntil;
+  final remaining = until?.difference(DateTime.now());
+
+  // Only for a boundary still ahead. A Timer with a non-positive duration fires
+  // on the next event-loop turn, and `invalidateSelf` would then spin. The
+  // extra second keeps the re-read strictly the far side of the boundary, so
+  // the recomputed `isActiveAt` cannot land on the same instant and repeat.
+  if (remaining != null && remaining > Duration.zero) {
+    final timer = Timer(
+      remaining + const Duration(seconds: 1),
+      ref.invalidateSelf,
+    );
+    ref.onDispose(timer.cancel);
+  }
+
+  return user.isActive;
+});
 
 final authControllerProvider = AsyncNotifierProvider<AuthController, void>(
   AuthController.new,

@@ -49,7 +49,10 @@ class HomeView extends ConsumerWidget {
             return const ContentLoading(label: 'Preparing your dashboard…');
           }
 
-          final suspended = !user.isActive;
+          // Via the provider, not `user.isActive` directly, so a timed
+          // suspension lifts the moment it expires rather than at the next
+          // pull-to-refresh.
+          final suspended = !ref.watch(accountActivityProvider);
           final adminWorkload = activeProfile == AccountProfile.admin
               ? ref.watch(adminWorkloadProvider)
               : AdminWorkload.empty;

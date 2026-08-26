@@ -478,7 +478,11 @@ class DisposalModel {
   String get userFacingStatus {
     switch (status) {
       case DisposalStatus.pending:
-        return 'Pending review';
+        // The same words as StatusChip and ClaimModel. Three phrases for one
+        // state invited the reader to look for a distinction that does not
+        // exist, in the flow where they are already anxious about whether
+        // anything is happening.
+        return 'Waiting for review';
       case DisposalStatus.autoApproved:
         return 'Approved';
       case DisposalStatus.manualApproved:

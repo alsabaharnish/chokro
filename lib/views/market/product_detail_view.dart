@@ -12,6 +12,7 @@ import '../../models/cart_model.dart';
 import '../../models/product_model.dart';
 import '../shared/content_state.dart';
 import '../shared/error_retry.dart';
+import '../shared/notice_card.dart';
 import 'product_card.dart';
 
 /// One listing, and the decision to buy it (F4.2, F4.3).
@@ -233,7 +234,7 @@ class _BuyRowState extends ConsumerState<_BuyRow> {
     final product = widget.product;
 
     if (widget.isOwnListing) {
-      return _Notice(
+      return const NoticeCard(
         icon: Icons.storefront_outlined,
         message:
             'This is your own listing. Buying from yourself is refused at '
@@ -241,13 +242,14 @@ class _BuyRowState extends ConsumerState<_BuyRow> {
       );
     }
     if (widget.suspended) {
-      return _Notice(
+      return const NoticeCard(
         icon: Icons.pause_circle_outline,
+        tone: NoticeTone.warning,
         message: 'Your account is suspended, so you cannot place an order.',
       );
     }
     if (product.isOutOfStock) {
-      return _Notice(
+      return const NoticeCard(
         icon: Icons.remove_shopping_cart_outlined,
         message: 'This is out of stock. The Greenpreneur may restock it.',
       );
@@ -350,37 +352,3 @@ class _BuyRowState extends ConsumerState<_BuyRow> {
   }
 }
 
-class _Notice extends StatelessWidget {
-  const _Notice({required this.icon, required this.message});
-
-  final IconData icon;
-  final String message;
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-
-    return Card(
-      color: scheme.surfaceContainerHighest,
-      child: Padding(
-        padding: const EdgeInsets.all(AppTheme.gapMd),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, color: scheme.onSurfaceVariant),
-            const SizedBox(width: AppTheme.gapMd),
-            Expanded(
-              child: Text(
-                message,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}

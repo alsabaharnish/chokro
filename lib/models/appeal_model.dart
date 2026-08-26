@@ -59,7 +59,7 @@ enum AppealStatus {
   String get label {
     switch (this) {
       case AppealStatus.pending:
-        return 'Awaiting review';
+        return 'Waiting for review';
       case AppealStatus.upheld:
         return 'Upheld';
       case AppealStatus.declined:

@@ -186,6 +186,11 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
           onRetry: () => ref.invalidate(currentUserProvider),
         ),
         data: (user) {
+          // Watched rather than read off `user` directly, so a timed suspension
+          // lifts the moment it expires. This screen has no refresh gesture, so
+          // without it a lapsed suspension persisted for the whole session with
+          // no discoverable remedy.
+          final active = ref.watch(accountActivityProvider);
           if (user == null) {
             return const _Message(
               icon: Icons.person_off_outlined,
@@ -206,8 +211,7 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
                   _Avatar(
                     user: user,
                     canEdit:
-                        activeProfile == AccountProfile.champion &&
-                        user.isActive,
+                        activeProfile == AccountProfile.champion && active,
                     isBusy: saving,
                     onUpload: _chooseProfilePhoto,
                   ),
@@ -215,7 +219,7 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
                   const AccountProfileSwitcher(),
                   const SizedBox(height: AppTheme.gapMd),
 
-                  if (!user.isActive) ...[
+                  if (!active) ...[
                     _SuspensionNotice(user: user),
                     const SizedBox(height: AppTheme.gapMd),
                   ],
@@ -312,12 +316,12 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
                     // with three controls on one screen disagreeing about the
                     // same suspension.
                     OutlinedButton.icon(
-                      onPressed: user.isActive
+                      onPressed: active
                           ? () => context.push('/apply-seller')
                           : null,
                       icon: const Icon(Icons.storefront_outlined),
                       label: Text(
-                        user.isActive
+                        active
                             ? 'Become a 3ZERO Greenpreneur'
                             : 'Become a 3ZERO Greenpreneur — unavailable '
                                   'while suspended',
@@ -326,7 +330,7 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
                   ],
                   const SizedBox(height: AppTheme.gapSm),
                   OutlinedButton.icon(
-                    onPressed: user.isActive
+                    onPressed: active
                         ? () {
                             ref
                                 .read(accountProfileControllerProvider.notifier)

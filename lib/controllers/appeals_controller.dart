@@ -17,11 +17,21 @@ final userAppealsProvider = StreamProvider.autoDispose<List<AppealModel>>((
   return ref.watch(appealServiceProvider).watchUserAppeals(uid);
 });
 
-/// The subject ids this user has already appealed. The submission history uses
-/// it to link to the existing appeal; deterministic ids and rules enforce the
-/// same one-per-subject invariant at the database boundary.
-final appealedSubjectIdsProvider = Provider.autoDispose<Set<String>>((ref) {
-  final appeals = ref.watch(userAppealsProvider).asData?.value ?? const [];
+/// The subject ids this user has already appealed, or null while unresolved.
+///
+/// The submission history uses it to link to the existing appeal; deterministic
+/// ids and rules enforce the same one-per-subject invariant at the database
+/// boundary.
+///
+/// Nullable rather than defaulting to the empty set. Empty-while-loading is
+/// indistinguishable from "nothing appealed yet", so [AppealButton] offered
+/// "Appeal this decision" for an already-appealed submission — and the rules
+/// then refused the duplicate with a message naming two conditions that were
+/// both true. Null lets the button decline to offer an action it cannot resolve
+/// yet, the way the rest of the app does.
+final appealedSubjectIdsProvider = Provider.autoDispose<Set<String>?>((ref) {
+  final appeals = ref.watch(userAppealsProvider).asData?.value;
+  if (appeals == null) return null;
   return appeals.map((appeal) => appeal.subjectKey).toSet();
 });
 

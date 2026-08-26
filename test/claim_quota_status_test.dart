@@ -42,20 +42,58 @@ void main() {
       expect(status.approvedThisWeek, 3);
       expect(status.remaining, 0);
       expect(status.isExhausted, isTrue);
-      expect(status.summary, 'You have used all 3 claims for this week.');
+      expect(
+        status.summary,
+        'All 3 approved eco-actions for this week are used. '
+        'The count resets on Monday.',
+      );
     });
 
     test('a fresh week reads as a full allowance', () {
       final status = ClaimQuotaStatus.fromJson(serverQuotaBody(used: 0));
 
       expect(status.remaining, 3);
-      expect(status.summary, '3 claims left this week.');
+      expect(status.summary, '3 more eco-actions can be approved this week.');
     });
 
     test('one left is worded in the singular', () {
       final status = ClaimQuotaStatus.fromJson(serverQuotaBody(used: 2));
 
-      expect(status.summary, '1 claim left this week.');
+      expect(status.summary, '1 more eco-action can be approved this week.');
+    });
+
+    test('the summary says the count is over approvals, not submissions', () {
+      // The wording is the whole point of this one. "3 claims left this week"
+      // on a submission form reads as a submission budget, so a Champion
+      // submitted five, was told each was under review, and collected two
+      // rejections they had no way to anticipate. The counter is incremented
+      // in `approveClaim`, never on create.
+      final fresh = ClaimQuotaStatus.fromJson(serverQuotaBody(used: 0));
+      final spent = ClaimQuotaStatus.fromJson(serverQuotaBody(used: 3));
+
+      for (final summary in [fresh.summary, spent.summary]) {
+        expect(
+          summary.toLowerCase(),
+          contains('approved'),
+          reason: 'the number counts approvals and must say so',
+        );
+      }
+      expect(spent.summary, contains('resets on Monday'));
+    });
+
+    test('carries the per-claim award the server already sends', () {
+      // Parsed away before this, so the submission form asked the user to
+      // photograph and describe an eco-action without ever saying what one is
+      // worth — the figure only appeared after approval, days later.
+      final status = ClaimQuotaStatus.fromJson(serverQuotaBody(claimAward: 15));
+
+      expect(status.claimAward, 15);
+    });
+
+    test('a missing award falls back to zero rather than throwing', () {
+      final body = serverQuotaBody()..remove('claimAward');
+
+      expect(ClaimQuotaStatus.fromJson(body).claimAward, 0);
     });
 
     test('a counter above the limit cannot report negative headroom', () {

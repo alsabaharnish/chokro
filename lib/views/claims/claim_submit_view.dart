@@ -11,6 +11,7 @@ import '../../models/claim_model.dart';
 import '../shared/app_shell.dart';
 import '../../models/appeal_model.dart';
 import '../appeals/appeal_button.dart';
+import '../shared/content_state.dart';
 import '../shared/error_retry.dart';
 
 /// Submitting a self-reported eco-action (F6.1, F6.2, F6.4).
@@ -18,20 +19,58 @@ import '../shared/error_retry.dart';
 /// The screen is honest with the user about what this route is. A claim pays
 /// less than a disposal and always waits for a person, and saying so up front
 /// is better than letting someone expect an instant credit and feel cheated.
-class ClaimSubmitView extends ConsumerWidget {
+class ClaimSubmitView extends ConsumerStatefulWidget {
   const ClaimSubmitView({super.key});
 
   static const double _maxContentWidth = 640;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ClaimSubmitView> createState() => _ClaimSubmitViewState();
+}
+
+class _ClaimSubmitViewState extends ConsumerState<ClaimSubmitView> {
+  /// Whether the submission being confirmed was made on *this* visit.
+  ///
+  /// `ClaimDraftController` calls `ref.keepAlive()`, so a completed draft
+  /// outlives the route. Gating the confirmation on `draft.submittedId` alone
+  /// therefore meant that anyone who left the confirmation with the back button
+  /// — rather than with "Done" — found the primary path to logging an
+  /// eco-action broken ever after: `/claims/new` opened straight onto "Sent for
+  /// review", describing a claim from an earlier visit, with no form at all.
+  bool _submittedHere = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Release a terminal draft left behind by an earlier visit, along with the
+    // compressed photo bytes it was pinning in memory for the rest of the
+    // session. Deferred a frame because this runs during the parent's build.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (ref.read(claimDraftProvider).submittedId != null) {
+        ref.read(claimDraftProvider.notifier).reset();
+      }
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final draft = ref.watch(claimDraftProvider);
     final quota = ref.watch(claimQuotaProvider);
     final user = ref.watch(currentUserProvider).value;
     final theme = Theme.of(context);
 
-    if (draft.submittedId != null) {
-      return const _ClaimSubmitted();
+    // Read from the resolved quota only, so the informational note keeps its
+    // existing wording while the figure is unavailable.
+    final award = quota.asData?.value.claimAward ?? 0;
+    final awardLine = award > 0
+        ? 'An approved eco-action is worth $award points. '
+        : '';
+
+    if (_submittedHere && draft.submittedId != null) {
+      return _ClaimSubmitted(
+        onLogAnother: () => setState(() => _submittedHere = false),
+      );
     }
 
     // The quota was read, shown, and then ignored by both buttons. A Champion
@@ -60,13 +99,36 @@ class ClaimSubmitView extends ConsumerWidget {
             padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
             children: [
               quota.when(
-                loading: () => const LinearProgressIndicator(),
-                error: (error, _) => _Notice(
-                  icon: Icons.cloud_off_outlined,
-                  tone: theme.colorScheme.onSurfaceVariant,
-                  text:
-                      'Your weekly quota could not be checked. You can still '
-                      'submit; the server will decide.',
+                // The bar alone could spin for 90 seconds on a cold server
+                // saying nothing, and gave a screen reader nothing at all —
+                // the exact failure mode `ContentLoading`'s doc identifies.
+                loading: () => const Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    LinearProgressIndicator(
+                      semanticsLabel: 'Checking your weekly quota',
+                    ),
+                    SlowServerNote(),
+                  ],
+                ),
+                error: (error, _) => Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _Notice(
+                      icon: Icons.cloud_off_outlined,
+                      tone: theme.colorScheme.onSurfaceVariant,
+                      text:
+                          'Your weekly quota could not be checked. You can '
+                          'still submit; the server will decide.',
+                    ),
+                    // Without this the number was unrecoverable without
+                    // leaving the screen and coming back.
+                    TextButton.icon(
+                      onPressed: () => ref.invalidate(claimQuotaProvider),
+                      icon: const Icon(Icons.refresh),
+                      label: const Text('Check again'),
+                    ),
+                  ],
                 ),
                 data: (q) => _Notice(
                   icon: q.isExhausted
@@ -82,11 +144,15 @@ class ClaimSubmitView extends ConsumerWidget {
               _Notice(
                 icon: Icons.person_search_outlined,
                 tone: theme.colorScheme.onSurfaceVariant,
+                // The award is read from the `data` branch only, so the
+                // existing sentence stands unchanged while the quota is still
+                // loading or has errored. "Pays more" is a comparison against
+                // a figure the user did not otherwise have on this screen.
                 text:
-                    'Every eco-action is checked by a person, so points '
-                    'arrive after review rather than straight away. Disposals '
-                    'at a registered bin are verified automatically and pay '
-                    'more.',
+                    '${awardLine}Every eco-action is checked by a person, so '
+                    'points arrive after review rather than straight away. '
+                    'Disposals at a registered bin are verified automatically '
+                    'and pay more.',
               ),
               const SizedBox(height: 20),
               Text(
@@ -312,8 +378,14 @@ class ClaimSubmitView extends ConsumerWidget {
                 onPressed:
                     draft.isReadyToSubmit && !draft.isSubmitting && !quotaSpent
                     ? () async {
-                        await ref.read(claimDraftProvider.notifier).submit();
+                        final id = await ref
+                            .read(claimDraftProvider.notifier)
+                            .submit();
                         if (!context.mounted) return;
+                        if (id != null) {
+                          setState(() => _submittedHere = true);
+                          return;
+                        }
                         final error = ref.read(claimDraftProvider).error;
                         if (error == null) return;
                         final messenger = ScaffoldMessenger.of(context);
@@ -375,7 +447,11 @@ class ClaimSubmitView extends ConsumerWidget {
 }
 
 class _ClaimSubmitted extends ConsumerWidget {
-  const _ClaimSubmitted();
+  const _ClaimSubmitted({required this.onLogAnother});
+
+  /// Clears the parent's per-visit flag as well as the draft, so "Log another"
+  /// really does return to an empty form.
+  final VoidCallback onLogAnother;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -387,46 +463,59 @@ class _ClaimSubmitted extends ConsumerWidget {
         : 'If approved, Chokro may share it as an anonymous Champion story.';
     return AppShell(
       title: 'Claim submitted',
-      child: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                Icons.check_circle_outline,
-                size: 56,
-                color: theme.colorScheme.primary,
-              ),
-              const SizedBox(height: 16),
-              Text('Sent for review', style: theme.textTheme.titleLarge),
-              const SizedBox(height: 8),
-              Text(
-                'A reviewer will look at your photo. Points are added to your '
-                'wallet only if it is approved, and you will be told either '
-                'way. $publication',
-                textAlign: TextAlign.center,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+      // Scrollable. At accessibility text sizes this overflowed, and the
+      // overflow pushed "Done" and "Log another" off the bottom with no way to
+      // reach them — so the screen became unexitable except by the system back
+      // gesture, which is the very dead end the comment below records this
+      // screen was fixed to avoid.
+      child: SingleChildScrollView(
+        padding: const EdgeInsets.all(AppTheme.gapXl),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(
+              maxWidth: ClaimSubmitView._maxContentWidth,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(
+                  Icons.check_circle_outline,
+                  size: 56,
+                  color: theme.colorScheme.primary,
                 ),
-              ),
-              const SizedBox(height: AppTheme.gapLg),
-              // "Log another" was the only way off this screen, so a user who
-              // was finished had to log a second claim they did not want, or use
-              // the system back gesture, to leave.
-              FilledButton(
-                onPressed: () {
-                  ref.read(claimDraftProvider.notifier).reset();
-                  context.go('/home');
-                },
-                child: const Text('Done'),
-              ),
-              const SizedBox(height: AppTheme.gapSm),
-              TextButton(
-                onPressed: () => ref.read(claimDraftProvider.notifier).reset(),
-                child: const Text('Log another'),
-              ),
-            ],
+                const SizedBox(height: AppTheme.gapMd),
+                Text('Sent for review', style: theme.textTheme.titleLarge),
+                const SizedBox(height: AppTheme.gapSm),
+                Text(
+                  'A reviewer will look at your photo. Points are added to '
+                  'your wallet only if it is approved, and you will be told '
+                  'either way. $publication',
+                  textAlign: TextAlign.center,
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+                const SizedBox(height: AppTheme.gapLg),
+                // "Log another" was the only way off this screen, so a user
+                // who was finished had to log a second claim they did not
+                // want, or use the system back gesture, to leave.
+                FilledButton(
+                  onPressed: () {
+                    ref.read(claimDraftProvider.notifier).reset();
+                    context.go('/home');
+                  },
+                  child: const Text('Done'),
+                ),
+                const SizedBox(height: AppTheme.gapSm),
+                TextButton(
+                  onPressed: () {
+                    ref.read(claimDraftProvider.notifier).reset();
+                    onLogAnother();
+                  },
+                  child: const Text('Log another'),
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -475,14 +564,18 @@ class ClaimHistoryList extends ConsumerWidget {
                       : theme.colorScheme.onSurfaceVariant,
                 ),
                 title: Text(claim.actionType.label),
+                // The rejection reason is deliberately no longer joined in
+                // here. Middot-separated after the age, the single most
+                // important thing on the row — why it was refused, and
+                // therefore what to change — was typographically
+                // indistinguishable from "3d ago". It gets the labelled,
+                // error-toned treatment below, the way a rejected *disposal*
+                // has always presented the same information.
                 subtitle: Text(
                   [
                     claim.userFacingStatus,
                     claim.publicationLabel,
                     formatAge(claim.createdAt),
-                    if (claim.status.isRejected &&
-                        claim.rejectionReason != null)
-                      claim.rejectionReason!,
                   ].join(' · '),
                   style: theme.textTheme.bodySmall,
                 ),
@@ -496,6 +589,11 @@ class ClaimHistoryList extends ConsumerWidget {
                       )
                     : null,
               ),
+              if (claim.status.isRejected && claim.rejectionReason != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: AppTheme.gapSm),
+                  child: _RejectionNote(reason: claim.rejectionReason!),
+                ),
               // The same appeal route as a rejected disposal (F5.4). A claim is
               // the weaker verification route, so a rejection here rests on one
               // administrator's reading of one photograph — which is exactly the
@@ -509,6 +607,51 @@ class ClaimHistoryList extends ConsumerWidget {
           ],
         );
       },
+    );
+  }
+}
+
+/// Why a claim was refused, given its own labelled block.
+///
+/// Mirrors the shape `submission_history_view.dart` uses for a rejected
+/// disposal, so a Champion reading about a rejected eco-action and a rejected
+/// disposal meets the same treatment for the same information.
+class _RejectionNote extends StatelessWidget {
+  const _RejectionNote({required this.reason});
+
+  final String reason;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Icon(Icons.info_outline, size: 16, color: scheme.error),
+        const SizedBox(width: AppTheme.gapSm),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Why it was rejected',
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: scheme.error,
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              Text(
+                reason,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
 }

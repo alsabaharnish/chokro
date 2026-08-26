@@ -113,9 +113,21 @@ class _CatalogViewState extends ConsumerState<CatalogView> {
                 ref.read(catalogFilterProvider.notifier).setCategory(category),
             onOpenCart: () => context.push('/cart'),
           ),
-          const Divider(height: 1),
+          // The in-flight signal for a *refinement* goes here, where it costs
+          // the reader nothing, rather than over the results.
+          catalogAsync.isLoading
+              ? const LinearProgressIndicator(minHeight: 2)
+              : const Divider(height: 1),
           Expanded(
             child: catalogAsync.when(
+              // Keeps the previous results on screen while a new query
+              // resolves. Without it every category tap and every debounced
+              // keystroke blanked the whole grid to a centred spinner and reset
+              // the scroll position — filtering felt like a page reload, and on
+              // a slow connection the buyer lost their place on every
+              // refinement. The first load is unaffected: there is no previous
+              // value to keep, so `ContentLoading` still shows.
+              skipLoadingOnReload: true,
               loading: () => const ContentLoading(label: 'Loading the shop…'),
               error: (error, _) => ErrorRetry(
                 error: error,

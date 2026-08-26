@@ -26,6 +26,13 @@ String? validateEmail(String? value) {
   if (!_emailPattern.hasMatch(email)) {
     return 'That does not look like an email address';
   }
+  // Mirrors `validString(u.email, 3, 254)` in firestore.rules. Rare in
+  // practice, but an unbounded field here is exactly the failure mode
+  // [TextLimits] exists to eliminate: a value the form accepts, the rules
+  // refuse, and a bare permission-denied that cannot name the field.
+  if (email.length > TextLimits.emailMax) {
+    return 'Email addresses are limited to ${TextLimits.emailMax} characters';
+  }
   return null;
 }
 
@@ -60,6 +67,10 @@ String? validateNewPassword(String? value) {
 /// `ProductLimits` already documents for the marketplace bounds.
 class TextLimits {
   const TextLimits._();
+
+  /// `users.email`.
+  static const int emailMin = 3;
+  static const int emailMax = 254;
 
   /// `users.name`.
   static const int nameMin = 2;

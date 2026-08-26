@@ -213,12 +213,21 @@ class _AppealFormViewState extends ConsumerState<AppealFormView> {
   }
 
   /// Rules refuse an appeal that does not name the caller's own *rejected*
-  /// submission, and they give no reason for it. This names the two conditions
-  /// so the user is not left with "missing or insufficient permissions".
+  /// submission, and they give no reason for it. This names the conditions so
+  /// the user is not left with "missing or insufficient permissions".
+  ///
+  /// All three are named, including the one this message used to omit. A
+  /// duplicate appeal is a *second* `set()` on a deterministic document id,
+  /// which the rules treat as an update and allow only for an admin — so the
+  /// most likely reader of this message was being told they did not own their
+  /// own rejected submission, which is false twice over, with no way to work
+  /// out that the appeal already existed or where to read the answer.
   String _failureMessage(Object error) {
     if (error.toString().contains('permission-denied')) {
       return 'That appeal was refused. You can only appeal your own '
-          'submissions, and only ones that were rejected.';
+          'submissions, only ones that were rejected, and only once — if you '
+          'have already appealed this, the answer will appear on your appeals '
+          'screen.';
     }
     // Everything that is not the refusal above — an offline write, a quota
     // error — still reached the appellant as a raw exception.

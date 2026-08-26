@@ -308,7 +308,10 @@ class ClaimDraftController extends Notifier<ClaimDraft> {
         submittedPublicationMode: publicationMode,
         clearError: true,
       );
-      ref.invalidate(claimQuotaProvider);
+      // No `ref.invalidate(claimQuotaProvider)` here. The quota counts
+      // *approvals*, which a create cannot move — so this only ever re-fetched
+      // an identical body over a 90-second-timeout HTTP call, on the frame that
+      // renders the confirmation.
       return id;
     } on PhotoUploadException catch (err) {
       state = state.copyWith(isSubmitting: false, error: err.message);
