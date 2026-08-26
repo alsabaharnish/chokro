@@ -128,6 +128,29 @@ function validate(policy) {
   if (policy.lockoutHours > 24 * 7) {
     problems.push('Lockout window may not exceed one week.');
   }
+  // Mirrors the same invariant in `lib/core/points_policy.dart`. Only the
+  // integer quotient of these two numbers is ever used — `pointsPerTaka`
+  // truncates and floors at 1 — so an indivisible pair is applied at a rate
+  // that is neither what the admin typed nor derivable from it, and an inverted
+  // pair is applied at 1 point per taka, giving away far more than intended.
+  if (policy.redemptionPointsPerBlock > 0 && policy.redemptionTakaPerBlock > 0) {
+    if (policy.redemptionTakaPerBlock > policy.redemptionPointsPerBlock) {
+      problems.push(
+        'Redemption block: points must be at least the taka figure — a block ' +
+          'worth more taka than it costs points cannot be applied.',
+      );
+    } else if (
+      policy.redemptionPointsPerBlock % policy.redemptionTakaPerBlock !==
+      0
+    ) {
+      problems.push(
+        `Redemption block: ${policy.redemptionPointsPerBlock} points does not ` +
+          `divide evenly into ${policy.redemptionTakaPerBlock} BDT, so the ` +
+          `rate actually applied would be ${pointsPerTaka(policy)} points ` +
+          'per taka.',
+      );
+    }
+  }
   if (policy.claimAward >= policy.disposalAward) {
     problems.push(
       `Claim award (${policy.claimAward}) must be lower than disposal award ` +

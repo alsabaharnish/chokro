@@ -5,6 +5,7 @@ import '../../core/constants.dart';
 import '../../core/theme.dart';
 import '../../core/validators.dart';
 import '../../models/seller_application_model.dart';
+import '../shared/app_snackbar.dart';
 import '../shared/app_shell.dart';
 import '../shared/error_retry.dart';
 
@@ -41,25 +42,30 @@ class _SellerApplicationViewState extends ConsumerState<SellerApplicationView> {
     if (!mounted) return;
 
     final error = ref.read(sellerApplicationControllerProvider).error;
-    final scheme = Theme.of(context).colorScheme;
+    final notify = AppSnackBar.of(context);
 
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(
-            // `error.toString()` used to go straight to the applicant, which
-            // meant a Firestore permission-denied stack prefix was the feedback
-            // on their business application.
-            error == null
-                ? 'Application submitted for review'
-                : 'Your application could not be sent. Check your connection '
-                      'and try again.',
-          ),
-          backgroundColor: error != null ? scheme.errorContainer : null,
-          showCloseIcon: error != null,
-        ),
+    // Through `AppSnackBar`, which cannot get the pairing wrong. Hand-rolled,
+    // this overrode `backgroundColor` to `errorContainer` and left the text at
+    // Material's default `onInverseSurface` — the 1.70:1 combination that class
+    // was written to end, so every failed application reported itself
+    // invisibly. It also carries the error icon, which is what distinguishes
+    // the two outcomes without colour vision.
+    if (error == null) {
+      notify.success('Application submitted for review');
+    } else {
+      // Not every failure is the network. The rules refuse a second
+      // application while one is still pending, and telling that applicant to
+      // check their connection sends them to fix the wrong thing.
+      final denied = error.toString().contains('permission-denied');
+      notify.failure(
+        denied
+            ? 'Your application could not be sent. If you already have an '
+                  'application waiting, that is why — check your profile for '
+                  'its status.'
+            : 'Your application could not be sent. Check your connection and '
+                  'try again.',
       );
+    }
 
     if (error == null) {
       _businessNameController.clear();

@@ -10,6 +10,7 @@ import 'package:share_plus/share_plus.dart';
 
 import '../../core/eco_action_photocard.dart';
 import '../../models/claim_model.dart';
+import '../shared/app_snackbar.dart';
 import 'eco_action_photocard.dart';
 
 /// Opens a WYSIWYG preview for an approved eco-action.
@@ -147,13 +148,14 @@ class _EcoActionPhotocardDialogState extends State<_EcoActionPhotocardDialog> {
   }) async {
     if (_busy) return;
     setState(() => _busy = true);
-    final messenger = ScaffoldMessenger.of(context);
+    // Through AppSnackBar, so a failure is distinguishable from the success
+    // above it by icon as well as colour.
+    final notify = AppSnackBar.of(context);
     try {
       await action();
     } catch (error) {
       if (!mounted) return;
-      messenger.hideCurrentSnackBar();
-      messenger.showSnackBar(SnackBar(content: Text(failure)));
+      notify.failure(failure);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -181,9 +183,7 @@ class _EcoActionPhotocardDialogState extends State<_EcoActionPhotocardDialog> {
       mimeType: MimeType.png,
     );
     if (!mounted || location == null) return;
-    final messenger = ScaffoldMessenger.of(context);
-    messenger.hideCurrentSnackBar();
-    messenger.showSnackBar(const SnackBar(content: Text('PNG saved.')));
+    AppSnackBar.of(context).success('PNG saved.');
   }, failure: 'The PNG could not be saved. Try again.');
 
   Future<void> _share(BuildContext buttonContext) => _run(() async {
@@ -223,166 +223,179 @@ class _EcoActionPhotocardDialogState extends State<_EcoActionPhotocardDialog> {
     final ready =
         !_preparing && _preparationError == null && !_busy && privacyReady;
 
-    return Material(
-      color: theme.colorScheme.surface,
-      child: SafeArea(
-        child: Column(
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 14, 10, 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Eco-action photocard',
-                          style: theme.textTheme.titleLarge,
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          'The exported PNG is 1080 × 1080.',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: theme.colorScheme.onSurfaceVariant,
+    // `ScaffoldMessenger` + `Scaffold` inside the dialog route, not around it.
+    // Without them `ScaffoldMessenger.of(context)` resolved to the root
+    // messenger installed on `MaterialApp`, which renders into the `Scaffold`
+    // on the route *underneath* — and this dialog is `Dialog.fullscreen` over
+    // an opaque `Material`, so every success and every failure was painted
+    // behind it and never seen. An admin who failed to save a PNG was told
+    // nothing at all.
+    return ScaffoldMessenger(
+      child: Scaffold(
+        backgroundColor: theme.colorScheme.surface,
+        body: SafeArea(
+          child: Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 14, 10, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Eco-action photocard',
+                            style: theme.textTheme.titleLarge,
                           ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    tooltip: 'Close preview',
-                    onPressed: _busy ? null : () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close),
-                  ),
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20),
-              child: _PrivacyNotice(data: widget.data),
-            ),
-            if (!widget.data.publishesIdentity)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
-                child: CheckboxListTile(
-                  value: _anonymousContentReviewed,
-                  onChanged: _busy
-                      ? null
-                      : (value) => setState(
-                          () => _anonymousContentReviewed = value ?? false,
-                        ),
-                  controlAffinity: ListTileControlAffinity.leading,
-                  title: const Text(
-                    'I checked the photo and story for names, faces, addresses, uniforms and other identifying details.',
-                  ),
-                  subtitle: const Text(
-                    'The saved profile name and picture are hidden, but the submitted content may still identify someone.',
-                  ),
-                ),
-              ),
-            if (widget.data.storyIsCondensed)
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
-                child: Text(
-                  'The square card uses a readable excerpt of this long story; the full story remains in the admin gallery.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-            Expanded(
-              child: Stack(
-                children: [
-                  Positioned.fill(
-                    child: Padding(
-                      padding: const EdgeInsets.all(20),
-                      child: Center(
-                        child: FittedBox(
-                          fit: BoxFit.contain,
-                          child: RepaintBoundary(
-                            key: _captureKey,
-                            child: EcoActionPhotocard(
-                              data: widget.data,
-                              actionPhoto: _actionPhoto,
-                              championPhoto: _championPhoto,
+                          const SizedBox(height: 2),
+                          Text(
+                            'The exported PNG is 1080 × 1080.',
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: theme.colorScheme.onSurfaceVariant,
                             ),
                           ),
-                        ),
+                        ],
                       ),
+                    ),
+                    IconButton(
+                      tooltip: 'Close preview',
+                      onPressed: _busy
+                          ? null
+                          : () => Navigator.of(context).pop(),
+                      icon: const Icon(Icons.close),
+                    ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                child: _PrivacyNotice(data: widget.data),
+              ),
+              if (!widget.data.publishesIdentity)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+                  child: CheckboxListTile(
+                    value: _anonymousContentReviewed,
+                    onChanged: _busy
+                        ? null
+                        : (value) => setState(
+                            () => _anonymousContentReviewed = value ?? false,
+                          ),
+                    controlAffinity: ListTileControlAffinity.leading,
+                    title: const Text(
+                      'I checked the photo and story for names, faces, addresses, uniforms and other identifying details.',
+                    ),
+                    subtitle: const Text(
+                      'The saved profile name and picture are hidden, but the submitted content may still identify someone.',
                     ),
                   ),
-                  if (_preparing)
-                    const Positioned.fill(
-                      child: ColoredBox(
-                        color: Color(0xA8FFFFFF),
-                        child: Center(child: CircularProgressIndicator()),
-                      ),
+                ),
+              if (widget.data.storyIsCondensed)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+                  child: Text(
+                    'The square card uses a readable excerpt of this long story; the full story remains in the admin gallery.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
                     ),
-                  if (_preparationError != null)
+                  ),
+                ),
+              Expanded(
+                child: Stack(
+                  children: [
                     Positioned.fill(
-                      child: ColoredBox(
-                        color: theme.colorScheme.surface.withValues(alpha: .94),
+                      child: Padding(
+                        padding: const EdgeInsets.all(20),
                         child: Center(
-                          child: Padding(
-                            padding: const EdgeInsets.all(28),
-                            child: Column(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(
-                                  Icons.broken_image_outlined,
-                                  size: 42,
-                                  color: theme.colorScheme.error,
-                                ),
-                                const SizedBox(height: 12),
-                                Text(
-                                  _preparationError!,
-                                  textAlign: TextAlign.center,
-                                ),
-                                const SizedBox(height: 14),
-                                OutlinedButton.icon(
-                                  onPressed: _prepareImages,
-                                  icon: const Icon(Icons.refresh),
-                                  label: const Text('Retry'),
-                                ),
-                              ],
+                          child: FittedBox(
+                            fit: BoxFit.contain,
+                            child: RepaintBoundary(
+                              key: _captureKey,
+                              child: EcoActionPhotocard(
+                                data: widget.data,
+                                actionPhoto: _actionPhoto,
+                                championPhoto: _championPhoto,
+                              ),
                             ),
                           ),
                         ),
                       ),
                     ),
-                ],
+                    if (_preparing)
+                      const Positioned.fill(
+                        child: ColoredBox(
+                          color: Color(0xA8FFFFFF),
+                          child: Center(child: CircularProgressIndicator()),
+                        ),
+                      ),
+                    if (_preparationError != null)
+                      Positioned.fill(
+                        child: ColoredBox(
+                          color: theme.colorScheme.surface.withValues(
+                            alpha: .94,
+                          ),
+                          child: Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(28),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(
+                                    Icons.broken_image_outlined,
+                                    size: 42,
+                                    color: theme.colorScheme.error,
+                                  ),
+                                  const SizedBox(height: 12),
+                                  Text(
+                                    _preparationError!,
+                                    textAlign: TextAlign.center,
+                                  ),
+                                  const SizedBox(height: 14),
+                                  OutlinedButton.icon(
+                                    onPressed: _prepareImages,
+                                    icon: const Icon(Icons.refresh),
+                                    label: const Text('Retry'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
               ),
-            ),
-            if (_busy) const LinearProgressIndicator(minHeight: 2),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-              child: Wrap(
-                alignment: WrapAlignment.end,
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  OutlinedButton.icon(
-                    onPressed: ready ? _save : null,
-                    icon: const Icon(Icons.download_outlined),
-                    label: Text(kIsWeb ? 'Download PNG' : 'Save PNG'),
-                  ),
-                  Builder(
-                    builder: (buttonContext) => OutlinedButton.icon(
-                      onPressed: ready ? () => _share(buttonContext) : null,
-                      icon: const Icon(Icons.share_outlined),
-                      label: const Text('Share'),
+              if (_busy) const LinearProgressIndicator(minHeight: 2),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+                child: Wrap(
+                  alignment: WrapAlignment.end,
+                  spacing: 8,
+                  runSpacing: 8,
+                  children: [
+                    OutlinedButton.icon(
+                      onPressed: ready ? _save : null,
+                      icon: const Icon(Icons.download_outlined),
+                      label: Text(kIsWeb ? 'Download PNG' : 'Save PNG'),
                     ),
-                  ),
-                  FilledButton.icon(
-                    onPressed: ready ? _print : null,
-                    icon: const Icon(Icons.print_outlined),
-                    label: const Text('Print'),
-                  ),
-                ],
+                    Builder(
+                      builder: (buttonContext) => OutlinedButton.icon(
+                        onPressed: ready ? () => _share(buttonContext) : null,
+                        icon: const Icon(Icons.share_outlined),
+                        label: const Text('Share'),
+                      ),
+                    ),
+                    FilledButton.icon(
+                      onPressed: ready ? _print : null,
+                      icon: const Icon(Icons.print_outlined),
+                      label: const Text('Print'),
+                    ),
+                  ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );

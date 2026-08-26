@@ -1,5 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
+// Used for `SocketException` in the catch below. Flutter web compiles this
+// import against its own shim, so it does not break the web target.
 import 'dart:io';
 
 import 'package:firebase_auth/firebase_auth.dart';

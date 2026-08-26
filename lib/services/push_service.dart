@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
@@ -172,20 +173,41 @@ class PushService {
   /// sign-in mints a fresh one rather than resurrecting the document we just
   /// removed.
   ///
-  /// Never throws. Sign-out must not be blocked by a failed cleanup.
+  /// Never throws, and never blocks for long. Sign-out must not be held up by
+  /// a failed — or an unfinishable — cleanup.
+  ///
+  /// Every step is bounded, because "never throws" was not enough on its own.
+  /// Firestore has offline persistence enabled (see `main.dart`), and an
+  /// offline delete is *queued*: the returned Future does not complete until
+  /// the write reaches the server. So `await …delete()` on a phone with no
+  /// connection neither returned nor threw — it simply never finished, the
+  /// `catch` never ran, and `AuthController.signOut` awaits this before calling
+  /// `authService.signOut()`. A user out of signal who tapped Sign out was
+  /// therefore never signed out, on a handset this file's own notes describe as
+  /// often shared or borrowed.
+  ///
+  /// A stale device document is a far smaller problem than that: the next
+  /// sign-in re-registers, and `pushMessageProvider` is uid-scoped, so the
+  /// worst case is one unused row.
   Future<void> unregisterDevice(String uid) async {
     if (!isSupported || uid.isEmpty) return;
 
     try {
-      final token = await _fcm.getToken();
+      final token = await _fcm.getToken().timeout(_cleanupTimeout);
       if (token != null && token.isNotEmpty) {
-        await _devices(uid).doc(token).delete();
+        await _devices(uid).doc(token).delete().timeout(_cleanupTimeout);
       }
-      await _fcm.deleteToken();
+      await _fcm.deleteToken().timeout(_cleanupTimeout);
+    } on TimeoutException {
+      // Offline, or FCM is not answering. Sign out anyway.
+      debugPrint('[push] Device unregistration timed out; signing out anyway.');
     } catch (err) {
       debugPrint('[push] Device unregistration failed: $err');
     }
   }
+
+  /// Long enough for a healthy round trip, short enough that nobody waits.
+  static const Duration _cleanupTimeout = Duration(seconds: 5);
 
   /// Fires when FCM rotates this device's token.
   ///

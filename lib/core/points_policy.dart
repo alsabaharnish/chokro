@@ -209,6 +209,28 @@ class PointsPolicy {
     positive('Lockout window', lockoutHours);
     positive('Daily disposal cap', dailyDisposalCap);
 
+    // The redemption block is offered to the admin as two independent numbers,
+    // but only their integer quotient is ever used: `pointsPerTaka` truncates
+    // and then floors at 1. So "150 points to BDT 20" was accepted and silently
+    // applied as 7 points per taka — a rate that is neither what was typed nor
+    // derivable from it — and "10 points to BDT 100" was accepted and applied
+    // as 1 point per taka, giving away a hundred times the intended value.
+    // Neither is a number anyone chose.
+    if (redemptionPointsPerBlock > 0 && redemptionTakaPerBlock > 0) {
+      if (redemptionTakaPerBlock > redemptionPointsPerBlock) {
+        problems.add(
+          'Redemption block: points must be at least the taka figure — a '
+          'block worth more taka than it costs points cannot be applied.',
+        );
+      } else if (redemptionPointsPerBlock % redemptionTakaPerBlock != 0) {
+        problems.add(
+          'Redemption block: $redemptionPointsPerBlock points does not divide '
+          'evenly into $redemptionTakaPerBlock BDT, so the rate actually '
+          'applied would be $pointsPerTaka points per taka.',
+        );
+      }
+    }
+
     if (purchaseAwardPercent < 0 || purchaseAwardPercent > 100) {
       problems.add('Purchase award percent must be between 0 and 100.');
     }

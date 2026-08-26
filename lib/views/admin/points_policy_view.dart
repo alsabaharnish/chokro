@@ -5,11 +5,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../controllers/points_policy_controller.dart';
 import '../../core/label_format.dart';
 import '../../core/points_policy.dart';
+import '../../core/theme.dart';
 import '../../core/policy_fields.dart';
 import '../../services/points_policy_service.dart';
 import '../shared/app_shell.dart';
 import '../shared/content_state.dart';
 import '../shared/error_retry.dart';
+import '../shared/notice_card.dart';
 
 /// Administrator editor for the points policy (F3.3).
 ///
@@ -41,6 +43,26 @@ class _PointsPolicyViewState extends ConsumerState<PointsPolicyView> {
 
   bool _saving = false;
   List<String> _serverProblems = const [];
+
+  /// `updatedAt` of the document the baseline came from.
+  ///
+  /// The save is a full overwrite (`server/src/index.js` does `set()` on
+  /// `config/points`) computed against `_loaded`, and `policySnapshotProvider`
+  /// is not `autoDispose` — `cart_controller.dart` keeps it alive for the whole
+  /// session. So a second admin's change made after this editor was first
+  /// opened was invisible here, and the next save silently reverted it. There
+  /// is no version check anywhere on that path, so the client has to notice.
+  DateTime? _loadedAt;
+
+  @override
+  void initState() {
+    super.initState();
+    // Force a fresh read on open. Without it the baseline can be an hour old,
+    // cached from whenever some other screen first touched the policy.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) ref.invalidate(policySnapshotProvider);
+    });
+  }
 
   @override
   void dispose() {
@@ -134,6 +156,10 @@ class _PointsPolicyViewState extends ConsumerState<PointsPolicyView> {
       if (!mounted) return;
       setState(() {
         _adoptLoaded(stored);
+        // Our own write is now the baseline, so the staleness check must not
+        // fire on it. The provider is invalidated below, and the snapshot it
+        // returns carries the `updatedAt` this save produced.
+        _loadedAt = null;
         _saving = false;
       });
       ScaffoldMessenger.of(
@@ -177,7 +203,35 @@ class _PointsPolicyViewState extends ConsumerState<PointsPolicyView> {
               onRetry: () => ref.invalidate(policySnapshotProvider),
             ),
             data: (snapshot) {
-              if (_loaded == null) _adoptLoaded(snapshot.policy);
+              final serverAt = snapshot.provenance.updatedAt;
+              if (_loaded == null) {
+                _adoptLoaded(snapshot.policy);
+                _loadedAt = serverAt;
+              } else if (serverAt != null && serverAt != _loadedAt) {
+                // Somebody else saved while this form was open. Re-adopt only
+                // when there is nothing to protect; otherwise say so and let
+                // the admin choose, because silently replacing their typing is
+                // the same class of mistake as silently reverting the other
+                // admin's save.
+                final (policy: draft, parseErrors: _) = _readForm();
+                final dirty =
+                    draft != null && diffPolicies(_loaded!, draft).isNotEmpty;
+                if (!dirty) {
+                  _adoptLoaded(snapshot.policy);
+                  _loadedAt = serverAt;
+                } else {
+                  return _buildForm(
+                    context,
+                    snapshot.provenance,
+                    staleSince: serverAt,
+                    onReload: () => setState(() {
+                      _adoptLoaded(snapshot.policy);
+                      _loadedAt = serverAt;
+                      _serverProblems = const [];
+                    }),
+                  );
+                }
+              }
               return _buildForm(context, snapshot.provenance);
             },
           ),
@@ -186,7 +240,12 @@ class _PointsPolicyViewState extends ConsumerState<PointsPolicyView> {
     );
   }
 
-  Widget _buildForm(BuildContext context, PolicyProvenance provenance) {
+  Widget _buildForm(
+    BuildContext context,
+    PolicyProvenance provenance, {
+    DateTime? staleSince,
+    VoidCallback? onReload,
+  }) {
     final theme = Theme.of(context);
     final base = _loaded!;
     final (policy: draft, parseErrors: parseErrors) = _readForm();
@@ -204,6 +263,26 @@ class _PointsPolicyViewState extends ConsumerState<PointsPolicyView> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 32),
       children: [
+        // The save is a full overwrite with no version check on the server, so
+        // this warning is the only thing standing between two admins editing at
+        // once and one of them silently losing their change.
+        if (staleSince != null && onReload != null) ...[
+          NoticeCard(
+            icon: Icons.sync_problem_outlined,
+            tone: NoticeTone.warning,
+            title: 'Another 3ZERO Admin changed the policy',
+            message:
+                'It was saved at ${formatDateTime(staleSince)}, after you '
+                'opened this form. Saving now replaces their values with '
+                'yours. Reload to start from theirs instead — your unsaved '
+                'edits will be discarded.',
+            action: NoticeAction(
+              label: 'Reload the policy',
+              onPressed: onReload,
+            ),
+          ),
+          const SizedBox(height: AppTheme.gapMd),
+        ],
         Card(
           color: theme.colorScheme.surfaceContainerHighest,
           child: Padding(
@@ -239,6 +318,19 @@ class _PointsPolicyViewState extends ConsumerState<PointsPolicyView> {
             onChanged: () => setState(() {}),
           ),
           const SizedBox(height: 18),
+        ],
+        // The rate the app will actually apply, not just the pair that was
+        // typed. Only the integer quotient of the two redemption numbers is
+        // ever used, so the admin needs to see the quotient.
+        if (draft != null) ...[
+          NoticeCard(
+            icon: Icons.calculate_outlined,
+            message:
+                'Effective rate: ${draft.pointsPerTaka} points buys BDT 1. '
+                'Redemption is transacted in whole taka, so points are spent '
+                'in multiples of ${draft.pointsPerTaka}.',
+          ),
+          const SizedBox(height: AppTheme.gapMd),
         ],
         if (parseErrors.isNotEmpty)
           _ProblemList(

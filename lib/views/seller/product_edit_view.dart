@@ -98,6 +98,17 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
   /// The product is a live stream, so a second seed would overwrite whatever the
   /// seller had typed the moment any field changed — including the `updatedAt`
   /// their own save had just written.
+  /// The stock figure this form opened with.
+  ///
+  /// `stock` is the one field the *server* also writes, relatively:
+  /// `server/src/checkout.js` decrements it with `FieldValue.increment(-qty)`
+  /// on every purchase. The form saves an absolute value, so a seller who
+  /// opened the editor with 10 in stock, changed only the description, and
+  /// saved twenty minutes later wrote 10 back over three sales — silently
+  /// resurrecting stock that no longer existed, which the next buyer then
+  /// ordered.
+  String? _seededStock;
+
   void _seed(ProductModel product) {
     if (_seeded) return;
     _seeded = true;
@@ -106,6 +117,7 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
     _description.text = product.description;
     _price.text = product.price.toString();
     _stock.text = product.stock.toString();
+    _seededStock = _stock.text;
     _tags.text = product.tags.join(', ');
     _category = product.category;
     _imageUrls = product.imageUrls;
@@ -439,20 +451,28 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
 
     final messenger = ScaffoldMessenger.of(context);
 
-    // `image_picker` returns bytes on web as well as on mobile, so nothing here
-    // touches `dart:io` and the seller console works on both targets (§5.5).
-    final picked = await ImagePicker().pickImage(
-      source: ImageSource.gallery,
-      maxWidth: 1600,
-      maxHeight: 1600,
-      imageQuality: 90,
-    );
-    if (picked == null) return;
-
-    final original = await picked.readAsBytes();
-
     setState(() => _uploading = true);
     try {
+      // `pickImage` and `readAsBytes` are inside the guard, like every other
+      // picker call site in this codebase. Outside it, a denied photo-library
+      // permission threw past the handler and "Add photo" simply did nothing —
+      // no message, no spinner, nothing to act on — which reads as a broken
+      // button rather than a permission the seller can grant.
+      //
+      // `image_picker` returns bytes on web as well as on mobile, so nothing
+      // here touches `dart:io` and the seller console works on both targets
+      // (§5.5).
+      final picked = await ImagePicker().pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 1600,
+        maxHeight: 1600,
+        imageQuality: 90,
+      );
+      // Cancelling is not an error.
+      if (picked == null) return;
+
+      final original = await picked.readAsBytes();
+
       // Compressed on the same path the disposal and claim flows use.
       //
       // This used to rely on ImagePicker's resize alone, on the stated grounds
@@ -489,6 +509,18 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
       setState(() => _imageUrls = [..._imageUrls, url]);
     } on PhotoUploadException catch (error) {
       messenger.showSnackBar(SnackBar(content: Text(error.message)));
+    } on PlatformException catch (error) {
+      // The common cause, in the same words disposal_controller.dart uses.
+      messenger.showSnackBar(
+        SnackBar(
+          content: Text(
+            error.code == 'photo_access_denied'
+                ? 'Chokro needs permission to open your photos. Enable it in '
+                      'your device settings and try again.'
+                : 'That photo could not be opened. Try another.',
+          ),
+        ),
+      );
     } catch (error) {
       messenger.showSnackBar(
         SnackBar(
@@ -502,11 +534,75 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
     }
   }
 
+  /// Asks which stock figure to keep when both the seller and the shop moved it.
+  ///
+  /// Returns true to publish the typed figure, false to reload the live one,
+  /// null if the seller backed out. Both numbers are named, because "your
+  /// changes could not be saved" would leave them guessing at what happened.
+  Future<bool?> _confirmStockConflict({
+    required String opened,
+    required String typed,
+    required int live,
+  }) {
+    return showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Stock changed while you were editing'),
+        content: Text(
+          'You opened this listing with $opened in stock and typed $typed. '
+          'Orders since then have brought it to $live.\n\n'
+          'Saving $typed replaces the shop\'s count with yours.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: Text('Use $live'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: Text('Save $typed'),
+          ),
+        ],
+      ),
+    );
+  }
+
   Future<void> _save(ProductModel? existing) async {
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
     final uid = ref.read(currentUserProvider).value?.uid;
     if (uid == null) return;
+
+    // Reconcile the one field the server also owns. `existing` comes from a
+    // live stream, so it is current; the text controller is not, because
+    // `_seed` deliberately runs once so as not to overwrite the seller's
+    // typing.
+    var stock = int.parse(_stock.text.trim());
+    if (existing != null && _seededStock != null) {
+      final movedUnderneath = existing.stock.toString() != _seededStock;
+      final sellerEditedIt = _stock.text.trim() != _seededStock;
+
+      if (movedUnderneath && !sellerEditedIt) {
+        // They did not touch stock, so their edit must not carry the opening
+        // figure. Take the live one silently — there is nothing to ask about.
+        stock = existing.stock;
+      } else if (movedUnderneath && sellerEditedIt) {
+        // Both moved. Only the seller can say which number is right.
+        final keep = await _confirmStockConflict(
+          opened: _seededStock!,
+          typed: _stock.text.trim(),
+          live: existing.stock,
+        );
+        if (!mounted || keep == null) return;
+        if (!keep) {
+          setState(() {
+            _stock.text = existing.stock.toString();
+            _seededStock = _stock.text;
+          });
+          return;
+        }
+      }
+    }
 
     final draft = ProductModel.forSave(
       id: existing?.id,
@@ -516,7 +612,7 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
       description: _description.text,
       category: _category,
       price: int.parse(_price.text.trim()),
-      stock: int.parse(_stock.text.trim()),
+      stock: stock,
       tags: _tags.text.split(','),
       imageUrls: _imageUrls,
       // An edit keeps whatever the listing already was; a new one is on sale.

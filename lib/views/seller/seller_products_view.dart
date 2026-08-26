@@ -65,8 +65,15 @@ class SellerProductsView extends ConsumerWidget {
             );
           }
 
+          // `&& !product.active` matters. `hiddenBySuspension` is server-owned
+          // and cleared only by the admin's reinstate sweep, while a seller's
+          // own relist writes `active` alone — a state `server/src/listings.js`
+          // documents as reachable the moment a timed suspension lapses. Keyed
+          // on the flag by itself, this notice stayed on screen in error red
+          // telling a seller their listings were hidden from the shop while
+          // they were, in fact, back on it.
           final hidden = products
-              .where((product) => product.hiddenBySuspension)
+              .where((product) => product.hiddenBySuspension && !product.active)
               .length;
 
           // Constrain the viewport, build the rows lazily. See the same change
