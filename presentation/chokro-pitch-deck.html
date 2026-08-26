@@ -1,0 +1,958 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>*{margin:0;padding:0}</style>
+</head><body>
+<title>The Chokro Loop</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,600;0,9..144,700;0,9..144,900&family=Public+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=Noto+Sans+Bengali:wght@400;600&display=swap">
+
+<style>
+  :root {
+    /* Palette carried over from the app's own theme (lib/core/theme.dart),
+       so the deck and the live demo read as one product. */
+    --ink:        #0B1410;
+    --ink-2:      #12211B;
+    --emerald:    #006C4C;
+    --emerald-lift:#1FA97A;
+    --emerald-soft:#E8F0EB;
+    --gold:       #E4A11B;   /* the value ink — points, and nothing else */
+    --gold-soft:  #F6E7C4;
+    --verified:   #1E7F72;
+    --paper:      #F7FAF8;
+    --paper-2:    #FFFFFF;
+    --rule:       #D7E2DB;
+    --rule-ink:   #2C3B34;
+    --muted:      #55655D;
+    --muted-ink:  #9BB0A6;
+
+    --sans: "Public Sans", "Noto Sans Bengali", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    --serif: "Fraunces", "Noto Sans Bengali", Georgia, "Times New Roman", serif;
+    --mono: "IBM Plex Mono", "Noto Sans Bengali", ui-monospace, "SF Mono", Menlo, monospace;
+
+    --pad: clamp(2rem, 5vw, 5.5rem);
+    --maxw: 74rem;
+  }
+
+  * { box-sizing: border-box; }
+
+  html {
+    /* One knob: everything below is rem-based, so the whole deck scales
+       with the projector rather than with the browser's default 16px. */
+    font-size: clamp(13px, 0.72vw + 6.5px, 21px);
+    scroll-behavior: smooth;
+  }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 1rem;
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+    overflow: hidden;
+  }
+
+  /* ---------- deck mechanics ---------- */
+
+  .deck {
+    height: 100vh;
+    overflow-y: scroll;
+    scroll-snap-type: y mandatory;
+    scrollbar-width: none;
+  }
+  .deck::-webkit-scrollbar { display: none; }
+
+  .slide {
+    position: relative;
+    height: 100vh;
+    scroll-snap-align: start;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    padding: var(--pad) max(var(--pad), calc((100% - var(--maxw)) / 2)) calc(var(--pad) * 0.9);
+    background: var(--paper);
+    overflow: hidden;
+  }
+  .slide > * { width: 100%; }
+
+  .slide--ink { background: var(--ink); color: var(--paper); }
+  .slide--ink .eyebrow { color: var(--gold); }
+  .slide--ink .eyebrow::before { background: var(--gold); }
+  .slide--ink .muted { color: var(--muted-ink); }
+  .slide--ink .panel { border-color: var(--rule-ink); background: transparent; }
+  .slide--ink .rule { background: var(--rule-ink); }
+  .slide--ink .num { color: var(--rule-ink); }
+  .slide--ink .lede strong { color: var(--paper); }
+
+  .num {
+    position: absolute;
+    left: max(var(--pad), calc((100% - var(--maxw)) / 2));
+    bottom: calc(var(--pad) * 0.5);
+    margin: 0; width: auto;
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    letter-spacing: 0.08em;
+    color: #B9C8C0;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---------- type ---------- */
+
+  .eyebrow {
+    display: flex; align-items: center; gap: 0.7em;
+    font-family: var(--mono);
+    font-size: 0.72rem;
+    font-weight: 500;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--emerald);
+    margin: 0 0 1.5rem;
+  }
+  .eyebrow::before {
+    content: "";
+    width: 2.2rem; height: 1px;
+    background: var(--emerald);
+    flex: none;
+  }
+
+  h1, h2, h3 { font-family: var(--serif); font-weight: 700; margin: 0; text-wrap: balance; }
+  h1 {
+    font-size: 3.9rem;
+    line-height: 1.0;
+    letter-spacing: -0.025em;
+    font-variation-settings: "SOFT" 20, "WONK" 1;
+  }
+  h2 {
+    font-size: 2.6rem;
+    line-height: 1.06;
+    letter-spacing: -0.02em;
+    font-variation-settings: "SOFT" 12, "WONK" 1;
+  }
+  h3 {
+    font-size: 1.18rem;
+    line-height: 1.25;
+    letter-spacing: -0.01em;
+    font-weight: 700;
+  }
+
+  .lede {
+    font-size: 1.26rem;
+    line-height: 1.45;
+    max-width: 46ch;
+    color: var(--ink);
+    margin: 1.4rem 0 0;
+  }
+  .slide--ink .lede { color: #DCE8E2; }
+  .muted { color: var(--muted); }
+  p { margin: 0; }
+  strong { font-weight: 600; }
+
+  .stmt {
+    font-family: var(--serif);
+    font-size: 1.62rem;
+    line-height: 1.24;
+    letter-spacing: -0.015em;
+    font-variation-settings: "SOFT" 14, "WONK" 1;
+    max-width: 40ch;
+  }
+
+  .label {
+    font-family: var(--mono);
+    font-size: 0.68rem;
+    font-weight: 600;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: var(--emerald);
+  }
+  .slide--ink .label { color: var(--emerald-lift); }
+
+  /* Points are gold and tabular. Taka is text ink with ৳. Never alike. */
+  .pts {
+    font-family: var(--mono);
+    font-weight: 600;
+    color: #A8760D;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+  .slide--ink .pts { color: var(--gold); }
+  .tk { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+  /* ---------- layout helpers ---------- */
+
+  .rule { height: 1px; background: var(--rule); border: 0; margin: 0; width: 100%; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 2.6rem; align-items: start; }
+  .cols-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.6rem; }
+  .stack { display: flex; flex-direction: column; }
+
+  /* Elevation is a hairline rule, never a shadow. */
+  .panel {
+    border: 1px solid var(--rule);
+    border-radius: 18px;
+    padding: 1.5rem 1.6rem;
+    background: var(--paper-2);
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+  }
+  .panel .label { margin-bottom: 0.1rem; }
+  .panel p { font-size: 0.95rem; line-height: 1.5; }
+
+  .src {
+    font-family: var(--mono);
+    font-size: 0.64rem;
+    letter-spacing: 0.06em;
+    color: #7C8D84;
+    text-transform: uppercase;
+  }
+
+  /* ---------- slide 1: cover ---------- */
+
+  .cover { display: flex; flex-direction: column; gap: 0; }
+  .cover__mark { width: 3.4rem; height: 3.4rem; border-radius: 16px; overflow: hidden; }
+  .cover__top { display: flex; align-items: center; gap: 1.1rem; margin-bottom: 3rem; }
+  .cover__word {
+    font-family: var(--serif);
+    font-size: 1.5rem;
+    font-weight: 900;
+    letter-spacing: 0.01em;
+    line-height: 1;
+  }
+  .cover__bn { font-family: var(--mono); font-size: 0.78rem; letter-spacing: 0.22em; color: var(--emerald-lift); }
+  .cover h1 { max-width: 30ch; }
+  .cover__sub { font-size: 1.2rem; line-height: 1.45; max-width: 48ch; margin-top: 1.6rem; color: #C7D6CF; }
+  .cover__foot {
+    margin-top: 3.4rem;
+    display: flex; gap: 2rem; flex-wrap: wrap; align-items: baseline;
+    font-family: var(--mono); font-size: 0.74rem; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--muted-ink);
+  }
+  .cover__foot span:first-child { color: var(--paper); }
+
+  /* ---------- slide 2: the two problems ---------- */
+
+  .prob { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border-top: 1px solid var(--rule); }
+  .prob > div { padding: 1.7rem 0 0; }
+  .prob > div:first-child { padding-right: 2.6rem; border-right: 1px solid var(--rule); }
+  .prob > div:last-child { padding-left: 2.6rem; }
+  .prob h3 { margin-bottom: 0.9rem; }
+  .prob ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 0.75rem; }
+  .prob li { font-size: 0.99rem; line-height: 1.48; padding-left: 1.1rem; position: relative; }
+  .prob li::before {
+    content: ""; position: absolute; left: 0; top: 0.62em;
+    width: 5px; height: 5px; border-radius: 50%; background: var(--rule);
+  }
+  .prob li.hit::before { background: var(--gold); }
+  .prob li.hit { font-weight: 600; }
+  .verdict {
+    margin-top: 2rem; padding-top: 1.4rem; border-top: 1px solid var(--rule);
+    display: flex; justify-content: space-between; align-items: baseline; gap: 2rem;
+  }
+
+  /* ---------- slide 3: the loop ---------- */
+
+  .loop { display: grid; grid-template-columns: 1fr 1.15fr; gap: 3rem; align-items: center; }
+  .loop svg { width: 100%; height: auto; display: block; }
+  .ring-arc {
+    fill: none; stroke: var(--emerald-lift); stroke-width: 2.5; stroke-linecap: round;
+    stroke-dasharray: 200; stroke-dashoffset: 200;
+    transition: stroke-dashoffset 900ms cubic-bezier(.4,0,.2,1);
+  }
+  .is-active .ring-arc { stroke-dashoffset: 0; }
+  .is-active .ring-arc:nth-of-type(2) { transition-delay: 260ms; }
+  .is-active .ring-arc:nth-of-type(3) { transition-delay: 520ms; }
+  .is-active .ring-arc:nth-of-type(4) { transition-delay: 780ms; }
+  .spur {
+    fill: none; stroke: var(--gold); stroke-width: 2.5; stroke-linecap: round; stroke-dasharray: 3 6;
+    opacity: 0; transition: opacity 600ms ease 1100ms;
+  }
+  .is-active .spur { opacity: 1; }
+  .node { fill: var(--emerald-lift); }
+  .node-halo { fill: var(--ink); }
+  .lbl { font-family: var(--mono); font-size: 15px; font-weight: 600; letter-spacing: 0.14em; fill: var(--paper); text-transform: uppercase; }
+  .lbl-sub { font-family: var(--sans); font-size: 15px; fill: var(--muted-ink); letter-spacing: 0; }
+  .lbl-gold { fill: var(--gold); }
+  .ctr { font-family: var(--mono); font-size: 14px; font-weight: 600; letter-spacing: 0.2em; fill: var(--paper); }
+  .ctr-sub { font-family: var(--sans); font-size: 14px; fill: var(--muted-ink); letter-spacing: 0; }
+
+  /* ---------- slide 4: the four steps ---------- */
+
+  .steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1.5rem; margin-top: 2.2rem; }
+  .step { display: flex; flex-direction: column; gap: 0.85rem; }
+  .step__n {
+    font-family: var(--mono); font-size: 0.68rem; font-weight: 600; letter-spacing: 0.14em;
+    color: var(--emerald); display: flex; align-items: center; gap: 0.6em;
+  }
+  .step__n::after { content: ""; height: 1px; flex: 1; background: var(--rule); }
+  .phone {
+    border: 1px solid var(--rule); border-radius: 20px; background: var(--paper-2);
+    height: min(26vh, 14.5rem); width: auto; aspect-ratio: 9 / 12; align-self: center; padding: 0.85rem;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 0.7rem;
+  }
+  .phone__bar { width: 26%; height: 3px; border-radius: 2px; background: var(--rule); margin-bottom: 0.2rem; }
+  .step h3 { font-size: 1.04rem; }
+  .step p { font-size: 0.9rem; line-height: 1.45; color: var(--muted); }
+  .qr { display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px; width: 52%; }
+  .qr i { aspect-ratio: 1; background: var(--rule); border-radius: 1px; }
+  .qr i.on { background: var(--emerald); }
+  .frame { width: 56%; aspect-ratio: 1; position: relative; }
+  .frame span { position: absolute; width: 30%; height: 30%; border: 2px solid var(--emerald); }
+  .frame span:nth-child(1) { top: 0; left: 0; border-right: 0; border-bottom: 0; }
+  .frame span:nth-child(2) { top: 0; right: 0; border-left: 0; border-bottom: 0; }
+  .frame span:nth-child(3) { bottom: 0; left: 0; border-right: 0; border-top: 0; }
+  .frame span:nth-child(4) { bottom: 0; right: 0; border-left: 0; border-top: 0; }
+  .geo { width: 62%; aspect-ratio: 1; border-radius: 50%; border: 1px dashed var(--emerald); position: relative; display: grid; place-items: center; }
+  .geo b { width: 22%; aspect-ratio: 1; border-radius: 50%; background: var(--emerald); display: block; }
+  .stamp {
+    font-family: var(--mono); font-size: 0.6rem; font-weight: 600; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--verified);
+    border: 1px solid var(--verified); border-radius: 4px; padding: 0.22em 0.5em;
+    transform: rotate(-3deg);
+  }
+  .bigpts { font-family: var(--mono); font-weight: 600; font-size: 1.9rem; color: #A8760D; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; line-height: 1; }
+  .rate {
+    margin-top: 2.2rem; padding-top: 1.3rem; border-top: 1px solid var(--rule);
+    display: flex; gap: 2.6rem; flex-wrap: wrap; font-size: 0.95rem;
+  }
+
+  /* ---------- slide 5: the five gates ---------- */
+
+  .gates { margin-top: 1.8rem; border-top: 1px solid var(--rule-ink); }
+  .gate {
+    display: grid; grid-template-columns: 8rem 1fr; gap: 2rem; align-items: baseline;
+    padding: 0.92rem 0; border-bottom: 1px solid var(--rule-ink);
+  }
+  .gate .label { color: var(--emerald-lift); }
+  .gate p { font-size: 1rem; line-height: 1.45; color: #DCE8E2; max-width: 62ch; }
+
+  /* ---------- slide 9: the numbers ---------- */
+
+  .stats { display: grid; grid-template-columns: repeat(4, 1fr); gap: 0; margin-top: 2rem; border-top: 1px solid var(--rule); }
+  .stat { padding: 1.5rem 1.6rem 1.5rem 0; border-right: 1px solid var(--rule); display: flex; flex-direction: column; gap: 0.4rem; }
+  .stat:last-child { border-right: 0; }
+  .stat:not(:first-child) { padding-left: 1.6rem; }
+  .stat b {
+    font-family: var(--serif); font-weight: 900; font-size: 2.5rem; line-height: 0.95;
+    letter-spacing: -0.03em; font-variant-numeric: tabular-nums;
+    font-variation-settings: "SOFT" 8, "WONK" 0;
+  }
+  .stat span { font-family: var(--mono); font-size: 0.66rem; font-weight: 500; letter-spacing: 0.13em; text-transform: uppercase; color: var(--muted); }
+  .stat em { font-style: normal; font-size: 0.86rem; color: var(--muted); line-height: 1.4; }
+  .parts { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.1rem 1.6rem; margin-top: 1.9rem; }
+  .part {
+    font-size: 0.9rem; color: var(--muted);
+    padding-left: 0.85rem; border-left: 1px solid var(--rule);
+  }
+  .part b { display: block; color: var(--ink); font-weight: 600; font-size: 0.95rem; }
+
+  /* ---------- slide 10 / 11 / 12 lists ---------- */
+
+  .rows { margin-top: 1.8rem; border-top: 1px solid var(--rule); }
+  .row {
+    display: grid; grid-template-columns: 13rem 1fr; gap: 2rem; align-items: baseline;
+    padding: 1.02rem 0; border-bottom: 1px solid var(--rule);
+  }
+  .row p { font-size: 0.99rem; line-height: 1.47; max-width: 64ch; }
+  .slide--ink .rows { border-color: var(--rule-ink); }
+  .slide--ink .row { border-color: var(--rule-ink); }
+  .slide--ink .row p { color: #DCE8E2; }
+
+  .horizon { display: grid; grid-template-columns: repeat(3, 1fr); gap: 0; margin-top: 2rem; border-top: 1px solid var(--rule); }
+  .horizon > div { padding: 1.6rem 1.8rem 0 0; border-right: 1px solid var(--rule); display: flex; flex-direction: column; gap: 0.7rem; }
+  .horizon > div:last-child { border-right: 0; }
+  .horizon > div:not(:first-child) { padding-left: 1.8rem; }
+  .horizon p { font-size: 0.95rem; line-height: 1.48; color: var(--muted); }
+  .caveat {
+    margin-top: 2.2rem; padding: 1.2rem 1.5rem;
+    border: 1px solid var(--rule); border-left: 3px solid var(--gold); border-radius: 4px;
+    font-size: 0.97rem; line-height: 1.5; max-width: 74ch;
+  }
+
+  .ask { display: grid; grid-template-columns: 1.1fr 1fr; gap: 3.4rem; align-items: start; }
+  .contact { display: flex; flex-direction: column; align-items: flex-start; gap: 0.5rem; font-family: var(--mono); font-size: 0.86rem; letter-spacing: 0.04em; }
+  .contact b { color: var(--gold); font-weight: 600; }
+  .contact a { color: var(--paper); text-decoration: none; border-bottom: 1px solid var(--rule-ink); }
+  .contact a:hover, .contact a:focus-visible { border-color: var(--gold); }
+
+  /* ---------- chrome: rail, dots, arrows ---------- */
+
+  .rail { position: fixed; left: 0; right: 0; bottom: 0; height: 2px; background: rgba(85,101,93,0.16); z-index: 40; }
+  .rail__fill { height: 100%; width: 0; background: var(--emerald-lift); transition: width 420ms cubic-bezier(.4,0,.2,1); }
+
+  .dots {
+    position: fixed; left: 50%; transform: translateX(-50%); bottom: 1.15rem;
+    display: flex; gap: 0.5rem; z-index: 41;
+  }
+  .dots button {
+    width: 7px; height: 7px; padding: 0; border-radius: 50%; border: 0; cursor: pointer;
+    background: rgba(85,101,93,0.3); transition: background 200ms, transform 200ms;
+  }
+  .dots button[aria-current="true"] { background: var(--emerald-lift); transform: scale(1.45); }
+  .dots button:focus-visible { outline: 2px solid var(--gold); outline-offset: 3px; }
+
+  .arrows { position: fixed; right: 1.3rem; bottom: 1rem; display: flex; gap: 0.4rem; z-index: 41; }
+  .arrows button {
+    font: 500 0.9rem/1 var(--mono); color: var(--muted);
+    width: 2rem; height: 2rem; border: 1px solid rgba(85,101,93,0.28); border-radius: 6px;
+    background: transparent; cursor: pointer;
+  }
+  .arrows button:hover { color: var(--emerald); border-color: var(--emerald); }
+  .arrows button:focus-visible { outline: 2px solid var(--gold); outline-offset: 2px; }
+
+  .hint {
+    position: fixed; left: 50%; transform: translateX(-50%); bottom: 2.6rem; z-index: 41;
+    font-family: var(--mono); font-size: 0.66rem; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--muted-ink); transition: opacity 500ms;
+  }
+  .hint.gone { opacity: 0; pointer-events: none; }
+
+  /* ---------- reveal ---------- */
+
+  @media (prefers-reduced-motion: no-preference) {
+    .slide > *:not(.num) {
+      opacity: 0; transform: translateY(0.6rem);
+      transition: opacity 620ms cubic-bezier(.4,0,.2,1) 210ms,
+                  transform 620ms cubic-bezier(.4,0,.2,1) 210ms;
+    }
+    .slide > *:not(.num) > * {
+      opacity: 0; transform: translateY(0.45rem);
+      transition: opacity 560ms cubic-bezier(.4,0,.2,1) 300ms,
+                  transform 560ms cubic-bezier(.4,0,.2,1) 300ms;
+    }
+    .slide > .eyebrow { transition-delay: 0ms; }
+    .slide > h2 { transition-delay: 80ms; }
+    .slide > .lede { transition-delay: 150ms; }
+    .slide.is-active > *:not(.num),
+    .slide.is-active > *:not(.num) > * { opacity: 1; transform: none; }
+  }
+
+  /* ---------- print / PDF handout ---------- */
+
+  @page { size: 297mm 167mm; margin: 0; }
+  @media print {
+    html { font-size: 15px; }
+    body { overflow: visible; }
+    .deck { height: auto; overflow: visible; }
+    .slide { height: 167mm; page-break-after: always; break-after: page; }
+    .rail, .dots, .arrows, .hint { display: none !important; }
+    .slide > *, .slide > * > * { opacity: 1 !important; transform: none !important; }
+    .ring-arc { stroke-dashoffset: 0 !important; }
+    .spur { opacity: 1 !important; }
+  }
+
+  /* ---------- narrow screens: keep it legible, drop to one column ---------- */
+  @media (max-width: 860px) {
+    .cols, .loop, .ask { grid-template-columns: 1fr; gap: 1.6rem; }
+    .steps { grid-template-columns: repeat(2, 1fr); }
+    .stats { grid-template-columns: repeat(2, 1fr); }
+    .stat { border-right: 0; padding-left: 0 !important; }
+    .prob { grid-template-columns: 1fr; }
+    .prob > div:first-child { border-right: 0; padding-right: 0; border-bottom: 1px solid var(--rule); padding-bottom: 1.4rem; }
+    .prob > div:last-child { padding-left: 0; }
+    .horizon { grid-template-columns: 1fr; }
+    .horizon > div { border-right: 0; padding-left: 0 !important; }
+    .gate, .row { grid-template-columns: 1fr; gap: 0.4rem; }
+    .slide { justify-content: flex-start; padding-top: calc(var(--pad) * 0.9); overflow-y: auto; }
+  }
+</style>
+
+<div class="deck" id="deck">
+
+  <!-- 1 ─ cover -->
+  <section class="slide slide--ink" aria-label="Chokro">
+    <div class="cover">
+      <div class="cover__top">
+        <div class="cover__mark" aria-hidden="true">
+          <svg viewBox="0 0 1024 1024" width="100%" height="100%">
+            <defs>
+              <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#087F5B"/><stop offset="0.58" stop-color="#006C4C"/><stop offset="1" stop-color="#075E68"/>
+              </linearGradient>
+              <linearGradient id="sym" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stop-color="#FFFFFF"/><stop offset="1" stop-color="#D8FFF0"/>
+              </linearGradient>
+            </defs>
+            <rect width="1024" height="1024" fill="url(#bg)"/>
+            <path d="M 790 218 C 540 238 340 358 292 536 C 255 674 339 797 473 796 C 655 794 767 566 790 218 Z" fill="url(#sym)"/>
+            <path d="M 356 730 C 445 606 551 493 705 352" fill="none" stroke="#08745A" stroke-width="40" stroke-linecap="round" opacity="0.68"/>
+          </svg>
+        </div>
+        <div>
+          <div class="cover__word">Chokro</div>
+          <div class="cover__bn">চক্র · THE CYCLE</div>
+        </div>
+      </div>
+
+      <h1>Doing the right thing with your waste should pay you back.</h1>
+
+      <p class="cover__sub">A rewards loop for correct waste disposal that only pays against verified evidence — and a marketplace where those rewards are spent with local green entrepreneurs.</p>
+
+      <div class="cover__foot">
+        <span>Arnish</span>
+        <span>Lamppost</span>
+        <span>arnish@lamppost.org.bd</span>
+      </div>
+    </div>
+    <p class="num">01</p>
+  </section>
+
+  <!-- 2 ─ the problem -->
+  <section class="slide" aria-label="Two problems, never solved together">
+    <p class="eyebrow">The problem</p>
+    <h2>Two problems sit next to each other, and nobody solves them together.</h2>
+
+    <div class="prob">
+      <div>
+        <h3>The person who does it right</h3>
+        <ul>
+          <li>Bangladesh throws out <strong>25,000–30,000 tonnes</strong> of waste a day, and only <strong>45–50%</strong> of urban waste is formally collected at all.</li>
+          <li>Around <strong>100,000 people</strong> in Dhaka alone make a living picking through it.</li>
+          <li class="hit">Someone who separates their recyclables and carries them to the right bin gets nothing back. No record, no proof, no reward.</li>
+          <li>So the behaviour is invisible — it can't be reinforced in a person or counted in a city.</li>
+        </ul>
+      </div>
+      <div>
+        <h3>The person making something better</h3>
+        <ul>
+          <li>Makers of handmade and recycled goods — often home-based, often women — sell through scattered social media pages.</li>
+          <li>They compete for attention against mass-produced imports with far better distribution.</li>
+          <li class="hit">Two years of happy customers on one page counts for nothing on the next one. Reputation isn't portable.</li>
+          <li>Being handmade and low-impact is a disadvantage instead of the point.</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="verdict">
+      <p class="stmt">Waste apps reward disposal. Green marketplaces sell products. Neither one knows the other exists.</p>
+      <p class="src">Figures: LightCastle Partners, 2025</p>
+    </div>
+    <p class="num">02</p>
+  </section>
+
+  <!-- 3 ─ the loop -->
+  <section class="slide slide--ink" aria-label="Chokro means cycle">
+    <p class="eyebrow">The idea</p>
+    <div class="loop">
+      <div class="stack" style="gap:1.5rem">
+        <h2>চক্র means cycle.</h2>
+        <p class="lede">Both halves are sustainable behaviour, so <strong>both credit the same wallet.</strong></p>
+        <p class="lede" style="margin-top:0">The points you earn at a bin get spent on something handmade — and that purchase credits the wallet again. That is what makes this a cycle rather than a pipeline, and it is the one thing you should remember from this deck.</p>
+      </div>
+
+      <svg viewBox="-112 52 826 508" role="img" aria-label="A closed loop: dispose waste, earn points, spend with a green entrepreneur, earn again — with a branch for giving points to an initiative.">
+        <defs>
+          <marker id="ah" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="5.5" markerHeight="5.5" orient="auto-start-reverse">
+            <path d="M 0 1 L 9 5 L 0 9 z" fill="#1FA97A"/>
+          </marker>
+        </defs>
+
+        <path class="ring-arc" marker-end="url(#ah)" d="M 341.1 135.0 A 170 170 0 0 1 465.0 258.9"/>
+        <path class="ring-arc" marker-end="url(#ah)" d="M 465.0 341.1 A 170 170 0 0 1 341.1 465.0"/>
+        <path class="ring-arc" marker-end="url(#ah)" d="M 258.9 465.0 A 170 170 0 0 1 135.0 341.1"/>
+        <path class="ring-arc" marker-end="url(#ah)" d="M 135.0 258.9 A 170 170 0 0 1 258.9 135.0"/>
+
+        <path class="spur" d="M 420 420 L 486 486"/>
+        <circle class="node" cx="491" cy="491" r="5" fill="#E4A11B"/>
+
+        <circle class="node-halo" cx="300" cy="130" r="11"/><circle class="node" cx="300" cy="130" r="6"/>
+        <circle class="node-halo" cx="470" cy="300" r="11"/><circle class="node" cx="470" cy="300" r="6"/>
+        <circle class="node-halo" cx="300" cy="470" r="11"/><circle class="node" cx="300" cy="470" r="6"/>
+        <circle class="node-halo" cx="130" cy="300" r="11"/><circle class="node" cx="130" cy="300" r="6"/>
+
+        <text class="lbl" x="300" y="88" text-anchor="middle">DISPOSE</text>
+        <text class="lbl-sub" x="300" y="110" text-anchor="middle">at a registered bin</text>
+
+        <text class="lbl" x="494" y="294">EARN</text>
+        <text class="lbl-sub" x="494" y="316">points, into one wallet</text>
+
+        <text class="lbl" x="300" y="512" text-anchor="middle">SPEND</text>
+        <text class="lbl-sub" x="300" y="534" text-anchor="middle">with a green entrepreneur</text>
+
+        <text class="lbl" x="106" y="294" text-anchor="end">EARN AGAIN</text>
+        <text class="lbl-sub" x="106" y="316" text-anchor="end">the purchase credits it too</text>
+
+        <text class="lbl lbl-gold" x="506" y="486">OR GIVE</text>
+        <text class="lbl-sub" x="506" y="508">points to an initiative</text>
+
+        <text class="ctr" x="300" y="296" text-anchor="middle">ONE WALLET</text>
+        <text class="ctr-sub" x="300" y="320" text-anchor="middle">every point tagged with its source</text>
+      </svg>
+    </div>
+    <p class="num">03</p>
+  </section>
+
+  <!-- 4 ─ what it feels like -->
+  <section class="slide" aria-label="What it feels like to use">
+    <p class="eyebrow">The experience</p>
+    <h2>Four steps, standing at the bin.</h2>
+
+    <div class="steps">
+      <div class="step">
+        <p class="step__n">STEP 1</p>
+        <div class="phone" aria-hidden="true">
+          <span class="phone__bar"></span>
+          <div class="qr">
+            <i class="on"></i><i class="on"></i><i></i><i class="on"></i><i class="on"></i>
+            <i class="on"></i><i></i><i class="on"></i><i></i><i class="on"></i>
+            <i></i><i class="on"></i><i class="on"></i><i class="on"></i><i></i>
+            <i class="on"></i><i></i><i class="on"></i><i></i><i class="on"></i>
+            <i class="on"></i><i class="on"></i><i></i><i class="on"></i><i class="on"></i>
+          </div>
+        </div>
+        <h3>Scan the code on the bin</h3>
+        <p>A printed sticker, not a smart bin. That is the whole reason this can actually reach a neighbourhood.</p>
+      </div>
+
+      <div class="step">
+        <p class="step__n">STEP 2</p>
+        <div class="phone" aria-hidden="true">
+          <span class="phone__bar"></span>
+          <div class="frame"><span></span><span></span><span></span><span></span></div>
+        </div>
+        <h3>Photograph the disposal</h3>
+        <p>And say what it is and how much. Declaring it is what gives us something to check the picture against.</p>
+      </div>
+
+      <div class="step">
+        <p class="step__n">STEP 3</p>
+        <div class="phone" aria-hidden="true">
+          <span class="phone__bar"></span>
+          <div class="geo"><b></b></div>
+        </div>
+        <h3>Your phone proves you're there</h3>
+        <p>Location is captured at the moment of the scan, and checked against the bin's own recorded position.</p>
+      </div>
+
+      <div class="step">
+        <p class="step__n">STEP 4</p>
+        <div class="phone" aria-hidden="true">
+          <span class="phone__bar"></span>
+          <div class="bigpts">+50</div>
+          <span class="stamp">Verified</span>
+        </div>
+        <h3>Points land, with a receipt</h3>
+        <p>A notification tells you the decision. Every balance change is a line in a ledger you can read back.</p>
+      </div>
+    </div>
+
+    <div class="rate">
+      <span><span class="pts">100</span> points = <span class="tk">৳10</span></span>
+      <span class="muted">One disposal is worth about <span class="tk">৳5</span></span>
+      <span class="muted">Spent in multiples of ten — the remainder stays in your wallet</span>
+    </div>
+    <p class="num">04</p>
+  </section>
+
+  <!-- 5 ─ proof -->
+  <section class="slide slide--ink" aria-label="The hard part is proof">
+    <p class="eyebrow">Why this is hard</p>
+    <h2>A rewards system is worth exactly what its proof is worth.</h2>
+    <p class="lede">Five things have to hold before a single point is paid.</p>
+
+    <div class="gates">
+      <div class="gate">
+        <p class="label">Where</p>
+        <p>The photo has to be taken within a set radius of a registered bin. That distance is recomputed <strong>on our server</strong> against the bin's own recorded position — never trusted from the phone, because a phone can lie about where it is.</p>
+      </div>
+      <div class="gate">
+        <p class="label">What</p>
+        <p>An automated screen checks that the picture actually shows what the person said they were throwing away.</p>
+      </div>
+      <div class="gate">
+        <p class="label">Again</p>
+        <p>Every photo is fingerprinted, so the same picture submitted twice — at any bin, on any day — is caught.</p>
+      </div>
+      <div class="gate">
+        <p class="label">When</p>
+        <p>Six hours between claims at the same bin, and three approved disposals a day. Enough for a genuine twice-daily trip; not enough to farm.</p>
+      </div>
+      <div class="gate">
+        <p class="label">Who</p>
+        <p>Anything uncertain — a low confidence score, a count that disagrees with the photo, a screen we couldn't reach — goes to a person, not to a payout.</p>
+      </div>
+    </div>
+
+    <p class="stmt" style="margin-top:1.9rem; max-width:56ch">The system fails toward review, never toward payout. And no phone, ever, decides what it gets paid.</p>
+    <p class="num">05</p>
+  </section>
+
+  <!-- 6 ─ marketplace -->
+  <section class="slide" aria-label="Where the points go: the marketplace">
+    <p class="eyebrow">Where the points go</p>
+    <h2>A marketplace where handmade and recycled is the premise, not the handicap.</h2>
+
+    <div class="cols" style="margin-top:2rem">
+      <div class="stack" style="gap:1.1rem">
+        <div class="panel">
+          <p class="label">For the shopper</p>
+          <p>Points come off the bill — up to half of it. They supplement money; they never replace it, so a listing always earns its seller real income.</p>
+        </div>
+        <div class="panel">
+          <p class="label">For the entrepreneur</p>
+          <p>A channel where being handmade or recycled-material is the basis of the market, plus a reputation attached to the person rather than to a page they could lose tomorrow.</p>
+        </div>
+        <div class="panel">
+          <p class="label">For both</p>
+          <p>Confirming the delivery is what releases the purchase points. Both sides have to show up before anything is credited.</p>
+        </div>
+      </div>
+
+      <div class="stack" style="gap:0">
+        <hr class="rule">
+        <div class="row" style="border-bottom:1px solid var(--rule); padding:1.1rem 0">
+          <p class="label">Earn back</p>
+          <p><span class="pts">5%</span> of every order returns as points</p>
+        </div>
+        <div class="row" style="border-bottom:1px solid var(--rule); padding:1.1rem 0">
+          <p class="label">Point ceiling</p>
+          <p>At most half of a bill can be paid in points</p>
+        </div>
+        <div class="row" style="border-bottom:1px solid var(--rule); padding:1.1rem 0">
+          <p class="label">Mixed cart</p>
+          <p>Splits into one order per entrepreneur, automatically</p>
+        </div>
+        <div class="row" style="border-bottom:1px solid var(--rule); padding:1.1rem 0">
+          <p class="label">Paying</p>
+          <p>Cash on delivery, or a bKash / Nagad / card journey</p>
+        </div>
+        <p class="src" style="margin-top:1.1rem">Reward values are tunable at runtime, not baked into the app</p>
+      </div>
+    </div>
+    <p class="num">06</p>
+  </section>
+
+  <!-- 7 ─ giving -->
+  <section class="slide" aria-label="Or the points go to a cause">
+    <p class="eyebrow">The other exit</p>
+    <h2>Or the points go to a cause instead.</h2>
+    <p class="lede">Someone who would rather not shop can put what they earned straight into work on the ground.</p>
+
+    <div class="cols-3" style="margin-top:2.2rem">
+      <div class="panel"><p class="label">Initiative 01</p><h3>Waste recovery</h3><p class="muted">Getting more of what's thrown away back out of the stream.</p></div>
+      <div class="panel"><p class="label">Initiative 02</p><h3>Tree planting</h3><p class="muted">The most legible thing a small contribution can add up to.</p></div>
+      <div class="panel"><p class="label">Initiative 03</p><h3>Green entrepreneurship</h3><p class="muted">Backing the producers the marketplace exists for.</p></div>
+    </div>
+
+    <div class="rate" style="margin-top:2.3rem">
+      <span>Choose whole points, see the effect on the balance, confirm once.</span>
+      <span class="muted">Retrying a confirmation never gives twice.</span>
+    </div>
+
+    <div class="caveat">
+      <strong>Said plainly:</strong> online giving through bKash, Nagad and card is built as a complete journey, and in this prototype it moves no real money and collects no card details. Point donations are real point movements; they are not cash and not tax-deductible.
+    </div>
+    <p class="num">07</p>
+  </section>
+
+  <!-- 8 ─ roles -->
+  <section class="slide" aria-label="Three kinds of people, one app">
+    <p class="eyebrow">Who uses it</p>
+    <h2>Three kinds of people, one app, one account each.</h2>
+
+    <div class="rows">
+      <div class="row">
+        <p class="label">3ZERO Champion</p>
+        <p><strong>Everyone starts here.</strong> Dispose, earn, spend, give — and read about becoming an entrepreneur when they're ready to.</p>
+      </div>
+      <div class="row">
+        <p class="label">3ZERO Greenpreneur</p>
+        <p><strong>Still a Champion too.</strong> Lists products, manages stock, moves orders along. Applies through the app; an admin approves.</p>
+      </div>
+      <div class="row">
+        <p class="label">3ZERO Admin</p>
+        <p><strong>Holds all three.</strong> Registers bins and prints their labels, works through whatever got flagged, tunes the reward values, suspends abuse, and watches the totals.</p>
+      </div>
+    </div>
+
+    <p class="stmt" style="margin-top:2rem">You don't juggle three accounts. You switch workspace — and what you're permitted to do never changes with the view you're in.</p>
+    <p class="num">08</p>
+  </section>
+
+  <!-- 9 ─ built -->
+  <section class="slide" aria-label="This already works">
+    <p class="eyebrow">Status</p>
+    <h2>This isn't a concept. It runs.</h2>
+
+    <div class="stats">
+      <div class="stat"><b>40</b><span>features built</span><em>Identity, disposal, points, marketplace, admin, self-reported actions, notifications.</em></div>
+      <div class="stat"><b>2</b><span>platforms, one codebase</span><em>Android and the browser, with no forked logic between them.</em></div>
+      <div class="stat"><b>1,130</b><span>automated tests</span><em>616 on the app, 282 on the service, 232 on the security rules.</em></div>
+      <div class="stat"><b>41k</b><span>lines of product code</span><em>Plus 15,500 lines of tests behind it.</em></div>
+    </div>
+
+    <div class="parts">
+      <div class="part"><b>The app</b>Flutter, one codebase</div>
+      <div class="part"><b>A trusted service</b>the only thing that can move a point</div>
+      <div class="part"><b>Automated photo screening</b>with a human fallback</div>
+      <div class="part"><b>Push notifications</b>on every decision</div>
+      <div class="part"><b>Printable bin labels</b>high error-correction QR</div>
+      <div class="part"><b>A ledger</b>every balance reconstructable</div>
+    </div>
+
+    <p class="stmt" style="margin-top:2rem; max-width:60ch">A working prototype — and the full earn-and-spend cycle runs end to end, in one continuous demo, which is the part most of these ideas never reach.</p>
+    <p class="num">09</p>
+  </section>
+
+  <!-- 10 ─ what partners get -->
+  <section class="slide" aria-label="What each partner gets">
+    <p class="eyebrow">What's in it for you</p>
+    <h2>Four different people get four different things out of the same loop.</h2>
+
+    <div class="rows">
+      <div class="row">
+        <p class="label">Cities &amp; bin operators</p>
+        <p>Attributable, timestamped, location-verified disposal data. Which bins get used, when, and by how many distinct people — which is not measurable today at any price.</p>
+      </div>
+      <div class="row">
+        <p class="label">Green entrepreneurs</p>
+        <p>A market where their materials are the premise, and a reputation that travels with them instead of living on a page.</p>
+      </div>
+      <div class="row">
+        <p class="label">Sponsors</p>
+        <p>Rewards you fund are only paid against evidence that survived five checks, and every point of it is reconstructable from a ledger. You can see what your money actually bought.</p>
+      </div>
+      <div class="row">
+        <p class="label">The neighbourhood</p>
+        <p>Money circulating between residents and small local producers, instead of leaving for mass-produced imports.</p>
+      </div>
+    </div>
+    <p class="num">10</p>
+  </section>
+
+  <!-- 11 ─ next -->
+  <section class="slide" aria-label="What happens next">
+    <p class="eyebrow">Where it goes</p>
+    <h2>The next version of this is a pilot, not a feature.</h2>
+
+    <div class="horizon">
+      <div>
+        <p class="label">Now</p>
+        <h3>One neighbourhood</h3>
+        <p>Register a real set of bins, print and mount the labels, and run the loop with real users and a real reward pool.</p>
+      </div>
+      <div>
+        <p class="label">Next</p>
+        <h3>Works with no signal</h3>
+        <p>A submission composed at a roadside bin should queue and send itself later. Plus a Bangla interface — the app is built for it, it isn't translated yet.</p>
+      </div>
+      <div>
+        <p class="label">Then</p>
+        <h3>Real rails, shared data</h3>
+        <p>Live payment integration in place of the simulated journeys, and disposal data handed back to the city that owns the bins.</p>
+      </div>
+    </div>
+
+    <div class="caveat">
+      <strong>The honest boundary:</strong> this does not solve waste management, and we won't tell you it does. It makes one link in the chain — a person's decision at the moment of disposal — measurable and worth something, and it points the resulting value at local producers instead of out of the community.
+    </div>
+    <p class="num">11</p>
+  </section>
+
+  <!-- 12 ─ the ask -->
+  <section class="slide slide--ink" aria-label="The ask">
+    <p class="eyebrow">The ask</p>
+    <h2>Three things, and the loop starts turning.</h2>
+
+    <div class="ask">
+      <div class="rows" style="margin-top:1.4rem">
+        <div class="row">
+          <p class="label">Bins</p>
+          <p>One neighbourhood, one operator willing to let us label their bins and record where they are.</p>
+        </div>
+        <div class="row">
+          <p class="label">Entrepreneurs</p>
+          <p>A first cohort of makers to open the marketplace with, so there is something worth spending on.</p>
+        </div>
+        <div class="row">
+          <p class="label">Sponsorship</p>
+          <p>The reward pool and the pilot's running costs — the only place real money is needed to prove the loop.</p>
+        </div>
+      </div>
+
+      <div class="stack" style="gap:1.6rem; margin-top:1.9rem">
+        <p class="stmt">Everything else is built.</p>
+        <div class="contact">
+          <b>Arnish</b>
+          <span>Lamppost</span>
+          <a href="mailto:arnish@lamppost.org.bd">arnish@lamppost.org.bd</a>
+        </div>
+      </div>
+    </div>
+    <p class="num">12</p>
+  </section>
+
+</div>
+
+<div class="rail" aria-hidden="true"><div class="rail__fill" id="railFill"></div></div>
+<nav class="dots" id="dots" aria-label="Slides"></nav>
+<div class="arrows">
+  <button type="button" id="prev" aria-label="Previous slide">←</button>
+  <button type="button" id="next" aria-label="Next slide">→</button>
+</div>
+<p class="hint" id="hint">Use → or click the arrows</p>
+
+<script>
+  (function () {
+    var deck = document.getElementById('deck');
+    var slides = Array.prototype.slice.call(deck.querySelectorAll('.slide'));
+    var fill = document.getElementById('railFill');
+    var dotsWrap = document.getElementById('dots');
+    var hint = document.getElementById('hint');
+    var current = 0;
+
+    slides.forEach(function (s, i) {
+      var b = document.createElement('button');
+      b.type = 'button';
+      b.setAttribute('aria-label', 'Go to slide ' + (i + 1));
+      b.addEventListener('click', function () { go(i); });
+      dotsWrap.appendChild(b);
+    });
+    var dots = Array.prototype.slice.call(dotsWrap.children);
+
+    function paint(i) {
+      current = i;
+      fill.style.width = ((i + 1) / slides.length * 100) + '%';
+      dots.forEach(function (d, n) { d.setAttribute('aria-current', n === i ? 'true' : 'false'); });
+    }
+
+    function go(i) {
+      i = Math.max(0, Math.min(slides.length - 1, i));
+      slides[i].scrollIntoView({ behavior: 'smooth', block: 'start' });
+      paint(i);
+      if (hint) hint.classList.add('gone');
+    }
+
+    if ('IntersectionObserver' in window) {
+      var io = new IntersectionObserver(function (entries) {
+        entries.forEach(function (e) {
+          if (e.isIntersecting && e.intersectionRatio > 0.55) {
+            e.target.classList.add('is-active');
+            paint(slides.indexOf(e.target));
+          }
+        });
+      }, { threshold: [0.55] });
+      slides.forEach(function (s) { io.observe(s); });
+    } else {
+      slides.forEach(function (s) { s.classList.add('is-active'); });
+    }
+    slides[0].classList.add('is-active');
+    paint(0);
+
+    document.getElementById('next').addEventListener('click', function () { go(current + 1); });
+    document.getElementById('prev').addEventListener('click', function () { go(current - 1); });
+
+    document.addEventListener('keydown', function (e) {
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      var k = e.key;
+      if (k === 'ArrowRight' || k === 'ArrowDown' || k === 'PageDown' || k === ' ') { e.preventDefault(); go(current + 1); }
+      else if (k === 'ArrowLeft' || k === 'ArrowUp' || k === 'PageUp') { e.preventDefault(); go(current - 1); }
+      else if (k === 'Home') { e.preventDefault(); go(0); }
+      else if (k === 'End') { e.preventDefault(); go(slides.length - 1); }
+    });
+
+    setTimeout(function () { if (hint) hint.classList.add('gone'); }, 6500);
+  }());
+</script>
+
+</body></html>

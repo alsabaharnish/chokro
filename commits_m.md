@@ -17,6 +17,28 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-08-26 11:47 (+06) — A launch config for the trusted service
+
+Registering a bin failed with "Could not reach the server. It may be offline,
+or it may be refusing requests from this address." The message was accurate and
+the client code was correct: nothing was listening on `localhost:8787`, the
+address the running web build was compiled against. `.claude/launch.json`
+described only the hosting origin, so there was no configured way to start the
+backend; it now carries a `chokro-server` entry running `npm run dev` from
+`server/`. That script is the one that sets `ALLOW_LOOPBACK_ORIGINS=true`,
+which matters because `flutter run -d chrome` takes a fresh random port each
+launch and `ALLOWED_ORIGINS` names only `http://localhost:5000` — so a server
+started with `npm start` would have refused the browser and produced the very
+same sentence.
+
+No application code changed.
+
+Files: `.claude/launch.json`
+Checks: `/health` 200; preflight `OPTIONS /bins` from the app's live origin
+`http://localhost:64129` returns 204 with a matching
+`Access-Control-Allow-Origin`; `POST /bins` reaches the handler and returns
+401 `unauthenticated` instead of failing to connect.
+
 ## 2026-08-26 11:40 (+06) — The five never-audited areas, audited
 
 The prior audit planned eleven areas of `lib/` and ran six. The remaining five
