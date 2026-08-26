@@ -35,6 +35,25 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  try {
+    await _initialise();
+  } catch (error, stack) {
+    // Unguarded, a failure here left a black screen and nothing else: no
+    // message, no retry, no clue. `DefaultFirebaseOptions.currentPlatform`
+    // throws `UnsupportedError` on macOS, Windows and Linux — and macOS is one
+    // of the run targets `core/api_config.dart` documents — and
+    // `initializeApp` throws on a malformed or missing platform config.
+    debugPrint('[startup] Initialisation failed: $error\n$stack');
+    runApp(_StartupFailureApp(error: error));
+    return;
+  }
+
+  runApp(const ProviderScope(child: ChokroApp()));
+}
+
+/// Everything that must succeed before the app can be shown.
+Future<void> _initialise() async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
 
   // Offline persistence, set explicitly rather than left to the platform
@@ -74,8 +93,85 @@ Future<void> main() async {
   // first screen that needs the service is not the one paying for the cold
   // start. Fire-and-forget: it never blocks startup and never surfaces an error.
   ServerWarmup.ping();
+}
 
-  runApp(const ProviderScope(child: ChokroApp()));
+/// The last-resort screen: initialisation failed, so there is no Riverpod
+/// container, no router and no Firebase to lean on.
+///
+/// Deliberately not `StartupErrorView` — that one lives inside the provider
+/// scope and retries providers, neither of which exists yet here.
+class _StartupFailureApp extends StatelessWidget {
+  const _StartupFailureApp({required this.error});
+
+  final Object error;
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Chokro',
+      theme: AppTheme.light(),
+      darkTheme: AppTheme.dark(),
+      home: Builder(
+        builder: (context) {
+          final theme = Theme.of(context);
+          return Scaffold(
+            body: SafeArea(
+              child: Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(AppTheme.gapXl),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(
+                      maxWidth: AppTheme.maxFormWidth,
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.cloud_off_outlined,
+                          size: 56,
+                          color: theme.colorScheme.error,
+                        ),
+                        const SizedBox(height: AppTheme.gapMd),
+                        Text(
+                          'Chokro could not start',
+                          style: theme.textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: AppTheme.gapSm),
+                        Text(
+                          'The app could not set up its connection to Firebase. '
+                          'This usually means the build is missing its '
+                          'configuration for this platform, or this platform is '
+                          'not one Chokro supports yet.',
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const SizedBox(height: AppTheme.gapLg),
+                        // The technical detail, for whoever is running it —
+                        // selectable, because the useful thing to do with it is
+                        // paste it somewhere.
+                        SelectableText(
+                          '$error',
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
 }
 
 class ChokroApp extends ConsumerStatefulWidget {

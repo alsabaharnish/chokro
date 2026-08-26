@@ -131,7 +131,8 @@ class ReviewOutcome {
   });
 }
 
-class ReviewException implements Exception {
+class ReviewException implements UserFacingException {
+  @override
   final String message;
   const ReviewException(this.message);
 

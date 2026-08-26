@@ -184,9 +184,18 @@ class AppTheme {
           borderRadius: BorderRadius.circular(radiusSm),
           borderSide: BorderSide(color: scheme.outline),
         ),
+        // `outline`, not `outlineVariant`. `enabledBorder` is the state every
+        // field is in until it is touched, and against this theme's own
+        // `surfaceContainerLowest` fill the variant measured 1.33:1 in light
+        // and 1.75:1 in dark — under WCAG 1.4.11's 3:1 floor for the boundary
+        // of a control. The fill offers no help either: white on a #F7FAF8
+        // page is 1.09:1, so the field edge was the only thing marking where
+        // to type. `outlineVariant` is Material's role for decorative
+        // dividers; `outline` is the one specified for text-field outlines,
+        // and `border` above already uses it.
         enabledBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(radiusSm),
-          borderSide: BorderSide(color: scheme.outlineVariant),
+          borderSide: BorderSide(color: scheme.outline),
         ),
         focusedBorder: OutlineInputBorder(
           borderRadius: BorderRadius.circular(radiusSm),

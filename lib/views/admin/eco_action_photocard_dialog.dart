@@ -236,133 +236,156 @@ class _EcoActionPhotocardDialogState extends State<_EcoActionPhotocardDialog> {
         body: SafeArea(
           child: Column(
             children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 14, 10, 8),
-                child: Row(
+              // The chrome scrolls; the action bar stays pinned. As a bare
+              // Column with an `Expanded` preview, the fixed children — a
+              // ~100-character checkbox title, its subtitle, the header and
+              // the privacy notice, all of which grow with the text scale —
+              // consumed the whole height at Android "Large" on a small
+              // phone. `Expanded` then clamped to zero, RenderFlex
+              // overflowed, and Save, Share and Print were pushed off the
+              // bottom with no way to reach them.
+              Expanded(
+                child: ListView(
+                  padding: EdgeInsets.zero,
                   children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 14, 10, 8),
+                      child: Row(
                         children: [
-                          Text(
-                            'Eco-action photocard',
-                            style: theme.textTheme.titleLarge,
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            'The exported PNG is 1080 × 1080.',
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.onSurfaceVariant,
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Eco-action photocard',
+                                  style: theme.textTheme.titleLarge,
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  'The exported PNG is 1080 × 1080.',
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                    color: theme.colorScheme.onSurfaceVariant,
+                                  ),
+                                ),
+                              ],
                             ),
+                          ),
+                          IconButton(
+                            tooltip: 'Close preview',
+                            onPressed: _busy
+                                ? null
+                                : () => Navigator.of(context).pop(),
+                            icon: const Icon(Icons.close),
                           ),
                         ],
                       ),
                     ),
-                    IconButton(
-                      tooltip: 'Close preview',
-                      onPressed: _busy
-                          ? null
-                          : () => Navigator.of(context).pop(),
-                      icon: const Icon(Icons.close),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20),
+                      child: _PrivacyNotice(data: widget.data),
                     ),
-                  ],
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 20),
-                child: _PrivacyNotice(data: widget.data),
-              ),
-              if (!widget.data.publishesIdentity)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
-                  child: CheckboxListTile(
-                    value: _anonymousContentReviewed,
-                    onChanged: _busy
-                        ? null
-                        : (value) => setState(
-                            () => _anonymousContentReviewed = value ?? false,
+                    if (!widget.data.publishesIdentity)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(12, 4, 12, 0),
+                        child: CheckboxListTile(
+                          value: _anonymousContentReviewed,
+                          onChanged: _busy
+                              ? null
+                              : (value) => setState(
+                                  () => _anonymousContentReviewed =
+                                      value ?? false,
+                                ),
+                          controlAffinity: ListTileControlAffinity.leading,
+                          title: const Text(
+                            'I checked the photo and story for names, faces, addresses, uniforms and other identifying details.',
                           ),
-                    controlAffinity: ListTileControlAffinity.leading,
-                    title: const Text(
-                      'I checked the photo and story for names, faces, addresses, uniforms and other identifying details.',
-                    ),
-                    subtitle: const Text(
-                      'The saved profile name and picture are hidden, but the submitted content may still identify someone.',
-                    ),
-                  ),
-                ),
-              if (widget.data.storyIsCondensed)
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
-                  child: Text(
-                    'The square card uses a readable excerpt of this long story; the full story remains in the admin gallery.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ),
-              Expanded(
-                child: Stack(
-                  children: [
-                    Positioned.fill(
-                      child: Padding(
-                        padding: const EdgeInsets.all(20),
-                        child: Center(
-                          child: FittedBox(
-                            fit: BoxFit.contain,
-                            child: RepaintBoundary(
-                              key: _captureKey,
-                              child: EcoActionPhotocard(
-                                data: widget.data,
-                                actionPhoto: _actionPhoto,
-                                championPhoto: _championPhoto,
-                              ),
-                            ),
+                          subtitle: const Text(
+                            'The saved profile name and picture are hidden, but the submitted content may still identify someone.',
                           ),
                         ),
                       ),
-                    ),
-                    if (_preparing)
-                      const Positioned.fill(
-                        child: ColoredBox(
-                          color: Color(0xA8FFFFFF),
-                          child: Center(child: CircularProgressIndicator()),
+                    if (widget.data.storyIsCondensed)
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(20, 4, 20, 0),
+                        child: Text(
+                          'The square card uses a readable excerpt of this long story; the full story remains in the admin gallery.',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: theme.colorScheme.onSurfaceVariant,
+                          ),
                         ),
                       ),
-                    if (_preparationError != null)
-                      Positioned.fill(
-                        child: ColoredBox(
-                          color: theme.colorScheme.surface.withValues(
-                            alpha: .94,
-                          ),
-                          child: Center(
+                    // Bounded, not `Expanded`: this now lives inside a scroll
+                    // view, whose main axis is unbounded, and `Expanded` there
+                    // asserts. Square because the photocard itself is square, so
+                    // the `FittedBox` inside has the aspect ratio it wants.
+                    AspectRatio(
+                      aspectRatio: 1,
+                      child: Stack(
+                        children: [
+                          Positioned.fill(
                             child: Padding(
-                              padding: const EdgeInsets.all(28),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  Icon(
-                                    Icons.broken_image_outlined,
-                                    size: 42,
-                                    color: theme.colorScheme.error,
+                              padding: const EdgeInsets.all(20),
+                              child: Center(
+                                child: FittedBox(
+                                  fit: BoxFit.contain,
+                                  child: RepaintBoundary(
+                                    key: _captureKey,
+                                    child: EcoActionPhotocard(
+                                      data: widget.data,
+                                      actionPhoto: _actionPhoto,
+                                      championPhoto: _championPhoto,
+                                    ),
                                   ),
-                                  const SizedBox(height: 12),
-                                  Text(
-                                    _preparationError!,
-                                    textAlign: TextAlign.center,
-                                  ),
-                                  const SizedBox(height: 14),
-                                  OutlinedButton.icon(
-                                    onPressed: _prepareImages,
-                                    icon: const Icon(Icons.refresh),
-                                    label: const Text('Retry'),
-                                  ),
-                                ],
+                                ),
                               ),
                             ),
                           ),
-                        ),
+                          if (_preparing)
+                            const Positioned.fill(
+                              child: ColoredBox(
+                                color: Color(0xA8FFFFFF),
+                                child: Center(
+                                  child: CircularProgressIndicator(),
+                                ),
+                              ),
+                            ),
+                          if (_preparationError != null)
+                            Positioned.fill(
+                              child: ColoredBox(
+                                color: theme.colorScheme.surface.withValues(
+                                  alpha: .94,
+                                ),
+                                child: Center(
+                                  child: Padding(
+                                    padding: const EdgeInsets.all(28),
+                                    child: Column(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          Icons.broken_image_outlined,
+                                          size: 42,
+                                          color: theme.colorScheme.error,
+                                        ),
+                                        const SizedBox(height: 12),
+                                        Text(
+                                          _preparationError!,
+                                          textAlign: TextAlign.center,
+                                        ),
+                                        const SizedBox(height: 14),
+                                        OutlinedButton.icon(
+                                          onPressed: _prepareImages,
+                                          icon: const Icon(Icons.refresh),
+                                          label: const Text('Retry'),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                        ],
                       ),
+                    ),
                   ],
                 ),
               ),

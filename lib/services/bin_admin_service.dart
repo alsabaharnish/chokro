@@ -157,7 +157,8 @@ void _log(String context, Object error, [StackTrace? stackTrace]) {
   if (stackTrace != null) debugPrint('$stackTrace');
 }
 
-class BinAdminException implements Exception {
+class BinAdminException implements UserFacingException {
+  @override
   final String message;
   final List<String> problems;
 

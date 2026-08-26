@@ -14,14 +14,17 @@
 /// the caller.
 library;
 
+import 'network_errors.dart';
+
 /// An authentication failure carrying a message already fit to display.
 ///
 /// The controller converts the vendor exception into this at the boundary, so
 /// no view has to know that Firebase exists or what shape its errors are.
-class AuthFailure implements Exception {
+class AuthFailure implements UserFacingException {
   const AuthFailure(this.message, {this.code});
 
   /// Ready to show. Never null, never a stack trace, never a vendor prefix.
+  @override
   final String message;
 
   /// The originating Firebase code, kept for logging and tests. Not shown.

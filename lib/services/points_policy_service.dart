@@ -185,7 +185,8 @@ void _log(String context, Object error, [StackTrace? stackTrace]) {
   if (stackTrace != null) debugPrint('$stackTrace');
 }
 
-class PolicyException implements Exception {
+class PolicyException implements UserFacingException {
+  @override
   final String message;
 
   /// Field-level problems returned by the server's `validate()`. Empty for

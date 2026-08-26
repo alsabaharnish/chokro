@@ -1,3 +1,4 @@
+import '../core/network_errors.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/user_model.dart';
 import '../models/wallet_model.dart';
@@ -73,11 +74,26 @@ class UserService {
     return UserModel.fromFirestore(doc);
   }
 
-  Stream<UserModel?> watchUser(String uid) => _db
-      .collection('users')
-      .doc(uid)
-      .snapshots()
-      .map((doc) => doc.exists ? UserModel.fromFirestore(doc) : null);
+  /// The signed-in user's profile.
+  ///
+  /// Throws [ProfileUnavailableException] rather than emitting null when the
+  /// document is absent *and the answer came from the cache*. Those two states
+  /// are not the same thing and were indistinguishable: an offline user with a
+  /// cold cache — a reinstall, cleared storage, a new device — produced a
+  /// `doc.exists == false` snapshot that the router read as "registration was
+  /// interrupted", routing them to a screen that states as fact that their
+  /// profile is missing and suggests registering again. Their profile is fine;
+  /// the phone simply has no signal. An error routes to `StartupErrorView`
+  /// instead, which says the account service could not be reached and offers a
+  /// retry — both true and actionable.
+  Stream<UserModel?> watchUser(String uid) =>
+      _db.collection('users').doc(uid).snapshots().map((doc) {
+        if (doc.exists) return UserModel.fromFirestore(doc);
+        if (doc.metadata.isFromCache) {
+          throw const ProfileUnavailableException();
+        }
+        return null;
+      });
 
   // ── admin: user list ──────────────────────────────────────────────────────
 
@@ -198,4 +214,20 @@ class UserService {
       .doc(uid)
       .snapshots()
       .map((doc) => doc.exists ? WalletModel.fromFirestore(doc) : null);
+}
+
+/// The profile could not be read, as distinct from not existing.
+///
+/// Raised when Firestore answers from its cache with no document: offline, and
+/// this profile has never been cached on this device.
+class ProfileUnavailableException implements UserFacingException {
+  const ProfileUnavailableException();
+
+  @override
+  String get message =>
+      'Chokro could not reach the account service. Your profile has not been '
+      'changed.';
+
+  @override
+  String toString() => message;
 }

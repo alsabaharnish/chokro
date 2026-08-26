@@ -351,7 +351,8 @@ void _log(String context, Object error, [StackTrace? stackTrace]) {
   if (stackTrace != null) debugPrint('$stackTrace');
 }
 
-class OrderException implements Exception {
+class OrderException implements UserFacingException {
+  @override
   final String message;
   const OrderException(this.message);
 

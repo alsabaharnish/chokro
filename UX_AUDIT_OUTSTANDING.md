@@ -1,382 +1,474 @@
-# Outstanding UI/UX findings — 2026-08-24
+# Outstanding UI/UX findings — updated 2026-08-26
 
-Reported by an audit of six of eleven planned areas of `lib/`. Everything here
-was **read out of the code by the reporting pass but has not been independently
-re-verified**, because the verification stage of that audit did not finish. Treat
-each as a lead with a file and a line, not as a confirmed defect: the one finding
-that *was* checked in detail and disproved is recorded at the bottom.
+## What happened to the previous version of this file
 
-The findings that were confirmed and fixed are described in `commits_m.md`.
+The 2026-08-24 edition listed 44 findings from six of eleven planned areas of
+`lib/`, and opened by admitting that **its verification stage never ran** —
+every entry was a lead with a file and a line, not a confirmed defect, and it
+estimated that roughly one in ten would dissolve on contact with the code.
 
-## Not audited at all
+That stage has now run, and the file has been rewritten around the result.
 
-`admin-queues`, `admin-config`, `wallet-donations`, `seller`, and the
-cross-cutting `shared-core` sweep never ran. That leaves the admin review
-queues, the bins and points-policy consoles, the wallet ledger, the donation
-screens and the Greenpreneur console without a pass.
+**All 44 leads were read against the real source.** 43 were confirmed or partly
+confirmed and are fixed; 1 dissolved (`market-buyer-9` — the catalogue search
+field's Search key does work). Two of the doc's own *suggested fixes* were also
+wrong and would have shipped new bugs had they been applied as written:
 
+- comparing bins by `BinModel.id` to decide whether to restart a disposal draft
+  — `id` is null for an unwritten bin, so null-to-null compares equal and the
+  reset is skipped in exactly the case that needs it;
+- clearing the cached photo upload on the `clearPhoto` flag — the retake path
+  sets `photoBytes` *without* that flag, so a stale upload receipt would have
+  survived a retake and attached the previous photograph's URL to the new
+  declaration.
 
-## High severity as reported
+Both corrections are recorded in comments at the sites where they were made.
 
-### `claims-appeals-3` — Kept-alive draft strands the confirmation screen; /claims/new later opens with no form
+**The five areas that had never been audited at all** — `admin-queues`,
+`admin-config`, `wallet-donations`, `seller` and the cross-cutting
+`shared-core` sweep — have now been. They produced 75 findings, which is worse
+than the six areas that had already been looked at: **15 high severity**, 39
+medium, 21 low.
 
-**lib/controllers/claim_controller.dart:115** · bug
+All 15 high-severity findings are fixed. See `commits_m.md` for what they were;
+the ones worth knowing about are a sign-out that could not complete offline, an
+appeal review gate that leaked between appeals, a listing save that wrote stale
+stock over the server's decrements, a donation retry that could debit twice, and
+a redemption ratio the app accepted but would not honour.
 
-The primary path to logging an eco-action is broken for anyone who left the confirmation screen by the back button: it reports a stale claim as if it were just submitted and shows no form at all. It also pins the compressed photo bytes (`draft.photoBytes`) in memory for the rest of the session, since `keepAlive` prevents disposal.
+## What is left
 
-*Suggested:* Do not let the terminal state persist across a route exit. In `ClaimSubmitView`, keep the same `keepAlive` for an in-progress draft but clear the completed one on the way out — the codebase's own idiom for this is a `reset()` call, so make `_ClaimSubmitted` a `ConsumerStatefulWidget` whose `dispose()` schedules `ref.read(claimDraftProvider.notifier).reset()`. Alternatively drop `submittedId` from `ClaimDraft` altogether and let local `_sent` state in a `ConsumerStatefulWidget` own the confirmation, the way `AppealFormView._sent` (appeal_form_view.dart:45) already does — that widget has exactly the same two-phase shape and does not suffer this bug.
+Everything below is a **medium or low severity finding that has been verified
+against the code but not yet fixed**. Unlike the previous edition of this file,
+these are not unread leads: each was produced by a pass that opened the named
+file and quoted the code it is about. They are ordered by severity, then by
+file.
 
-### `market-buyer-3` — The checkout screen never consults unavailableCartItemsProvider — delisted lines vanish from the totals silently and short-stock lines are quoted, both refused by the server after payment is simulated
+Three areas of the audit did not complete and are still owed: the
+`firestore-cost`, `render-cost` and `state-lifecycle` performance lanes hit a
+usage limit before running. A performance pass was done by hand instead and is
+described in `commits_m.md` (image decode bounds, list virtualisation, hoisted
+per-build work), but it was not the systematic sweep those lanes would have
+been. Anything they would have found is still unfound.
 
-**lib/views/market/checkout_view.dart:48** · bug
+## Medium severity
 
-The buyer commits to a total computed over a silently different basket, and — having already pressed "Simulate successful payment" — is rejected by the server with a message the checkout screen gives them no way to act on. In the all-delisted case the app contradicts itself outright: "Your cart is empty" beside a cart badge showing three items.
+### The dashboard's Accounts section renders confident zeros while the account stream is loading or has failed
 
-*Suggested:* Watch `unavailableCartItemsProvider` in `_CheckoutViewState.build` alongside the quote, and when it is non-empty render the block the cart screen already has instead of the body — reuse the same shape as `_ProblemsCard` (an `errorContainer` Card listing `problem.title — problem.reason`) with a `FilledButton` "Back to cart" via `context.go('/cart')`, and disable Place Order, mirroring the cart footer's `blocked ? null : ...`. Fix the `quote.isEmpty` copy at line 97 too: when the raw cart is non-empty but every line resolved away, it should say the listings were withdrawn, not "Your cart is empty".
+**lib/controllers/dashboard_controller.dart:50** · bug
 
-### `home-profile-3` — Profile picker bottom sheet cannot scroll, clipping the third profile at large text
+On every cold open of the dashboard the Accounts section shows "Accounts 0 / Counted live, not a counter", "3ZERO Greenpreneurs 0", "0 Champions, 0 3ZERO Admins", "Cannot act 0" until the users stream arrives — and if that stream errors, those zeros are permanent with no error message and no retry. The tile's own subtitle asserts the figure is counted live, and `_ProvenanceNote` (395-406) repeats the claim, so an operator has every reason to believe the platform has no accounts and nobody is suspended. Nothing on screen distinguishes "zero" from "not loaded", which is exactly the distinction `_rate` (240-243) was written to preserve for the other counters.
 
-**lib/views/shared/account_profile_switcher.dart:129** · responsive
+*Suggested:* Change `accountTotalsProvider` to `Provider.autoDispose<AsyncValue<AccountTotals>>` (or expose `allUsersProvider`'s AsyncValue alongside it) and render the Accounts `_StatGrid` through `.when`: `ContentLoading(label: 'Counting accounts…')` while loading and `ErrorRetry(error: e, title: 'Account totals', onRetry: () => ref.invalidate(allUsersProvider))` on failure — the same treatment the counters above already get.
 
-An admin or greenpreneur using accessibility text sizes cannot reach the last profile in the list, so they are locked out of the Champion workspace (shopping, donating, eco-actions) from either entry point. The picker is the only general way to switch.
+### Notification permission is asked for with no context and has no denial path anywhere in the app
 
-*Suggested:* Wrap the `Column` in a `SingleChildScrollView` (or make it a `ListView(shrinkWrap: true)`), which is what `isScrollControlled: true` is there to enable; the theme's `bottomSheetTheme` already supplies the drag handle and rounded top.
+**lib/controllers/push_controller.dart:100** · ux
 
-### `home-profile-4` — Suspended Greenpreneur and Admin get dead navigation tabs that silently do nothing
+The prompt appears the instant the home screen loads, before the user has seen anything that would justify it — the most likely moment to reflexively decline. After that, F7.1 decision notifications silently never arrive, forever, with nothing in the app that says notifications are off or offers a way to turn them on. The user concludes the app doesn't notify.
 
-**lib/views/shared/app_shell.dart:53** · ux
+*Suggested:* The codebase already has both halves of the pattern: `LocationService.openSettings()` (location_service.dart:155) for the permanently-denied case, and `NoticeCard` with a `NoticeAction` for stating a condition plus its one remedy. Expose the outcome as a provider (`pushPermissionProvider`) set by `_sync`, and render `NoticeCard(tone: NoticeTone.info, icon: Icons.notifications_off_outlined, message: 'Decision notifications are turned off for Chokro. Your history still shows every outcome.', action: NoticeAction(label: 'Open settings', onPressed: …))` on the profile screen.
 
-The most prominent control on the screen is inert with no explanation, directly contradicting the home cards that do explain themselves. The user taps repeatedly and concludes the app is broken rather than that their account is suspended.
+### "Log another eco-action" silently navigates to Home for every Admin and Greenpreneur
 
-*Suggested:* In `AppShell`, gate the destination list on the account state the same way home does — e.g. `final suspended = user != null && !user.isActive;` and fall back to the Champion destination set (all of which are `requireSignedIn`) when suspended, or keep the tabs and have `onSelect` show a SnackBar carrying the same "Unavailable while suspended." wording instead of a `go` that bounces.
+**lib/routing/router.dart:358** · ux
 
+A visible, enabled, primary control does nothing except move the user to Home with no message. The user cannot discover that the fix is to switch workspace, because nothing says so.
 
-## Medium severity as reported
+*Suggested:* Follow app_shell.dart:178-188's rule — 'Say why, rather than bouncing'. In `ClaimHistoryView`, watch `activeAccountProfileProvider` and when it is not `champion` replace the button's action with `showAccountProfilePicker(context, ref)` under a label naming the requirement ('Switch to 3ZERO Champion to log an action'), the same switcher app_shell.dart:280 already opens.
 
-### `claims-appeals-2` — "N claims left this week" counts approvals, but reads as submissions
+### The fulfilment queue silently drops the oldest orders past 40, and the open-orders banner undercounts with them
 
-**lib/services/claim_service.dart:238** · copy
+**lib/services/order_service.dart:65** · bug
 
-On a submission form, "3 claims left this week" is read as "I may submit three more". The user submits five, is told each one is under review, and later receives two rejections they had no way to anticipate — the same surprise the class doc for `ClaimQuotaStatus.fromJson` (lines 206-217) says F6.4 exists to prevent.
+The cap discards the *oldest* orders, which are exactly the ones a seller has not fulfilled. Past 40 orders, an unshipped order silently leaves the queue for good: it is not in the list, it is not in the banner count, and there is no control anywhere that can reach it. A Champion's order is never shipped and the seller has no way to discover it exists — while the sales report, two taps away, goes out of its way to warn about a truncation that costs nobody anything.
 
-*Suggested:* Say what the number actually counts, and name the reset the server already names. In `summary`, use `'$remaining more claim${remaining == 1 ? '' : 's'} can be approved this week.'` and, for the exhausted case, `'All $limit approved claims for this week are used. The count resets on Monday.'` Then drop the now-pointless `ref.invalidate(claimQuotaProvider)` at claim_controller.dart:218, or move it to where the quota can genuinely change.
+*Suggested:* Give the fulfilment list the same honesty the report already has. Read one past the cap and carry the fact, mirroring `watchSellerOrdersForReport` (order_service.dart:88-102): return a `SellerOrderPage`, and render a `_Caveat`-style note at the top of `seller_orders_view` when `truncated` — "Showing your 40 most recent orders. Older ones are not listed." Better still for this screen, sort open orders ahead of closed ones before applying the cap client-side, so the cap can only ever drop orders with nothing left to do.
 
-### `claims-appeals-5` — A duplicate appeal is refused with a message that names the wrong two reasons
+### The ledger stops at 50 entries with no disclosure and no way to load older ones
 
-**lib/views/appeals/appeal_form_view.dart:190** · bug
+**lib/services/transaction_service.dart:25** · ux
 
-The user is told they do not own their own rejected submission, or that it was not rejected — both false. They have no way to work out that the appeal already exists or where to read it, and the message gives no next step.
+An active Champion - disposals at 50 points each, eco-action claims, purchases, redemptions, donations - passes 50 ledger entries within months. From then on the wallet silently shows only the newest 50 with no indication anything is missing and no route to older history, which is precisely the NFR-4 property the screen's own header comment claims to make visible ('the balance is reconstructable from history'). The '+N earned across the entries below' line (wallet_ledger_view.dart:124-126) also becomes a partial figure presented without qualification.
 
-*Suggested:* Two changes. (a) Name the actual third condition in `_failureMessage`, since the rules enforce one appeal per subject: '...You can only appeal your own submissions, only ones that were rejected, and only once — if you already appealed this, the answer will appear on your appeals screen.' (b) Stop the button from lying while the stream is loading: change `appealedSubjectIdsProvider` to expose the loading state (e.g. a `Provider.autoDispose<Set<String>?>` returning `null` until `asData` is non-null) and, in `AppealButton`, render the `TextButton.icon` with `onPressed: null` while it is `null`, the same way the rest of the app declines to offer an action it cannot yet resolve.
+*Suggested:* Mirror the approved-claims idiom. Add `class LedgerLimit extends Notifier<int> { int build() => QueryLimits.ledger; void loadOlder() => state += QueryLimits.ledger; }` in ledger_controller.dart, have ledgerProvider watch it and pass it as the service limit, and append an `OutlinedButton.icon(icon: Icon(Icons.expand_more), label: Text('Load older activity'))` to the ListView children when `entries.length >= limit` - the same shape as admin_claims_view.dart:238-247. Also point TransactionService at QueryLimits.ledger instead of the literal 50.
 
-### `claims-appeals-6` — A claim's rejection reason is joined into the subtitle with a middot, unlabelled
+### The account list is capped at 200 unordered documents, and both the count and the search silently lie about it
 
-**lib/views/claims/claim_submit_view.dart:308** · ux
+**lib/services/user_service.dart:84** · bug
 
-The single most important thing on that row — why it was refused and therefore what to change — is typographically indistinguishable from "3d ago". The same user reading the same information about a disposal gets a labelled, error-toned note. The claim also offers only "Appeal this decision" as a next step, while the appeal screen itself tells them the real remedy is to submit again (appeal_form_view.dart:109-112).
+Past 200 accounts, an admin who searches for the user they were asked to suspend gets "No accounts match." for an account that exists and is perfectly readable — with nothing on screen suggesting the list is partial. The header confidently reads "200 of 200", and the dashboard reports the platform has exactly 200 accounts. Because there is no ordering, which 200 survive is arbitrary and changes as documents are added. This codebase already treats silent truncation as a defect: `QueryLimits.salesReport` carries a `SellerSalesReport.truncated` flag so "the figures are never quietly partial" (constants.dart:92-94), and the admin nav badges render `50+` for capped queues (app_shell.dart:481-491).
 
-*Suggested:* Reuse what the disposal card already established. Drop the reason out of the joined subtitle (leave `userFacingStatus · formatAge` there) and render it below the `ListTile`, beside the existing `AppealButton` at lines 332-336, in the same shape as `submission_history_view.dart`'s `_Note`: an `Icons.info_outline` icon, `theme.colorScheme.error` tone, title "Why it was rejected", body `claim.rejectionReason!`. Add a second affordance next to the appeal button — an `OutlinedButton` "Log this again" that calls `ref.read(claimDraftProvider.notifier).reset()` then `context.push('/claims/new')` — so the remedy the appeal screen names is actually reachable from the rejection.
+*Suggested:* Add `orderBy('name')` so the cap is deterministic, and carry the cap to the screen: expose `truncated: docs.length >= QueryLimits.accounts` the way `SellerSalesReport.truncated` does, then have `_FilterBar` read `'$visibleCount of 200+'` and render a note above the list when truncated. Since search is the operation that actually breaks, back the search field with a server-side `where('email', isEqualTo: query)` lookup when the list is truncated and the query looks like an address, rather than filtering a partial snapshot.
 
-### `claims-appeals-8` — Quota banner can spin for 90 seconds unexplained, then dead-end with no retry
+### The appeal queue's notice states a capped count as a total
 
-**lib/views/claims/claim_submit_view.dart:46** · ux
+**lib/views/admin/admin_appeals_view.dart:449** · copy
 
-For a minute and a half the screen looks broken with no explanation, which the doc comment on `ContentLoading` (content_state.dart:17-22) identifies as the exact failure mode that scaffolding was written to fix. When it does fail, the user cannot re-check without leaving the screen and coming back, and a screen reader gets nothing at all from the unlabelled `LinearProgressIndicator`.
+With more than 50 pending appeals the notice asserts "50 waiting, oldest first" while the Appeals icon in the same shell shows "50+". The admin works through ten appeals and the count stays at 50, which reads as a stuck screen rather than a deep backlog. The disposal queue is the same shape with no count at all, so its truncation is entirely invisible.
 
-*Suggested:* Give the loading branch the standard slow-server treatment and the error branch a retry. Replace `loading: () => const LinearProgressIndicator()` with a `Column` holding the bar and `const SlowServerNote()`, and add to the error `_Notice` an inline `TextButton.icon(onPressed: () => ref.invalidate(claimQuotaProvider), icon: const Icon(Icons.refresh), label: const Text('Check again'))` — the same `ref.invalidate` retry this file already uses at line 281.
+*Suggested:* Pass the cap through and word it honestly: `_QueueNotice(count: appeals.length, atCap: appeals.length >= QueryLimits.reviewQueue)` rendering `'At least $count waiting, oldest first.'` when capped. Do the same for the disposal queue, which today shows no count, and for the claims tab badge (`_TabLabel(count: pending.value?.length)`, admin_claims_view.dart:59).
 
-### `claims-appeals-10` — The "Sent for review" confirmation cannot scroll and overflows at large text sizes
+### The appeal queue builds all 50 cards and all 50 full-size evidence photos eagerly
 
-**lib/views/claims/claim_submit_view.dart:220** · a11y
+**lib/views/admin/admin_appeals_view.dart:50** · perf
 
-At accessibility text sizes the user who just submitted sees a yellow-and-black overflow stripe and, worse, the "Done" and "Log another" buttons are pushed off-screen with no way to scroll to them — the screen becomes unexitable except by the system back gesture, which is the very dead end the comment at lines 244-246 says this screen was fixed to avoid.
+Opening Appeals with a full queue fires 50 concurrent Firestore document reads and 50 concurrent downloads of full-resolution evidence photographs, decoding each at up to 1600 px — on the order of half a gigabyte of image cache. On a mid-range Android handset that is a multi-second freeze on open followed by stutter or an out-of-memory kill; on the web build it is 50 parallel requests before the first card is readable. The disposal queue with the same content opens instantly because it builds lazily.
 
-*Suggested:* Make the body scrollable the way the rest of the feature does. Wrap the `Center` in a `SingleChildScrollView` (or swap the whole hand-rolled column for the shared `ContentEmpty` from `views/shared/content_state.dart`, which already renders icon/title/message/action in the app's tokens — keeping "Done" as its `actionLabel`/`onAction` and putting "Log another" underneath). While there, replace the raw `EdgeInsets.all(32)` and `SizedBox(height: 16/8)` with `AppTheme.gapXl`/`gapMd`/`gapSm`, which the lower half of the same method already uses.
+*Suggested:* Move the `Center`/`ConstrainedBox` inside the item builder and use `ListView.builder` with `itemCount: appeals.length + 1` (index 0 rendering `_QueueNotice`), exactly as admin_disposals_view.dart:83-95 does. That also fixes the widget-identity problem in the first finding when combined with `key: ValueKey(appeal.id)`.
 
-### `disposal-5` — Backing out to the scanner and tapping Continue silently discards a photo already taken for the same bin
+### Bin form skips the range checks that already exist, so bad coordinates and radii cost a 90-second round trip to discover
 
-**lib/views/disposal/scan_view.dart:76** · bug
+**lib/views/admin/admin_bins_view.dart:164** · bug
 
-A photo taken standing over a bin is destroyed with no warning and no undo, by a button labelled "Continue" that the user reasonably reads as "carry on where I was". They have to re-open the camera and re-shoot the same bag.
+An admin correcting a bin from a desk types a longitude of 190, or a radius of 0, or 5000 m for an open compound. The button says 'Registering…', the SlowServerNote appears after five seconds, and up to ninety seconds later — because this call inherits `ApiConfig.coldStartTimeout` — they finally get 'Longitude is out of range.' It is the same sentence `BinModel.validate()` would have produced instantly. On a cold Render instance that is a minute and a half per typo, on a screen the brief describes as used standing at a bin.
 
-*Suggested:* Only restart the draft when the bin actually changed: `final current = ref.read(disposalDraftProvider).bin; if (current?.id != bin.id) { ref.read(disposalDraftProvider.notifier).startForBin(bin); }` before the push. That preserves the stated intent (a different bin clears the photo) without the collateral damage.
+*Suggested:* Build the candidate and validate it locally before the request, keeping the existing `_problems` rendering: after parsing, `final candidate = BinModel(label: _label.text.trim(), lat: lat ?? 0, lng: lng ?? 0, radiusMeters: radius ?? 0, qrPayload: 'pending', createdBy: 'pending', active: true); local.addAll(candidate.validate().where((p) => !p.startsWith('QR payload') && !p.startsWith('Creating')));` — or lift the five geometry checks out of `BinModel.validate()` into a shared helper both call. Add the one rule the client copy is missing, `if (_label.text.trim().length > 120) 'Bin label may not exceed 120 characters.'`, so client and server agree exactly.
 
-### `disposal-6` — Final submit shows a bare unlabelled spinner for up to 90 seconds, with no slow-server note
+### Close/Reopen on a bin card has no in-flight state: no feedback for up to 90 seconds, and rapid taps race
 
-**lib/views/disposal/declare_view.dart:253** · ux
+**lib/views/admin/admin_bins_view.dart:686** · bug
 
-The single most important action in the app looks hung for a minute and a half, on the exact cold-start case the codebase documents as normal. The user who gives up and backs out loses the photo and the GPS fix and has to redo the flow at the bin.
+The admin taps 'Close' on a bin. The label still says 'Close', the icon is unchanged, no spinner appears, nothing at all happens for up to ninety seconds on a cold Render instance. They tap again, and again, firing three POSTs. If they conclude it is broken and tap 'Reopen' after the row finally flips, the two in-flight requests land in an order the client does not control, so the bin's final state can be the opposite of the last button they pressed — and a bin left open when the admin believes they closed it keeps accepting scans and paying out.
 
-*Suggested:* Match the two existing idioms: keep the `FilledButton.icon` mounted with `onPressed: draft.isSubmitting ? null : ...`, a 16 px `CircularProgressIndicator` as the icon and a `'Submitting…'` label while in flight, and add `if (draft.isSubmitting) const SlowServerNote()` directly beneath it.
+*Suggested:* Track the in-flight bin id in the state (`String? _togglingBinId;`), set it in `_toggle` before the await and clear it in a `finally`, then pass it down: `_BinCard(..., busy: _togglingBinId == bin.id, ...)` and render `TextButton(onPressed: busy ? null : onToggle, child: busy ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : Text(bin.active ? 'Close' : 'Reopen'))`, matching the register button's pattern two hundred lines above.
 
-### `disposal-7` — The "Checking your submission" screen offers no escape and no explanation for a 90-second wait
+### Bins list error branch has no retry, stranding the screen on a stream failure
 
-**lib/views/disposal/declare_view.dart:335** · ux
+**lib/views/admin/admin_bins_view.dart:428** · ux
 
-A screen the user cannot leave by any offered control, for a minute and a half, at the emotional peak of the flow. The one honest reassurance the system has ("it is saved either way — check your history") is written into `VerificationOutcome.pending`'s note but never shown during the wait.
+When the bins stream errors — a stale token producing permission-denied, a dropped connection, a missing index — the admin gets a sentence telling them to 'try again' and no control that tries again. The 'Print all labels' button also disappears (it is gated on `bins != null`), so the entire lower half of the screen is dead. The only recovery is to navigate away and back, and the message does not say so. The wording is also fixed text that never reflects the actual cause, so permission-denied reads as a connection problem.
 
-*Suggested:* Add `const SlowServerNote(message: 'The server is taking a while. Your submission is already saved — you can check your history in a moment.')` to the `_verifying` branch, and offer a `TextButton` "See my submissions" during verification too (it calls `controller.reset()` and `context.go('/history')`, which is safe: the document already exists and the history stream shows the real outcome).
+*Suggested:* Swap in the shared widget: `error: (error, _) => ErrorRetry(title: 'Bins', error: error, onRetry: () => ref.invalidate(allBinsProvider))`, and add the import. It routes the message through `friendlyErrorMessage`, which distinguishes permission-denied from unavailable. While there, the `loading:` branch above it is a bare `CircularProgressIndicator` — `ContentLoading(label: 'Loading bins…')` is the idiom.
 
-### `disposal-8` — A raw platform exception string is shown to the user in the location error card
+### Latitude and longitude inputs are too narrow to show a coordinate at 320 dp, because the radius box is a fixed 110 px
 
-**lib/services/location_service.dart:146** · ux
+**lib/views/admin/admin_bins_view.dart:520** · responsive
 
-A resident standing at a bin is shown a Dart exception dump with no remedy, on a screen whose sibling failure modes all have carefully written sentences. Also a small information leak of internal plugin detail.
+On a 320 dp handset at the default text size — and on any phone once the OS text size is raised — the admin cannot see the coordinate they captured or typed: the latitude field shows about four characters of '23.78080' and scrolls the rest out of view, so there is no way to eyeball a mistyped digit before registering a geofence that every future disposal at that bin is measured against. At 2.0× the 'Radius' label alone (~100 dp at 32 sp) exceeds the 78 dp of usable width inside its fixed box and is clipped.
 
-*Suggested:* Route it through the shared helper the flow already uses one screen earlier: `return LocationResult(outcome: LocationOutcome.error, message: friendlyErrorMessage(err));`, keeping the existing `text.toLowerCase().contains('time')` timeout reclassification above it. Import `../core/network_errors.dart`.
+*Suggested:* Stop competing for one line below a breakpoint. Wrap the row in `LayoutBuilder` and, when `constraints.maxWidth < 420` (or when `MediaQuery.textScalerOf(context).scale(16) > 20`), emit the three fields stacked with `AppTheme.gapSm` between them — the enclosing widget is already a `Column(crossAxisAlignment: CrossAxisAlignment.stretch)`, so it is a straight swap of children. Otherwise keep the row but give the radius `Expanded(flex: 1)` against `flex: 2` for each coordinate instead of the hard-coded `SizedBox(width: 110)`.
 
-### `disposal-9` — Fix-accuracy warning uses a hardcoded 30 m instead of the codebase's radius-relative helper
+### A bin-registration timeout tells the admin to retry without warning that the bin may already exist
 
-**lib/services/location_service.dart:64** · bug
+**lib/views/admin/admin_bins_view.dart:208** · ux
 
-Case (a) sends users hunting for open sky when their fix is fine. Case (b) is the costly one: the user is told nothing is wrong, submits, and the reason their points did not arrive is invisible to them — the advice that would have prevented it was withheld by a threshold that ignores the bin.
+The admin's registration times out, the message invites them to retry, they retry, and a second bin is created at the same coordinates with a different QR payload. Two labels get printed and attached, `resolveByPayload` resolves each to a different document, and the daily cap and per-bin lockout (`lockouts/{uid}_{binId}`) are keyed per bin — so a resident can scan one code, get locked out of that bin, walk one step and scan the other for a second award from the same spot.
 
-*Suggested:* Judge it against the bin in `_FixResult`, using the tested helper: replace `lowAccuracy: location.isLowAccuracy` with `lowAccuracy: isFixTooRoughForRadius(accuracyMeters: location.accuracyMeters, radiusMeters: bin.radiusMeters)` (already in scope via the `core/geo.dart` import). Keep `LocationResult.isLowAccuracy` only if some radius-free caller needs it; nothing in `lib/` currently does.
+*Suggested:* Distinguish the timeout in the catch and point the admin at the live list already on the screen: `final timedOut = error.problems.isEmpty && error.message == slowServerMessage; _problems = timedOut ? [error.message, 'The bin may still have been created. Check "Registered bins" below before registering it again.'] : (error.problems.isEmpty ? [error.message] : error.problems);` — `allBinsProvider` is a live stream, so a bin created after the deadline appears there without a refresh. Import `slowServerMessage` from `core/network_errors.dart`.
 
-### `disposal-10` — Item-count stepper is two unlabelled icon buttons around a bare number
+### The eco-action queue reports failures in the same neutral snackbar as successes
 
-**lib/views/disposal/declare_view.dart:130** · a11y
+**lib/views/admin/admin_claims_view.dart:34** · ux
 
-The one value the automated screen checks the photograph against — a count mismatch is `countMismatch`, which routes the submission to manual review — is set through controls that never say what they do. A misread here costs the user their auto-approval.
+The 409 messages the server writes for an administrator are surfaced verbatim — "That submission has already been decided (approved).", "This user has reached their weekly limit of 2 approved eco-actions." (server/src/index.js:456-460). Presented in the same neutral pill as "Approved — 50 points credited.", with no icon and no colour, a statement about a quota reads as information rather than as "your approval did not happen." The admin moves to the next card believing the claim was decided when it is still pending.
 
-*Suggested:* Add `tooltip: 'One fewer item'` / `tooltip: 'One more item'` to the two `IconButton.filledTonal`s, and wrap the count in `Semantics(liveRegion: true, label: itemCount(draft.declaredItemCount), child: ExcludeSemantics(child: Text(...)))` — `itemCount` already exists in `core/label_format.dart` and yields "7 items".
+*Suggested:* Replace the listener body with the disposal queue's: `final notify = AppSnackBar.of(context); if (next.error != null) { notify.failure(next.error!); } else if (next.lastMessage != null) { notify.success(next.lastMessage!); }`, keeping the existing `clearMessages()` call.
 
-### `market-buyer-4` — Cart quantity stepper's "+" stays enabled past CartItem.maxQty and then does nothing
+### "Verification is still running" is a permanent dead end that the admin cannot clear
 
-**lib/views/market/cart_view.dart:220** · bug
+**lib/views/admin/admin_disposals_view.dart:254** · ux
 
-An enabled control that reports no error and produces no change reads as a broken app rather than a limit, and the tooltip actively misinforms — it says "One more" at the exact point where one more is impossible. Each dead tap also costs a redundant Firestore write of the unchanged cart document.
+A stranded submission sits at the top of the oldest-first queue forever, showing a spinner for a process that is not running and copy promising evidence that will never arrive. The admin cannot approve it and cannot retry it; the only exit is rejecting a submission that may be entirely legitimate, which costs the user their points and their bin lockout. Every subsequent visit to the queue shows the same row still "running", so the queue never reaches zero.
 
-*Suggested:* Clamp the ceiling handed to the stepper: `max: math.min(line.stock ?? line.qty, CartItem.maxQty)` (import `dart:math`, and `CartItem` from `models/cart_model.dart`). Then extend the tooltip so the disabled reason is truthful in both cases — `qty >= (line.stock ?? qty) ? 'No more in stock' : 'Most you can order is 20'`.
+*Suggested:* Distinguish the two states using `disposal.createdAt`, which the card already reads at line 204. Within a couple of minutes of submission keep the current copy. Beyond that, drop the `CircularProgressIndicator`, say what is true — "Verification never completed. Only the submitter can retry it from their history, so this cannot be approved." — and keep Reject available. Better still, add an admin-callable re-verify: `verifyDisposal` already takes `callerUid`, so allow `callerUid === disposal.userId || isAdmin` in server/src/verify.js and surface a "Run verification" `OutlinedButton` on the card.
 
-### `market-buyer-5` — A suspended Champion's cart offers a Checkout button that teleports them to Home and Remove buttons that fail as "you do not have permission to view this"
+### The dashboard to-do list renders capped queue counts as exact totals, ignoring the `badgeLabel` written for it
 
-**lib/views/market/cart_view.dart:113** · ux
+**lib/views/admin/admin_todo_list.dart:186** · bug
 
-A suspended buyer gets two misleading dead ends on a screen that never mentions the one fact that explains both, while the product screen one tap away states it plainly.
+With a 300-item disposal backlog the home card says "50 waiting" and the header says "150 remaining", while the nav rail six inches away shows "50+" on the same queue — two contradictory numbers for the same thing on one screen. The count never falls as the admin works through the first 50, so the card reads as broken, and there is no hint that older work exists behind the cap.
 
-*Suggested:* Watch `currentUserProvider` in `CartView.build` as `ProductDetailView` does, and when `!user.isActive` render the existing `_Notice` copy above the lines and pass `blocked: true` to `_CartFooter` with a label such as "Account suspended" — the footer already renders a disabled button with an explanatory label for the `blocked` case. Separately, since the cart is the only screen where a write denial is user-reachable, give `_runCartAction` a message fit for a write rather than falling through to the generic read wording.
+*Suggested:* Use the accessor that already exists: `label: '${progress.badgeLabel} waiting'`, and the same in the Semantics string with words rather than a `+` glyph (`'${progress.atCap ? "at least " : ""}${progress.pending} waiting'`), matching `_DestinationIcon`'s handling at app_shell.dart:483-491. For the header pill, render `'${workload.pendingTotal}+ remaining'` when any queue is at cap.
 
-### `market-buyer-6` — Every category tap and every debounced search blanks the whole catalogue to a full-page spinner
+### Account actions report failure in a neutral snackbar, using copy written for a read failure
 
-**lib/views/market/catalog_view.dart:118** · ux
+**lib/views/admin/admin_users_view.dart:186** · ux
 
-Filtering feels like a page reload rather than a filter; on a slow connection the buyer loses their place and their scroll position on every refinement.
+A suspension that the rules refuse — an account whose stored `name` is shorter than two characters, or whose `profilePhotoUrl` does not match the strict per-uid Cloudinary pattern `validUser` re-checks — produces a neutral grey bar telling the admin they lack permission to *view* something. Nothing has been suspended, nothing says so, and the advice offered (sign out and back in) does not touch the actual cause. Combined with the missing in-flight state above, the admin has no reliable signal at all about whether the action landed.
 
-*Suggested:* Pass `skipLoadingOnReload: true` to the `catalogAsync.when(...)` call so the previous results stay on screen while the new query resolves, and put the in-flight signal somewhere non-destructive — the `TextField`'s existing suffix area, or a thin `LinearProgressIndicator` under the `Divider(height: 1)` at line 116.
+*Suggested:* Use `AppSnackBar.of(context)` captured before the await, `notify.failure('$name was not suspended. ${friendlyErrorMessage(error)}')` in the catch and `notify.success(message.toString())` on the clean path (keeping `notify.failure` for the partial-sweep case, which is a failure the current code shows as a success). Separately, `friendlyErrorMessage`'s `permission-denied` copy should not say "view" when the caller is a write path — either add a `verb` parameter or make the wording neutral ("That change was refused.").
 
-### `auth-4` — The "New to Chokro?" / "Already a member?" footer Row overflows at large text
+### The suspension dialog never says it will hide the seller's entire catalogue or revoke another admin's access
 
-**lib/views/auth/login_view.dart:242** · responsive
+**lib/views/admin/admin_users_view.dart:77** · ux
 
-The only link between the two auth screens is clipped and partially untappable for exactly the users who enlarge system text. A first-time user at Largest text cannot reliably reach registration from the sign-in screen — a dead end at the very first screen of the app.
+An admin picking "7 days" to pause a user for a disputed submission takes a Greenpreneur's entire shop offline for a week without being told in advance — a consequence for the seller's customers, not just the seller. Suspending a colleague's admin account, which the list permits and styles no differently from suspending a Champion, locks them out of every queue and the accounts screen itself with no warning at the moment of decision.
 
-*Suggested:* Swap the Row for the Wrap this file's own frame already uses: `Wrap(alignment: WrapAlignment.center, crossAxisAlignment: WrapCrossAlignment.center, children: [const Text('New to Chokro?'), TextButton(...)])`. Same change at register_view.dart:160.
+*Suggested:* Make the dialog state the consequences it is confirming: when `user.isSeller`, add a line "Their listings will be hidden from the shop while this lasts, and restored when you reinstate them."; when `user.isAdmin`, add "This is a 3ZERO Admin. Suspending them revokes every administrative privilege until reinstated." Both read from `user` which `_suspend` already holds. Add an explicit `SimpleDialogOption('Cancel')` so the dialog has a labelled exit rather than only the barrier.
 
-### `auth-5` — Password validation error keeps saying "2 more characters" after the user types them
+### Points policy editor discards unsaved edits on back with no prompt, while the guard for exactly this already exists
 
-**lib/views/auth/register_view.dart:82** · ux
+**lib/views/admin/points_policy_view.dart:158** · ux
 
-The form displays a factually wrong instruction about the text currently in the field, on the app's first-run screen. A user who follows it types two more characters than needed, or concludes the form is stuck and abandons registration. The helper text "At least six characters" (register_view.dart:128) is correct but is replaced by the stale error while it is showing.
+An admin retunes several policy numbers, gets pulled away, and back-swipes or taps the app-bar back arrow out of reflex. Every edit is gone with no dialog, no snackbar and no draft — and because the values look plausible either way, they may not notice which of their changes survived. The pending-changes panel that was on screen a moment ago is the only record, and it is gone too.
 
-*Suggested:* Add `autovalidateMode: AutovalidateMode.onUserInteraction` to the `Form` at register_view.dart:82 and login_view.dart:162. That re-runs the validators as the user types, but only after they have touched the field, so nothing turns red before the first submit.
+*Suggested:* Wrap the returned `AppShell` in the existing guard: `return UnsavedChangesGuard(hasChanges: changes.isNotEmpty || parseErrors.isNotEmpty, child: AppShell(...))`. Because `changes`/`parseErrors` are computed inside `_buildForm`, either hoist that computation into `build` or arm the guard from a small `bool get _isDirty => _loaded != null && policyFields.any((f) => (_controllers[f.key]?.text.trim() ?? '') != '${f.read(_loaded!)}');` so it stays disarmed on an untouched form.
 
-### `auth-6` — The account-recovery screen's Try again and Sign out give no feedback and no error
+### Policy save can sit on "Saving…" for ninety seconds with no explanation, while the sibling screen explains the same wait
 
-**lib/views/shared/account_incomplete_view.dart:69** · ux
+**lib/views/admin/points_policy_view.dart:282** · ux
 
-This is the app's designated escape hatch from a broken account — the screen written specifically so such a user is "not trapped". Both of its two buttons can fail silently, which returns the user to the trapped state the screen exists to end, with no evidence that anything was attempted. Repeated taps look like a frozen screen.
+The admin confirms an economy change and the button says 'Saving…'. On a cold Render instance it says that for up to ninety seconds with no further signal. Believing it hung, they back out of the screen — losing the edit, since the form is not guarded — or force-quit, without ever learning whether the write landed.
 
-*Suggested:* Make both actions report. For retry, hold a local `_checking` flag and show `ContentLoading(label: 'Checking your account…')` (or swap the button label for a spinner) for a beat, then, if the gate has not moved on, show an errorContainer snackbar saying the profile is still missing — the same pattern lib/views/shared/error_retry.dart already encodes. For sign-out, `await` the call and, on `ref.read(authControllerProvider).error != null`, surface `friendlyErrorMessage(error)` in a snackbar. Apply the same to startup_error_view.dart:61-76.
+*Suggested:* Add the existing inline note directly under the button row, exactly as the bin screen does: `if (_saving) const SlowServerNote(),` after the `Row` at line 293. `SlowServerNote` renders nothing for the first five seconds, so a fast save is unaffected.
 
-### `auth-7` — The in-flight sign-in button announces nothing to a screen reader
+### A Champion with fewer than 10 points gets a screen with every control dead and no explanation
 
-**lib/views/auth/login_view.dart:231** · a11y
+**lib/views/donations/donation_view.dart:437** · ux
 
-A blind user gets silence for the duration of the network call and cannot tell whether the tap registered. On a cold Render instance (network_errors.dart:38-40 documents 30–60 s wake times) that silence lasts up to a minute, and the natural response is to tap again.
+A brand-new Champion, whose wallet is created holding zero (firestore.rules:430-444), taps 'Support green initiatives' on the home screen and lands on a page where the chips, the button and effectively the form are all greyed out with no sentence explaining why or what to do about it. It reads as broken rather than as 'earn some points first'.
 
-*Suggested:* Give the in-flight state a name: `Semantics(label: 'Signing in…', liveRegion: true, child: const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2)))`, and 'Creating your account…' at register_view.dart:151. Same idiom as `ContentLoading`'s `Semantics(liveRegion: true, label: widget.label, ...)`.
+*Suggested:* In _PointEditor's data branch, when `balance < _DonationViewState._minimum`, return a ContentEmpty instead of the editor - the shape already used one branch above for the wallet-load failure (370-377): `ContentEmpty(icon: Icons.stars_outlined, title: 'Not enough points yet', message: 'Point donations start at 10 points and you have $balance. Dispose verified waste or log an eco-action to earn some.', actionLabel: 'Dispose waste', onAction: ...)` routing to /dispose/scan.
 
-### `auth-8` — Sign-in uses the email autofill hint, so saved-password managers do not offer the stored login
+### The prototype payment reference is shown once, cannot be copied, and is unreachable afterwards
 
-**lib/views/auth/login_view.dart:171** · ux
+**lib/views/donations/donation_view.dart:658** · ux
 
-The saving half works (registration hints correctly and calls `TextInput.finishAutofillContext()`), so the credential is in the manager — it just cannot be filled back in. Every returning sign-in becomes manual typing of an email and password on a phone, which is the single most common action in the app and the one most likely to produce the wrong-credentials error from auth-1.
+The app presents the Champion with a reference number, implying it matters, and then makes it impossible to copy, re-read, or look up. A user who wants to note it has to retype it from the screen before navigating, and one back gesture destroys it.
 
-*Suggested:* Hint the field as the credential's username, keeping the email keyboard: `autofillHints: const [AutofillHints.username, AutofillHints.email],` at login_view.dart:171. `keyboardType`, `textCapitalization` and `autocorrect` at lines 169-176 are already right and need no change.
+*Suggested:* Give _SuccessLayout an optional trailing widget slot and pass the reference through it as a SelectableText next to an IconButton(tooltip: 'Copy reference', onPressed: () => Clipboard.setData(ClipboardData(text: outcome.paymentReference))) - the exact pattern at admin_bins_view.dart:795-825. Then say plainly on the same screen that a prototype donation is not recorded in the wallet, so the reference is the only record.
 
-### `auth-9` — "An account already exists — Sign in instead" gives the user no way to sign in
+### Save is not disabled during a photo upload, so the listing publishes without the photo
 
-**lib/core/auth_errors.dart:58** · ux
+**lib/views/seller/product_edit_view.dart:397** · bug
 
-The message states the remedy and withholds it. The user must dismiss the bar, scroll, find a small text link, and retype the email they just entered — and if they in fact forgot the password, the reset flow is another screen away. This is the single most common registration failure and the app's least-supported one.
+The seller picks a photograph, sees the small spinner in the 110 dp tile, and taps "Publish listing" while it is still going. The listing is written with `imageUrls: []`, the editor pops, and the upload lands on an unmounted widget. The photograph is in Cloudinary, paid for, referenced by nothing — the file's own header calls this out as the abandoned-form trade — and the published listing has no picture. The seller has to reopen the editor and add it again, never having been told why it was missing.
 
-*Suggested:* Attach the action the message promises: `SnackBar(..., action: SnackBarAction(label: 'Sign in', textColor: scheme.onErrorContainer, onPressed: () => context.go('/login')))` in register_view.dart's `_submit`, gated on `error is AuthFailure && error.code == 'email-already-in-use'` — `AuthFailure.code` is retained (auth_errors.dart:27-28) precisely so callers can branch without re-parsing the message.
+*Suggested:* Make the button agree with the field that already got it right: `onPressed: _saving || _uploading ? null : () => _save(existing)`, and give the label the reason so a disabled button is not a mystery — `label: Text(_uploading ? 'Waiting for the photo…' : _saving ? 'Saving…' : _isNew ? 'Publish listing' : 'Save changes')`.
 
-### `home-profile-5` — Profile screen's "Become a 3ZERO Greenpreneur" stays enabled while suspended and throws the user off the screen
+### The photo upload has the same unexplained cold-start wait, in a 110 dp tile
 
-**lib/views/profile/profile_view.dart:228** · bug
+**lib/views/seller/product_edit_view.dart:653** · ux
 
-The tap navigates to /home instead of the application form, so the user is silently ejected from the profile screen they were on, with no message saying why. Three controls on one screen disagree about the same suspension.
+The seller picks their first photograph after a quiet period and watches a tiny spinner in a thumbnail slot for up to a minute. Nothing distinguishes it from a hung upload. They tap around, leave the form — and the guard's own message warns that an abandoned listing leaves the photograph uploaded and orphaned, which is precisely what happens.
 
-*Suggested:* Mirror the sibling donate button: `onPressed: user.isActive ? () => context.push('/apply-seller') : null`, and say why it is off — the home card's wording is "Unavailable while suspended."
+*Suggested:* `_PhotoStrip` already ends in a column of explanatory captions; add `if (uploading) const SlowServerNote()` after the existing caption at line 690-695. It renders nothing until the wait becomes surprising, and its default text is the standard `ContentLoading.serverWakingHint`.
 
-### `home-profile-6` — A temporary suspension never lifts inside a running session
+### Price and stock validation errors are cut off mid-sentence on a normal phone
 
-**lib/views/home/home_view.dart:52** · bug
+**lib/views/seller/product_edit_view.dart:318** · a11y
 
-A user whose timed suspension has expired is still locked out of every earning action, with the app telling them the suspension is still in force. Pull-to-refresh does not help, so the remedy is undiscoverable.
+On the most common Android width, at the default text size, a seller who leaves the price blank is told "Enter a price in whole ta…". The Stock helper — 'Zero is allowed', the one line that stops a seller deleting a listing rather than setting it to nothing — reads as "Zero is allow…" from about 1.4× text scale. The form's whole premise, stated in its header comment, is that a seller is told what is wrong rather than being handed a permission denial; here it tells them most of it.
 
-*Suggested:* Add a provider that re-evaluates on the boundary, mirroring the existing idiom in admin_workload_controller.dart:69-75: watch `currentUserProvider`, and when `suspendedUntil` is in the future do `final timer = Timer(until.difference(DateTime.now()), ref.invalidateSelf); ref.onDispose(timer.cancel);`. Have `HomeView` (and `ProfileView`) watch it so `user.isActive` is recomputed the moment the suspension lapses.
+*Suggested:* Set both on the shared theme so every side-by-side field in the app is covered at once: add `errorMaxLines: 2, helperMaxLines: 2` to the `InputDecorationTheme` at `lib/core/theme.dart:176`. If a narrower change is preferred, add the same two arguments to the two `InputDecoration`s at lines 316 and 338.
 
-### `home-profile-7` — Profile screen's load error is a dead end with no retry
+### The order advance button waits up to 90 seconds on a cold-start host with no explanation
 
-**lib/views/profile/profile_view.dart:107** · ux
+**lib/views/seller/seller_orders_view.dart:172** · ux
 
-The user is told to "try again" on a screen that provides no way to try again, and the real cause (say, permission-denied after a session change) is never surfaced.
+The first fulfilment of the day hits a sleeping server. "Updating…" sits there for a minute with nothing else on screen. Long before it returns, the seller concludes the app is broken, force-closes it or navigates away — and never learns whether the order was marked shipped, because the only way to check is the same screen they abandoned.
 
-*Suggested:* Replace the error branch with the shared widget: `error: (error, _) => ErrorRetry(error: error, title: 'Your profile', onRetry: () => ref.invalidate(currentUserProvider))` — the same call HomeView makes.
+*Suggested:* Render the shared note under the button while `_busy`, exactly as `declare_view.dart:294` does: wrap the `FilledButton.icon` in a `Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [button, if (_busy) const SlowServerNote()])`. It draws nothing for the first five seconds, so a fast response is unaffected.
 
-### `home-profile-8` — Greeting badge and points-balance label overflow at large text on a narrow phone
+### A failed delist or relist tells the seller they lack permission to *view* the listing
 
-**lib/views/home/home_view.dart:478** · responsive
+**lib/views/seller/seller_products_view.dart:213** · copy
 
-Overflow stripes across the top of the greeting hero and across the balance card — the two elements that set the tone of the screen — and the role label / "POINTS BALANCE" caption are clipped.
+When a suspension lands while the console is open — the rules resolve status per request, so the write can be refused a moment before the router redirects — the seller taps "Take off the shop" and is told they cannot view their own listing and should sign out and back in. Signing out and back in changes nothing, because the cause is the account status, which is the one thing the message never mentions. The right sentence already exists thirty lines away in another file.
 
-*Suggested:* Wrap the pill `Container` in `Flexible` and give the role `Text` `overflow: TextOverflow.ellipsis`; wrap the `'POINTS BALANCE'` `Text` in `Flexible` with the same overflow — matching what `_BalanceValue`'s number Row at line 692 already does.
+*Suggested:* Reuse the interpretation the editor already wrote. Lift `_saveFailureMessage` out of `_ProductEditViewState` into a small top-level helper (it takes only an `Object error`) and call it from both sites, so a rules refusal on a product write says the same thing wherever the seller triggers it. Route the result through `AppSnackBar.of(context).failure(...)` while you are there, so the two branches of `_setActive` stop being visually identical.
 
-### `shell-routing-3` — NavigationRail overflows and clips destinations on a phone held in landscape
+### The sales period chips are clipped and sit below the minimum touch target
 
-**lib/views/shared/app_shell.dart:152** · responsive
+**lib/views/seller/seller_sales_view.dart:165** · a11y
 
-Yellow-and-black overflow stripes in profile builds, a RenderFlex assertion in debug, and in release the bottom destinations ('Appeals', and part of 'Eco') are painted outside the rail and cannot be tapped. Rotating the phone loses navigation destinations. It bites hardest for the Admin, who has five destinations.
+At the default text size the period selector — the control the whole report hangs off — is a 44 dp row on a phone, under the 48 dp target the rest of the app guarantees, so it is easy to miss. From roughly 1.8× text scale upward the chips' bottom edge and part of their label are cut off by the ListView clip, so a seller who has enlarged text reads "Last 3 mont" with the border sliced through it.
 
-*Suggested:* Pass `scrollable: true` to the `NavigationRail` at app_shell.dart:245 — Flutter 3.44 supports it and it wraps the destination column in a `SingleChildScrollView`. Additionally make the breakpoint two-dimensional so a landscape phone keeps the bottom bar: `final isWide = constraints.maxWidth >= AppConstants.webBreakpoint && constraints.maxHeight >= 600;`, adding the height floor next to `webBreakpoint` in lib/core/constants.dart.
+*Suggested:* Drop the fixed box and let the chips size themselves, using the reasoning already written into `_SettlementGrid`: replace the `SizedBox`/`ListView.separated` with `Wrap(spacing: AppTheme.gapSm, runSpacing: AppTheme.gapSm, children: [for (final period in SalesPeriod.values) ChoiceChip(label: Text(period.label), selected: period == selected, onSelected: (_) => select(period))])`. Five short labels wrap onto two rows on a 320 dp phone and grow with the text scale instead of being clipped.
 
-### `shell-routing-4` — Sign-out from the app bar shows no progress and never reports a failure
+### Every submission failure is reported as a connection problem, including "already pending"
 
-**lib/views/shared/app_shell.dart:341** · ux
+**lib/views/seller_application/seller_application_view.dart:54** · copy
 
-The user confirms a deliberate, security-relevant action and gets zero acknowledgement. On a slow network they will tap the menu and confirm again (firing a second `signOut`); on a failure they are left believing they signed out on a device the codebase explicitly says is often shared or borrowed (push_service.dart:160-169).
+An applicant whose second submission is refused because one is already under review is told their connection is at fault. They retry on a different network, retry on mobile data, and keep getting the same sentence — while the real answer ("you already have one in the queue") was raised, caught and thrown away. The same wrong sentence covers a rules refusal and an expired session.
 
-*Suggested:* In `AppShell.build`, add `final isSigningOut = ref.watch(authControllerProvider).isLoading;` next to the other watches and disable the popup's sign-out entry while it is true, matching startup_error_view.dart:19. In `_confirmSignOut`, capture `final messenger = ScaffoldMessenger.of(context);` before the await and after it do `final error = ref.read(authControllerProvider).error; if (error != null) messenger.showSnackBar(SnackBar(content: Text('Could not sign out. $\{friendlyErrorMessage(error)}')));` — the same read-`.error`-after-await pattern login_view.dart:129 already uses. Apply the error half to startup_error_view.dart:71-75 and account_incomplete_view.dart:78-82 too.
+*Suggested:* Interpret the error rather than guessing: `snack.failure(friendlyErrorMessage(error))` — `StateError.toString()` starts with "Bad state: ", so give the controller a small `SellerApplicationException` carrying the message (the pattern `ProductException`/`OrderException`/`ClaimException` already follow, all of which `friendlyErrorMessage` passes through verbatim at network_errors.dart:97-104), and keep the connection wording only for the branches that really are transport failures.
 
-### `shell-routing-5` — Admin nav badges silently cap at 50 and understate the real queue
+### The Greenpreneur application has no unsaved-changes guard, though it is one of the three forms the guard was written for
 
-**lib/views/shared/app_shell.dart:144** · ux
+**lib/views/seller_application/seller_application_view.dart:195** · ux
 
-The badge is the admin's only at-a-glance measure of backlog and it is a hard-capped lie above 50. An admin working a 300-item queue sees the number never move, cannot tell whether they are making progress, and has no signal that items older than the fiftieth exist at all — which is precisely the denial-of-service scenario constants.dart:46-51 was written to make degrade visibly rather than invisibly.
+The applicant writes a business name and a description with a 20-character minimum — the one substantial piece of prose a Champion writes in this app — then swipes back or hits browser back by reflex. The State is disposed, both controllers go with it, and there is no draft anywhere. They must retype the whole thing, and nothing warned them.
 
-*Suggested:* Have `AdminTaskProgress` carry the cap, e.g. add `final bool atCap;` set as `atCap: (pendingDisposals.value?.length ?? 0) >= QueryLimits.reviewQueue` in admin_workload_controller.dart, and in `_DestinationIcon` render `Badge(label: Text(atCap ? '$badge+' : '$badge'), child: Icon(icon))` instead of `Badge.count`. The queue screens should carry the same '+' or a one-line 'showing the oldest 50' note, in the idiom of admin_appeals_view.dart:429.
+*Suggested:* Wrap the returned `AppShell` in `UnsavedChangesGuard` the way `product_edit_view._scaffold` does: rebuild the guard on keystrokes with `ListenableBuilder(listenable: Listenable.merge([_businessNameController, _descriptionController]), builder: (context, shell) => UnsavedChangesGuard(hasChanges: _businessNameController.text.trim().isNotEmpty || _descriptionController.text.trim().isNotEmpty, title: 'Discard this application?', message: 'What you have written has not been sent, and leaving now loses it.', child: shell!), child: <the AppShell>)`. Arm it only while the form branch is showing, so the "under review" state does not interrogate anyone.
 
+### Android back exits the app from screens reached with go() that aren't nav destinations
 
-## Low severity as reported
+**lib/views/shared/app_shell.dart:244** · ux
 
-### `claims-appeals-7` — Three different phrases for "waiting for a reviewer" across the Champion's own screens
+A Champion who has just paid taps 'View my orders' and then swipes back — Chokro closes. Same after filing an appeal. The AppBar's 'Back to home' leading (app_shell.dart:264-269) covers the on-screen case, so the app is not strandable, but the platform back gesture violates the Android convention the surrounding code deliberately implements everywhere else.
 
-**lib/models/claim_model.dart:221** · copy
+*Suggested:* Drop the conjunct: `final interceptBack = location != '/home' && !canPop;`. A pushed screen still has something to pop (`canPop` true) and is unaffected; `/home` still exits, as intended.
 
-Three labels for one state invites the reader to look for a distinction that does not exist — is "pending" a different stage from "awaiting"? — in exactly the flow where the user is already anxious about whether anything is happening.
+### Both review dialogs put a multi-line autofocused TextField in a non-scrollable AlertDialog
 
-*Suggested:* Pick the one that already reads best and is used on the most-visited screen, `'Waiting for review'`, and use it in all three: change `ClaimModel.userFacingStatus`'s `ClaimStatus.pending` case (claim_model.dart:221) and `AppealStatus.pending`'s `label` (appeal_model.dart:62) to match `status_chip.dart:32`. The two enums are the only definitions, so nothing else needs touching.
+**lib/views/shared/rejection_reason_dialog.dart:95** · responsive
 
-### `claims-appeals-9` — Server sends the per-claim award; the client parses it away and never tells the user what a claim is worth
+This is the dialog every rejection in the app passes through — disposals, eco-action claims and seller applications. On a phone with the keyboard up, and on any device above roughly 1.3x text scale, the content overflows its bounded box: the helper text that counts down the remaining characters, and in the appeals dialog the Uphold/Decline buttons' explanation, are clipped off-screen with no way to scroll to them. The admin sees a disabled submit button and the one line that explains why is the line that got cut.
 
-**lib/services/claim_service.dart:219** · ux
+*Suggested:* Wrap both dialogs' `content` in a `SingleChildScrollView`, matching admin_bins_view.dart:761. Consider dropping `autofocus: true` on small viewports, or set `scrollable: true` on the `AlertDialog` itself, which does the same job for the title and actions too.
 
-The user is asked to photograph and submit something without being told what it earns, and "pays more" is a comparison against a figure they also do not have on this screen. `ClaimModel.creditedPoints` is only ever shown after approval (claim_submit_view.dart:319-325), so the number arrives days after the decision to bother.
+### The wallet balance header is an unbounded Row and overflows at large text scale
 
-*Suggested:* Add `final int claimAward;` to `ClaimQuotaStatus`, parse it in `fromJson` with `wireInt(json['claimAward']) ?? 0` (the same `wireInt` fallback the other two fields use), and surface it in the informational `_Notice` at claim_submit_view.dart:65-73: "An approved eco-action is worth ${q.claimAward} points. Every one is checked by a person, so points arrive after review…". Read it from the `data` branch only, leaving the existing wording as the fallback while the quota is loading or errored.
+**lib/views/wallet/wallet_ledger_view.dart:102** · responsive
 
-### `disposal-11` — Retrying a failed submit re-uploads the photograph, orphaning the first upload
+A Champion using Android's largest font size, or iOS accessibility text sizes, opens the Wallet tab and the headline balance - the single number the screen exists to show - is cut off by the yellow-and-black overflow banner. The screen has no other copy of the figure except the per-row 'balance NNNN' labels.
 
-**lib/controllers/disposal_controller.dart:365** · bug
+*Suggested:* Wrap the number so it can shrink: `Flexible(child: FittedBox(fit: BoxFit.scaleDown, alignment: Alignment.centerLeft, child: Text(...)))`, or switch the Row to a Wrap with `crossAxisAlignment: WrapCrossAlignment.end` so 'points' drops to a second line. Both cart_view.dart:255 and admin_claims_view.dart:188 already branch on `MediaQuery.textScalerOf(context).scale(1) > 1.3` for this class of reflow.
 
-Every retry leaves a permanently unreferenced image in the image host with no cleanup path, and burns one of the user's 40 hourly photo uploads. A user retrying through a flaky connection can trip their own rate limit and be told the photo could not be uploaded when nothing is wrong with it.
 
-*Suggested:* Cache the successful upload on the draft and reuse it: add `final UploadedPhoto? uploadedPhoto;` to `DisposalDraft`, set it via `copyWith` immediately after `uploadDisposalPhoto` returns, and open `submit` with `final photo = draft.uploadedPhoto ?? await ref.read(photoUploadServiceProvider).uploadDisposalPhoto(photoBytes);`. Clear it wherever `clearPhoto` clears the byte fields, so a retake always re-uploads.
+## Low severity
 
-### `market-buyer-7` — The receipt never says the server applied fewer points than the buyer asked for — the helper written for it is called nowhere
+### The submitter's prior record goes stale after a decision, on the rows where it just changed
 
-**lib/views/market/checkout_view.dart:720** · ux
+**lib/controllers/admin_review_controller.dart:42** · bug
 
-A buyer who redeemed the maximum sees a smaller discount than the screen quoted and is given no reason for it, contradicting a promise made three lines above the button.
+A user with three pending submissions produces three cards sharing one cached record. The admin rejects the first for a bad photograph; the second and third still read the pre-decision summary (e.g. "12 approved, 0 rejected") — precisely the context that just changed, on precisely the decisions where it matters most. The record is wrong exactly when the doc says it must be right.
 
-*Suggested:* Keep the requested figure on the state — `int _pointsRequested = 0;` set in `_place` before the call — and pass it to `_Receipt`. Render a note under the "Points spent" row when `outcome.appliedLessThan(requested)`: something like "Prices changed while you were checking out, so fewer points could be spent than the ${requested} you chose. The rest are still in your balance." That gives `appliedLessThan` its one caller and makes the promise at line 244 true.
+*Suggested:* Invalidate the family entry after each decision. Capture the submitter uid in the controller's `approve`/`reject` (or pass it from the card) and call `ref.invalidate(submitterRecordProvider(uid))` in the success branch, so the remaining cards for that user refetch.
 
-### `market-buyer-8` — "Empty your cart?" makes the destructive choice the visually primary button
+### "Completed today" reads the earliest 250 reviews of the day platform-wide, then filters by admin
 
-**lib/views/market/cart_view.dart:140** · ux
+**lib/services/admin_workload_service.dart:54** · bug
 
-Muscle memory for "the filled button is the safe one" empties a cart the buyer spent time building; nothing in the app can restore it.
+Once the platform passes 250 decisions in a local day — plausible with several admins working parallel queues — every later decision falls outside the window. The admin's "done today" pill freezes mid-shift and stops counting their work, and `AdminTodoList._summary` reports a number that contradicts what they just did. With multiple admins the number is a share of a global cap rather than their own total, so it can be low from the start of the afternoon.
 
-*Suggested:* Style the confirm as destructive using the pattern already in `rejection_reason_dialog.dart`: `FilledButton(style: FilledButton.styleFrom(backgroundColor: Theme.of(context).colorScheme.error, foregroundColor: Theme.of(context).colorScheme.onError), ...)`. Label it "Empty the cart" rather than "Empty" so the confirm button does not read identically to the app-bar button that opened the dialog.
+*Suggested:* Filter server-side rather than client-side: add `.where('reviewedBy', isEqualTo: adminUid)` and accept the four composite indexes, so the 250 cap applies to this admin's own decisions. If the indexes are genuinely unwanted, `.orderBy('reviewedAt', descending: true)` at least keeps the most recent work in the window instead of dropping it.
 
-### `market-buyer-9` — The catalogue search field's "Search" key does nothing
+### Pressing Decline on an appeal shows the progress spinner on the Uphold button
 
-**lib/views/market/catalog_view.dart:206** · ux
+**lib/views/admin/admin_appeals_view.dart:513** · ux
 
-The keyboard advertises an action that has no effect, and on a small phone the results the buyer just searched for stay hidden behind the keyboard.
+The admin taps Decline, and the button that starts spinning is the one they deliberately did not press. For the two or three seconds the Firestore write takes — longer on a poor connection — the screen reads as "Uphold in progress", which is the opposite decision from the one being recorded. Once the appeal resolves it leaves the queue, so there is no confirmation on screen to correct the impression beyond the snackbar.
 
-*Suggested:* Thread an `onSubmitted` through `_SearchAndFilters` to the existing immediate path — `onSubmitted: (value) { _setQueryNow(value); FocusScope.of(context).unfocus(); }` on the state side, exposed on the widget as a `ValueChanged<String> onSubmitQuery` beside the `onQueryChanged` it already takes.
+*Suggested:* Track which outcome is in flight (`bool? _busyUphold`) and put the spinner on the pressed button: give the Decline button the same conditional icon keyed on `_busyUphold == false`, and the Uphold button on `_busyUphold == true`, disabling both while either is set.
 
-### `auth-10` — The wide-screen brand panel overflows vertically in a short browser window
+### Bin form loses a typed label and a captured GPS fix on back, with no prompt
 
-**lib/views/shared/auth_frame.dart:192** · responsive
+**lib/views/admin/admin_bins_view.dart:292** · ux
 
-The deliberately-designed brand panel — the first impression on desktop — renders with a debug overflow stripe and its "Verified evidence / Auditable rewards / Circular marketplace" pills cut off, with no way to scroll to them. Cosmetic rather than blocking, since the form half still works, but it is the screen every desktop user sees first.
+An admin standing at a bin taps 'Use my location', waits up to twenty seconds for a fix good enough to pass the accuracy check, types the label — then back-swipes by accident or to check something. Everything is gone, including the fix, and re-capturing means waiting for the GPS again on the street. The file's own header calls this flow mobile-first precisely because the fix is taken on site.
 
-*Suggested:* Give the panel the same escape the form side has, using the tokens already in the file: wrap the Column in a `SingleChildScrollView` and replace the `Spacer` with `SizedBox(height: AppTheme.gapXl)` (a Spacer cannot live in a scrollable), or keep the Spacer and gate the panel on height as well as width — `final wide = constraints.maxWidth >= 900 && constraints.maxHeight >= 620;` at auth_frame.dart:30, which falls back to the already-scrollable phone layout.
+*Suggested:* Wrap the returned shell: `return UnsavedChangesGuard(hasChanges: _label.text.trim().isNotEmpty || _lat.text.trim().isNotEmpty || _lng.text.trim().isNotEmpty || _fix != null, child: AppShell(title: 'Bins', child: ...))`. The guard disarms itself on an untouched form, so opening the screen to browse the bin list is unaffected.
 
-### `auth-11` — validateEmail has no upper bound, but firestore.rules caps the stored email at 254
+### "Copy payload" reports success without checking whether the copy happened
 
-**lib/core/validators.dart:23** · bug
+**lib/views/admin/admin_bins_view.dart:822** · bug
 
-Rare in practice, but it is the exact failure mode validators.dart:45-60 was written to eliminate — a value the form accepts, the rules refuse, and a bare permission-denied that cannot name the field. It also leaves the client/rules contract that `TextLimits` documents incomplete, so the next person reading `TextLimits` believes every rules bound is mirrored there.
+The admin copies a bin's payload to paste into a support ticket or a spreadsheet, reads 'Payload copied.', switches app, and pastes whatever was on the clipboard before. Because the confirmation was explicit, they have no reason to check, and the payload is the identifier support needs to trace a code that will not scan.
 
-*Suggested:* Add `static const int emailMin = 3; static const int emailMax = 254;` to `TextLimits` with the same `users.email` doc line the other entries carry, and check it in `validateEmail`: after the pattern test, `if (email.length > TextLimits.emailMax) return 'Email addresses are limited to ${TextLimits.emailMax} characters';` — the same wording shape `validateName` already uses at validators.dart:90.
+*Suggested:* Await it and report honestly, using the same `_run` helper the dialog already has for print and share: `onPressed: _busy ? null : () => _run(() async { await Clipboard.setData(ClipboardData(text: bin.qrPayload)); if (mounted) ScaffoldMessenger.of(context)..hideCurrentSnackBar()..showSnackBar(const SnackBar(content: Text('Payload copied.'))); }, 'The payload could not be copied.')`. The `SelectableText` of the payload above (line 795) remains the manual fallback.
 
-### `home-profile-9` — Suspension end shown as a bare date although the admin sets an exact time
+### Every bin row exposes an identically-labelled "Close" button to a screen reader
 
-**lib/views/home/home_view.dart:769** · copy
+**lib/views/admin/admin_bins_view.dart:687** · a11y
 
-The notice reads as "you are free on the 26th" when the account is actually blocked until the evening, so the one number in the message is misleading on the day it matters.
+A TalkBack or VoiceOver user swiping through a list of fifteen bins hears 'Close, button' fifteen times with the bin name announced as an unrelated earlier node, and cannot tell which bin the focused control belongs to. 'Close' also reads as dismiss-this-screen rather than take-this-bin-out-of-service, so the destructive reading of the control is the more natural one.
 
-*Suggested:* Use `formatDateTime(until)` in both notices, as `admin_users_view.dart:447` already does for the same field.
+*Suggested:* Name the target on the control: `Semantics(button: true, label: bin.active ? 'Close ${bin.label}' : 'Reopen ${bin.label}', child: ExcludeSemantics(child: TextButton(onPressed: onToggle, child: Text(bin.active ? 'Close' : 'Reopen'))))`. Give the QR button the same treatment — `tooltip: 'Show and print QR code for ${bin.label}'`.
 
-### `shell-routing-6` — PendingDestination drops the query string, so a restored /appeals/new loses its subject
+### "Print all labels" silently prints only some of the labels
 
-**lib/routing/router.dart:344** · bug
+**lib/views/admin/admin_bins_view.dart:416** · copy
 
-The user is told their appeal was refused because it was not their own rejected submission, when in fact the app dropped the subject reference on reload. The stated reason sends them to check the wrong thing, and the real appeal is never filed.
+An admin with eighteen bins, three of them closed, taps 'Print all labels', gets fifteen labels across four sheets and has no way to know whether three failed to render or were deliberately skipped. They count against the list, find the discrepancy, and re-check the print output. If they had wanted a replacement label for a bin they are about to reopen, the button gives them no path to it and never says why.
 
-*Suggested:* Remember the full location: `final location = state.matchedLocation;` stays for the `isSplash`/`isAuthRoute` comparisons, but the two `pending.remember(...)` calls at router.dart:369 and :376 should pass `state.uri.toString()`. `PendingDestination.consume()` already returns a location that goes back through GoRouter matching, so a query string round-trips safely. Separately, `AppealActions.raise` should reject an empty `subjectId` with an `AppealValidationException` rather than letting the rules answer for it.
+*Suggested:* State the rule in the control and the count in the outcome: label the button `'Print labels (${bins.where((b) => b.active).length})'` and add a `Tooltip(message: 'Open bins only. A label on a closed bin sends people on a wasted trip.')` around it, or put that sentence in the section subhead next to 'Registered bins'. The per-bin QR dialog already reachable from every row remains the way to print a single closed bin's label.
 
-### `shell-routing-7` — Signing out records the current screen, so the next person to sign in lands there
+### Dashboard provenance note reads "an 3ZERO Admin"
 
-**lib/routing/router.dart:376** · bug
+**lib/views/admin/admin_dashboard_view.dart:401** · copy
 
-A new session opens on a screen the previous person chose rather than on Home, which is disorienting on a shared handset and contradicts the invariant the class doc claims to hold. No data crosses accounts — every provider is uid-scoped — but the app looks like it remembered the wrong user's place.
+The wrong article appears on a fresh deployment — which is exactly the state a first-run demo or a viva walkthrough is in — on the one paragraph on the dashboard whose job is to establish that the numbers are trustworthy. Two copies of the same sentence disagreeing is the kind of detail that undermines the claim it is making.
 
-*Suggested:* Clear the pending destination when a session ends. The smallest change in this codebase's idiom is one line in `AuthController.signOut` (lib/controllers/auth_controller.dart:167), before `authService.signOut()`: `ref.read(pendingDestinationProvider).consume();`. Alternatively have `_AuthGateListenable` remember the previous gate and skip `pending.remember` in the `anonymous` branch when the previous gate was `signedIn`.
+*Suggested:* Change `'an '` to `'a '` on line 400 so both branches read "a 3ZERO Admin included."
 
-### `shell-routing-8` — The admin 'Eco' tab is a bare abbreviation, and the same concept has three names
+### An approve or reject can sit on a 90-second cold start with nothing but an unlabelled spinner
 
-**lib/views/shared/app_shell.dart:68** · copy
+**lib/views/admin/admin_disposals_view.dart:265** · ux
 
-'Eco' is a one-word abbreviation with no established meaning in this product and is the only nav label that does not name what it opens. An admin cannot tell from the bar which queue it is, and the label-to-title jump ('Eco' → 'Claim review') makes it read like a mis-tap. The same concept appearing as 'Eco', 'Claim review' and 'Eco-actions' across three screens costs an admin the ability to talk about it consistently with a Champion.
+The first decision of a shift routinely takes 30-60 seconds. The admin sees a silent spinner where the buttons were, with no indication whether the request is progressing, whether the app is frozen, or how long to wait. If the queue has been scrolled, the spinner is off-screen entirely and there is no indication anything is happening at all. The predictable response is to leave the screen or reload, at which point they have no idea whether the decision was recorded.
 
-*Suggested:* Rename the destination label to match the screen and the Champion-facing term: `ShellDestination('/admin/claims', Icons.eco_outlined, Icons.eco, 'Eco claims')`, and set admin_claims_view.dart:38 to `title: 'Eco-action claims'` so all three surfaces use the same noun. Consider the same for 'Disposals' → keep the label and retitle admin_disposals_view.dart:49 to 'Disposal review'.
+*Suggested:* Render `SlowServerNote()` beside the busy spinner on both cards so the "server is waking" line appears automatically after 5 seconds, and label the spinner ("Recording the decision…"). This is the same treatment the submission flow already gives its cold-start calls.
 
+### The account list's empty result offers no way to undo the search or filter that produced it
 
-## Disproved
+**lib/views/admin/admin_users_view.dart:237** · ux
 
-`disposal-4` claimed the scanner had no app-lifecycle handling, so the camera
-stayed live through steps 2–4 and did not resume after backgrounding. It does:
-`mobile_scanner` 7.4.0's own `MobileScanner` widget is a `WidgetsBindingObserver`
-with `useAppLifecycleState` defaulting to true, and it stops on `inactive` and
-starts on `resumed`. Checked in
-`~/.pub-cache/hosted/pub.dev/mobile_scanner-7.4.0/lib/src/mobile_scanner.dart:408`.
+An admin filters to "Suspended", sees nothing, and is left with one unstyled sentence, a filter chip they may not connect to the result, and a search box with no clear button — on mobile they have to tap into the field and hold backspace. The screen gives no hint that the emptiness is caused by their own filters rather than by there being no such accounts.
 
-This is the reason the rest of the list is marked unverified — roughly one in ten
-of these is likely to dissolve the same way on contact with the code.
+*Suggested:* Replace with `ContentEmpty(icon: Icons.person_search_outlined, title: 'No accounts match', message: 'No account matches this search and filter.', actionLabel: 'Clear search and filter', onAction: () => setState(() { _search.clear(); _filter = _Filter.all; }))`, and add a `suffixIcon` clear button to the search field.
+
+### Photocard export buttons are disabled with no stated reason until the anonymity checkbox is ticked
+
+**lib/views/admin/eco_action_photocard_dialog.dart:366** · a11y
+
+For an anonymous eco-action the admin arrives at three greyed-out buttons at the bottom of the dialog with no message explaining what to do. On a phone the checkbox may be scrolled out of view above the preview. A screen-reader user hears 'Save PNG, button, dimmed' with nothing saying which control unblocks it, and the only recourse is to explore the whole dialog again.
+
+*Suggested:* Say it where the buttons are. Above the action `Wrap`, add `if (!privacyReady) Padding(padding: const EdgeInsets.fromLTRB(20, 0, 20, 4), child: Text('Confirm the privacy check above to export this anonymous card.', style: theme.textTheme.bodySmall?.copyWith(color: theme.colorScheme.onSurfaceVariant)))`, or use the shared `NoticeCard(icon: Icons.visibility_off_outlined, tone: NoticeTone.warning, message: ...)` from lib/views/shared/notice_card.dart, which is the idiom for a blocking condition with a stated remedy.
+
+### Server rejection stays on screen after the admin has fixed the values that caused it
+
+**lib/views/admin/points_policy_view.dart:255** · ux
+
+After a rejected save, the admin corrects the offending number. The client-side 'These values are not allowed' block correctly disappears, but the red 'The server refused the write' block underneath it stays, listing the old complaint about the value they just changed. Three problem panels can be on screen at once with no way to tell which describe the current form, so the admin cannot tell whether it is safe to press Save.
+
+*Suggested:* Clear it whenever the form changes. In `_PolicyInput`'s callback, `onChanged: () => setState(() { _serverProblems = const []; })`, and do the same in the Revert and 'Load section 7.3 defaults' handlers — the same three places that already `setState` on this screen.
+
+### Failures across admin config are shown with the neutral SnackBar, indistinguishable from successes
+
+**lib/views/admin/points_policy_view.dart:148** · ux
+
+A policy write that the server refused and one that succeeded produce the same grey pill in the same place for the same four seconds. An admin who glances away reads any pill as confirmation. On the bins screen the same is true of a bin that failed to close — the row does not move either, so the neutral pill is the only signal and it looks exactly like the success pill.
+
+*Suggested:* Replace the four raw call sites with the shared helper: capture `final notify = AppSnackBar.of(context);` before the await, then `notify.failure(error.message)` / `notify.success('Points policy updated.')` and, in admin_bins_view, `notify.info('${bin.label} closed.')` for the state change the user can already see and `notify.failure(...)` for the two failures. It also hides any queued bar, which the current calls do not.
+
+### A too-large policy number is reported as "must be a whole number" when the admin plainly typed one
+
+**lib/views/admin/points_policy_view.dart:81** · copy
+
+An admin who leans on the keypad or pastes a stray figure into 'Disposal award' sees 'Disposal award must be a whole number.' next to a field containing nothing but digits. The message contradicts what is on screen and names no remedy, and Save stays disabled with no other explanation. An empty field produces the same sentence, which is also not what it means.
+
+*Suggested:* Split the two cases and cap the input. Add `LengthLimitingTextInputFormatter(9)` alongside `digitsOnly` in `_PolicyInput`, and in `_readForm` distinguish them: `if (raw.isEmpty) { errors.add('${field.label} is required.'); continue; } final value = int.tryParse(raw); if (value == null) { errors.add('${field.label} is too large.'); continue; }`.
+
+### Donation failures are never announced to a screen reader
+
+**lib/views/donations/donation_view.dart:594** · a11y
+
+A screen-reader user submits a donation, waits out the 90-second timeout, and hears nothing when it fails. The only change in the accessibility tree is the button label flipping from 'Donating...' back to 'Review donation' - which is indistinguishable from success - while the error text sits silently below the field.
+
+*Suggested:* Wrap _DonationError's Container in `Semantics(liveRegion: true, container: true, child: ...)`, matching ContentLoading (content_state.dart:74-76), so the failure is spoken when it appears.
+
+### Every listing's action menu announces itself identically to a screen reader
+
+**lib/views/seller/seller_products_view.dart:166** · a11y
+
+A seller using TalkBack or VoiceOver on a console of twenty listings hears "Listing actions, button" twenty times, with no way to tell which product each one belongs to except by swiping back to the title and counting. Delisting is destructive from the buyer's point of view, and this is the control that does it.
+
+*Suggested:* Name the subject in the tooltip, which is what both the tooltip and the semantics label read from: `tooltip: 'Actions for ${product.title}'`. The `IconButton` in `_PhotoStrip` already follows this pattern with `tooltip: 'Remove photo'`; this one just needs the product.
+
+### A Greenpreneur with no sales sees a wall of zeros instead of an empty state
+
+**lib/views/seller/seller_sales_view.dart:45** · ux
+
+A newly approved Greenpreneur opens Sales and gets a ৳0 headline, "Earned from 0 orders, after points discounts", four ৳0 tiles, a Volume block of zeros and a status list of zeros — a dense, confident-looking report of nothing. It reads as a broken screen rather than as "you have not sold anything yet", and offers no route to the thing that would change that.
+
+*Suggested:* Branch on the underlying page rather than the period, so the selector is not hidden from a seller whose "Today" is merely empty: in `SellerSalesView.build`, when `ref.watch(sellerReportOrdersProvider).asData?.value.orders.isEmpty == true`, return `ContentEmpty(icon: Icons.query_stats_outlined, title: 'No sales yet', message: 'When a 3ZERO Champion buys one of your products, the order and its value appear here.', actionLabel: 'Go to your listings', onAction: () => context.go('/seller/products'))`.
+
+### The application screen's loading branch renders nothing, so the form appears to be missing
+
+**lib/views/seller_application/seller_application_view.dart:179** · ux
+
+While `userApplicationsProvider` resolves — a first Firestore read on a cold connection — the screen shows the marketing card, the three benefit lines and then nothing. There is no form, no "under review" card and no spinner. A user who arrives during that window sees a page advertising Greenpreneur status with no way to apply for it, and no indication that anything is coming.
+
+*Suggested:* Give the gate a visible state: replace the `SizedBox.shrink()` at lines 179-180 with `const Padding(padding: EdgeInsets.symmetric(vertical: AppTheme.gapXl), child: ContentLoading(label: 'Checking your applications…'))`, and drop the now-redundant blank `loading:` branch at line 135 so only one spinner appears.
+
+### Pull-to-refresh on the wallet does nothing when the ledger is short, and is absent when it has failed
+
+**lib/views/wallet/wallet_ledger_view.dart:48** · ux
+
+A Champion whose disposal was just approved opens Wallet, sees 'Your wallet is ready', and pulls down repeatedly with nothing happening. The list is a live Firestore stream so the data is not actually stale - but an affordance that visibly does nothing reads as a broken screen.
+
+*Suggested:* Add `physics: const AlwaysScrollableScrollPhysics(),` to the ListView at line 48 so a short list still accepts the overscroll. The ErrorRetry branch already carries its own retry button, so it needs no change.
+

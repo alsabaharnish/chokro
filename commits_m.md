@@ -17,6 +17,57 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-08-26 11:40 (+06) — The five never-audited areas, audited
+
+The prior audit planned eleven areas of `lib/` and ran six. The remaining five
+— `admin-queues`, `admin-config`, `wallet-donations`, `seller`, `shared-core` —
+had never been looked at by anyone. They have now been, and the results were
+worse than the six that had: **six high-severity defects**, three of them in
+paths that move points or make decisions about them.
+
+The ones worth naming:
+
+- **Sign-out could not complete offline.** `unregisterDevice` was written to
+  "never throw" so cleanup could not block sign-out — but Firestore offline
+  persistence *queues* a delete, and the Future neither returns nor throws
+  until it reaches a server. The `await` simply never finished, the catch never
+  ran, and a user out of signal was never signed out at all.
+- **The appeal review gate leaked between appeals.** The "I reviewed the
+  photograph" tick lives in the card's local State and the cards were unkeyed,
+  so resolving one appeal shifted the rest up a position and Flutter re-used the
+  State by index — arming Uphold and Decline on evidence nobody had opened.
+- **A listing save wrote stale stock over the server's decrements**,
+  resurrecting stock that sales had already consumed.
+- **Retrying a failed donation could debit twice.** `resetDraft()` nulled the
+  idempotency key and the screen called it from six ordinary-interaction
+  callbacks, so tapping the same amount chip after a lost response minted a
+  second key.
+- **The redemption block accepted ratios the app will not honour** — only the
+  integer quotient is used, so "150 points to BDT 20" was applied as 7 points
+  per taka and "10 points to BDT 100" gave away a hundredfold.
+- **The points policy silently reverted another admin's change**: a full
+  overwrite from a baseline cached for the whole session, with no version check
+  anywhere on the path.
+
+Plus: every text field's resting outline measured 1.33:1 against its own fill,
+under WCAG's 3:1 floor for a control boundary; `friendlyErrorMessage` forwarded
+raw `StateError` text so users read "Bad state: Not signed in."; an offline user
+with a cold cache was told their profile was missing and to register again; and
+a failure in `main()` left a black screen.
+
+Two reported findings dissolved on contact with the code, and one of my own
+earlier fixes was a regression the audit caught: the image work had downscaled
+the eco-action queue's photo, which is not a thumbnail but the image an admin
+decides a claim from. `image_delivery.dart`'s own library doc states the
+invariant that was broken. The appeals queue's private viewer is now shared as
+`EvidenceThumbnail`/`showEvidencePhoto`.
+
+Files: ~25 modified, 3 added (`views/shared/evidence_viewer.dart`,
+`views/shared/notice_card.dart`, `core/image_delivery.dart`), 7 new test files.
+
+Checks: `flutter analyze` clean · `flutter test` 619 → **646** ·
+`npm test --prefix server` 282 · `rules_test` 232 · `flutter build web` succeeds.
+
 ## 2026-08-26 09:30 (+06) — Verified the outstanding UX audit, then fixed it
 
 `UX_AUDIT_OUTSTANDING.md` opened by saying its own verification stage never

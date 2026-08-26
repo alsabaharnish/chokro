@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../models/seller_application_model.dart';
 import '../core/constants.dart';
+import '../core/network_errors.dart';
 import 'auth_controller.dart';
 
 final pendingApplicationsProvider =
@@ -27,7 +28,11 @@ class SellerApplicationController extends AsyncNotifier<void> {
     state = const AsyncLoading();
     state = await AsyncValue.guard(() async {
       final user = ref.read(currentUserProvider).value;
-      if (user == null) throw Exception('Not signed in');
+      if (user == null) {
+        throw const SellerApplicationException(
+          'You are signed out. Sign in again to continue.',
+        );
+      }
 
       // A second pending request adds noise to the Admin queue and makes it
       // unclear which business description should be reviewed. The screen also
@@ -35,7 +40,10 @@ class SellerApplicationController extends AsyncNotifier<void> {
       // entry point cannot accidentally bypass it.
       final existing = await ref.read(userApplicationsProvider.future);
       if (existing.any((application) => application.isPending)) {
-        throw StateError('A Greenpreneur application is already pending.');
+        throw const SellerApplicationException(
+          'You already have an application waiting for review. Its status is '
+          'on your profile.',
+        );
       }
 
       final app = SellerApplicationModel(
@@ -55,7 +63,11 @@ class SellerApplicationController extends AsyncNotifier<void> {
     state = const AsyncLoading();
     state = await AsyncValue.guard(() async {
       final user = ref.read(currentUserProvider).value;
-      if (user == null) throw Exception('Not signed in');
+      if (user == null) {
+        throw const SellerApplicationException(
+          'You are signed out. Sign in again to continue.',
+        );
+      }
 
       await ref
           .read(userServiceProvider)
@@ -71,7 +83,11 @@ class SellerApplicationController extends AsyncNotifier<void> {
     state = const AsyncLoading();
     state = await AsyncValue.guard(() async {
       final user = ref.read(currentUserProvider).value;
-      if (user == null) throw Exception('Not signed in');
+      if (user == null) {
+        throw const SellerApplicationException(
+          'You are signed out. Sign in again to continue.',
+        );
+      }
 
       await ref
           .read(userServiceProvider)
@@ -89,3 +105,19 @@ final sellerApplicationControllerProvider =
     AsyncNotifierProvider<SellerApplicationController, void>(
       SellerApplicationController.new,
     );
+
+/// A Greenpreneur-application failure with a sentence already fit to display.
+///
+/// The three sites that used to throw `Exception('Not signed in')` and
+/// `StateError('A Greenpreneur application is already pending.')` reached the
+/// applicant through `friendlyErrorMessage` complete with Dart's own
+/// `Exception: ` / `Bad state: ` prefix.
+class SellerApplicationException implements UserFacingException {
+  const SellerApplicationException(this.message);
+
+  @override
+  final String message;
+
+  @override
+  String toString() => message;
+}

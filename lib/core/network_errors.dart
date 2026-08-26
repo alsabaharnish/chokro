@@ -91,15 +91,30 @@ String friendlyErrorMessage(Object? error) {
     }
   }
 
-  // The app's own exception types (AuthFailure, ProfileFailure, PolicyException,
-  // ClaimException, BinAdminException…) all carry a message written to be shown,
-  // and all override toString to return it.
-  final text = error.toString();
+  // The app's own exception types (AuthFailure, PolicyException,
+  // ClaimException, BinAdminException…) all carry a message written to be
+  // shown, and all override toString to return it.
+  //
+  // Recognised by opting in, not by blocklist. This used to return
+  // `error.toString()` for anything that did not start with `Instance of` or a
+  // bracketed vendor prefix — which meant every plain `StateError` and
+  // `Exception` in the codebase went to the user verbatim. A Champion whose
+  // session had lapsed mid-appeal read "The appeal could not be sent. Bad
+  // state: Not signed in."; an applicant with one already pending read
+  // "Exception: A Greenpreneur application is already pending." Dart's
+  // `toString()` prefixes are not sentences, and the set of exception types
+  // reaching here is open-ended, so a blocklist can only ever be behind.
+  if (error is UserFacingException) return error.message;
 
-  // A bare `Instance of 'Foo'` or a bracketed vendor prefix is not a message.
-  if (text.startsWith('Instance of') || text.startsWith('[')) {
-    return 'Something went wrong. Try again.';
-  }
+  return 'Something went wrong. Try again.';
+}
 
-  return text;
+/// Marks an exception whose `message` was written to be read by a user.
+///
+/// Implemented by the app's own failure types so [friendlyErrorMessage] can
+/// recognise them by intent rather than by guessing from the shape of a
+/// `toString()`. Anything that does not implement this is treated as internal
+/// and replaced with a general sentence.
+abstract interface class UserFacingException implements Exception {
+  String get message;
 }

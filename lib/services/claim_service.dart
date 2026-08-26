@@ -297,7 +297,8 @@ void _log(String context, Object error, [StackTrace? stackTrace]) {
   if (stackTrace != null) debugPrint('$stackTrace');
 }
 
-class ClaimException implements Exception {
+class ClaimException implements UserFacingException {
+  @override
   final String message;
   const ClaimException(this.message);
 

@@ -1,3 +1,4 @@
+import '../core/network_errors.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/appeal_model.dart';
@@ -76,7 +77,13 @@ class AppealActions {
     required String message,
   }) async {
     final uid = _ref.read(currentUidProvider);
-    if (uid == null) throw StateError('Not signed in.');
+    // The app's own type, so `friendlyErrorMessage` shows this sentence rather
+    // than Dart's "Bad state: " prefix in front of it.
+    if (uid == null) {
+      throw AppealValidationException(
+        'You are signed out. Sign in again and your appeal will be waiting.',
+      );
+    }
 
     // An appeal with no subject is a rules refusal waiting to happen, and the
     // refusal names ownership and rejection status — two things that are both
@@ -116,7 +123,13 @@ class AppealActions {
     required String response,
   }) async {
     final uid = _ref.read(currentUidProvider);
-    if (uid == null) throw StateError('Not signed in.');
+    // The app's own type, so `friendlyErrorMessage` shows this sentence rather
+    // than Dart's "Bad state: " prefix in front of it.
+    if (uid == null) {
+      throw AppealValidationException(
+        'You are signed out. Sign in again and your appeal will be waiting.',
+      );
+    }
 
     final problem = AppealModel.validateResponse(response);
     if (problem != null) throw AppealValidationException(problem);
@@ -137,9 +150,10 @@ final appealActionsProvider = Provider<AppealActions>(
 );
 
 /// Text that failed the same bounds `firestore.rules` enforces.
-class AppealValidationException implements Exception {
+class AppealValidationException implements UserFacingException {
   const AppealValidationException(this.message);
 
+  @override
   final String message;
 
   @override

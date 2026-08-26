@@ -190,7 +190,8 @@ class UploadedPhoto {
   final String publicId;
 }
 
-class PhotoUploadException implements Exception {
+class PhotoUploadException implements UserFacingException {
+  @override
   final String message;
   const PhotoUploadException(this.message);
 

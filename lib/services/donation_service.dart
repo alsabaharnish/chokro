@@ -193,9 +193,10 @@ void _log(String context, Object error, [StackTrace? stackTrace]) {
   if (stackTrace != null) debugPrint('$stackTrace');
 }
 
-class DonationException implements Exception {
+class DonationException implements UserFacingException {
   const DonationException(this.message);
 
+  @override
   final String message;
 
   @override
