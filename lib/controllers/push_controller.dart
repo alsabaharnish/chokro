@@ -66,7 +66,7 @@ class PushRegistrar {
     // A rotated token is a device that has silently stopped receiving anything,
     // with no error raised anywhere. Re-registering is the only signal.
     _refreshSub = _ref.read(pushServiceProvider).onTokenRefresh.listen((_) {
-      unawaited(_sync(forceRegistration: true));
+      unawaited(_sync(forceRegistration: true, forcePermissionCheck: true));
     });
   }
 
@@ -79,6 +79,7 @@ class PushRegistrar {
   bool _busy = false;
   bool _queued = false;
   bool _forceRegistration = false;
+  bool _forcePermissionCheck = false;
 
   /// Permission is checked at most once per signed-in session unless Profile
   /// explicitly asks for a refresh after the person changes device settings.
@@ -91,25 +92,37 @@ class PushRegistrar {
   /// Dropping is particularly bad on a shared device: user B can sign in while
   /// user A's registration is still awaiting the OS, and the one event that
   /// should register B used to return at [_busy] and disappear permanently.
-  Future<void> _sync({bool forceRegistration = false}) async {
+  Future<void> _sync({
+    bool forceRegistration = false,
+    bool forcePermissionCheck = false,
+  }) async {
     _queued = true;
     _forceRegistration = _forceRegistration || forceRegistration;
+    _forcePermissionCheck = _forcePermissionCheck || forcePermissionCheck;
     if (_busy) return;
 
     _busy = true;
     try {
       while (_queued) {
         final force = _forceRegistration;
+        final recheckPermission = _forcePermissionCheck;
         _queued = false;
         _forceRegistration = false;
-        await _syncOnce(forceRegistration: force);
+        _forcePermissionCheck = false;
+        await _syncOnce(
+          forceRegistration: force,
+          forcePermissionCheck: recheckPermission,
+        );
       }
     } finally {
       _busy = false;
     }
   }
 
-  Future<void> _syncOnce({required bool forceRegistration}) async {
+  Future<void> _syncOnce({
+    required bool forceRegistration,
+    required bool forcePermissionCheck,
+  }) async {
     final uid = _currentUid;
 
     if (uid == null) {
@@ -122,11 +135,9 @@ class PushRegistrar {
       return;
     }
 
-    if (!forceRegistration && uid == _registeredFor) return;
-
     final push = _ref.read(pushServiceProvider);
 
-    if (_permissionCheckedFor != uid) {
+    if (forcePermissionCheck || _permissionCheckedFor != uid) {
       // Read only. The system prompt belongs to the contextual action on the
       // profile screen, not to a background auth listener.
       final permission = await push.permissionStatus();
@@ -145,6 +156,10 @@ class PushRegistrar {
       debugPrint('[push] Notifications not permitted; skipping registration.');
       return;
     }
+
+    // A lifecycle resume needs to refresh the permission card, not rewrite the
+    // same Firestore device document every time the app returns to foreground.
+    if (!forceRegistration && uid == _registeredFor) return;
 
     if (_currentUid != uid) {
       _queued = true;
@@ -182,8 +197,7 @@ class PushRegistrar {
 
   /// Rechecks permission after the user returns from operating-system settings.
   Future<void> refreshPermission() async {
-    _permissionCheckedFor = null;
-    await _sync(forceRegistration: true);
+    await _sync(forcePermissionCheck: true);
     _ref.invalidate(pushPermissionProvider);
   }
 

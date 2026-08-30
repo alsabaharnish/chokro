@@ -130,8 +130,11 @@ class SellerProductsView extends ConsumerWidget {
                     child: ProductCard(
                       product: product,
                       showSellerState: true,
-                      onTap: () =>
-                          context.push('/seller/products/${product.id}'),
+                      // The menu already pauses edits during a suspension; the
+                      // card itself is also an edit affordance and must agree.
+                      onTap: active
+                          ? () => context.push('/seller/products/${product.id}')
+                          : null,
                       trailing: _ListingMenu(
                         product: product,
                         accountActive: active,

@@ -165,6 +165,36 @@ async function persistReviewEvidence({
 }
 
 /**
+ * Reads the winner after an automatic-award transaction loses a race.
+ *
+ * Only a genuinely committed decision or a flagged review result is returned.
+ * A still-untouched pending document returns null so the original award error
+ * (daily cap, closed bin, missing wallet, and so on) remains authoritative.
+ */
+async function committedVerificationOutcome({
+  disposalId,
+  callerUid,
+  disposalRef,
+}) {
+  const latestSnap = await disposalRef.get();
+  if (!latestSnap.exists) return null;
+
+  const latest = latestSnap.data();
+  if (latest.userId !== callerUid) return null;
+
+  if (latest.status !== 'pending') {
+    return existingVerificationOutcome(disposalId, latest);
+  }
+
+  const storedFlags = Array.isArray(latest.flags) ? latest.flags : [];
+  if (hasCompletedVerification(latest) && storedFlags.length > 0) {
+    return existingVerificationOutcome(disposalId, latest);
+  }
+
+  return null;
+}
+
+/**
  * Verifies a pending submission and either credits it or routes it to review.
  *
  * @param {object} args
@@ -337,12 +367,31 @@ async function verifyDisposal({ disposalId, callerUid }) {
       ...screeningFields,
     };
 
-    const result = await approveDisposal({
-      disposalId,
-      adminUid: null,
-      flags: [],
-      verificationEvidence,
-    });
+    let result;
+    try {
+      result = await approveDisposal({
+        disposalId,
+        adminUid: null,
+        flags: [],
+        verificationEvidence,
+      });
+    } catch (error) {
+      // A duplicate request or an administrator may have committed while this
+      // request was screening the photo. Return that committed truth instead
+      // of a 409 that tells the submitter verification failed when it did not.
+      // If this read itself fails, preserve the original, more useful error.
+      try {
+        const committed = await committedVerificationOutcome({
+          disposalId,
+          callerUid,
+          disposalRef,
+        });
+        if (committed) return committed;
+      } catch (_) {
+        // Preserve [error] below.
+      }
+      throw error;
+    }
 
     return {
       disposalId,
@@ -399,5 +448,6 @@ module.exports = {
   approvedTodayCount,
   existingVerificationOutcome,
   persistReviewEvidence,
+  committedVerificationOutcome,
   verifyDisposal,
 };

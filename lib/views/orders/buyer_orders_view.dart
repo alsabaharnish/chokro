@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../controllers/orders_controller.dart';
+import '../../core/constants.dart';
 import '../../core/theme.dart';
 import '../../models/order_model.dart';
 import '../../services/order_service.dart';
@@ -39,7 +40,8 @@ class BuyerOrdersView extends ConsumerWidget {
           title: 'Your orders',
           onRetry: () => ref.invalidate(buyerOrdersProvider),
         ),
-        data: (orders) {
+        data: (page) {
+          final orders = page.orders;
           if (orders.isEmpty) {
             return ContentEmpty(
               icon: Icons.receipt_long_outlined,
@@ -58,6 +60,8 @@ class BuyerOrdersView extends ConsumerWidget {
           // nothing was virtualised: all forty order cards were laid out and
           // painted on every frame, including the thirty-odd off screen.
           final banner = awaiting.isNotEmpty;
+          final headerCount = banner ? 1 : 0;
+          final footerCount = page.truncated ? 1 : 0;
 
           return Center(
             child: ConstrainedBox(
@@ -71,15 +75,33 @@ class BuyerOrdersView extends ConsumerWidget {
                   AppTheme.gapMd,
                   AppTheme.gapXl,
                 ),
-                itemCount: orders.length + (banner ? 1 : 0),
+                itemCount: orders.length + headerCount + footerCount,
                 itemBuilder: (context, index) {
                   if (banner && index == 0) {
                     return Padding(
                       padding: const EdgeInsets.only(bottom: AppTheme.gapMd),
-                      child: _AwaitingBanner(count: awaiting.length),
+                      child: _AwaitingBanner(
+                        count: awaiting.length,
+                        moreOrdersExist: page.truncated,
+                      ),
                     );
                   }
-                  final order = orders[index - (banner ? 1 : 0)];
+                  final orderIndex = index - headerCount;
+                  if (orderIndex == orders.length) {
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: AppTheme.gapMd),
+                      child: OutlinedButton.icon(
+                        onPressed: () => ref
+                            .read(buyerOrderLimitProvider.notifier)
+                            .loadOlder(),
+                        icon: const Icon(Icons.expand_more),
+                        label: const Text(
+                          'Load ${QueryLimits.orders} older orders',
+                        ),
+                      ),
+                    );
+                  }
+                  final order = orders[orderIndex];
                   return Padding(
                     padding: const EdgeInsets.only(bottom: AppTheme.gapMd),
                     child: OrderCard(
@@ -101,9 +123,10 @@ class BuyerOrdersView extends ConsumerWidget {
 }
 
 class _AwaitingBanner extends StatelessWidget {
-  const _AwaitingBanner({required this.count});
+  const _AwaitingBanner({required this.count, required this.moreOrdersExist});
 
   final int count;
+  final bool moreOrdersExist;
 
   @override
   Widget build(BuildContext context) {
@@ -121,7 +144,15 @@ class _AwaitingBanner extends StatelessWidget {
             const SizedBox(width: AppTheme.gapMd),
             Expanded(
               child: Text(
-                count == 1
+                moreOrdersExist
+                    ? count == 1
+                          ? 'At least one loaded order is waiting for you to '
+                                'confirm receipt. Load older orders to check '
+                                'the rest.'
+                          : 'At least $count loaded orders are waiting for you '
+                                'to confirm receipt. Load older orders to check '
+                                'the rest.'
+                    : count == 1
                     ? 'One order is waiting for you to confirm receipt. Your '
                           'purchase points are credited when you do.'
                     : '$count orders are waiting for you to confirm receipt. '

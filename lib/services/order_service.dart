@@ -26,6 +26,18 @@ class SellerOrderPage {
   final bool truncated;
 }
 
+/// A page of a Champion's orders, and whether older purchases exist.
+///
+/// Kept separate from [SellerOrderPage] even though the shape is the same so a
+/// provider cannot accidentally feed a seller queue into the buyer history (or
+/// vice versa) without the type system noticing.
+class BuyerOrderPage {
+  const BuyerOrderPage({required this.orders, required this.truncated});
+
+  final List<OrderModel> orders;
+  final bool truncated;
+}
+
 /// Orders (F4.4–F4.8).
 ///
 /// Split along the trust boundary like every other paying path: reads come
@@ -52,12 +64,22 @@ class OrderService {
   // Reads
   // ---------------------------------------------------------------------------
 
-  Stream<List<OrderModel>> watchBuyerOrders(String uid) => _orders
+  Stream<BuyerOrderPage> watchBuyerOrders(
+    String uid, {
+    int limit = QueryLimits.orders,
+  }) => _orders
       .where('buyerId', isEqualTo: uid)
       .orderBy('createdAt', descending: true)
-      .limit(QueryLimits.orders)
+      .limit(limit + 1)
       .snapshots()
-      .map((snap) => snap.docs.map(_fromDoc).toList());
+      .map((snap) {
+        final truncated = snap.docs.length > limit;
+        final docs = truncated ? snap.docs.take(limit) : snap.docs;
+        return BuyerOrderPage(
+          orders: docs.map(_fromDoc).toList(),
+          truncated: truncated,
+        );
+      });
 
   Stream<SellerOrderPage> watchSellerOrders(
     String uid, {

@@ -32,6 +32,7 @@ class SellerSalesView extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final reportAsync = ref.watch(sellerSalesReportProvider);
+    final ordersPage = ref.watch(sellerReportOrdersProvider).asData?.value;
 
     return AppShell(
       title: 'Sales',
@@ -42,7 +43,17 @@ class SellerSalesView extends ConsumerWidget {
           title: 'Your sales',
           onRetry: () => ref.invalidate(sellerReportOrdersProvider),
         ),
-        data: (report) => _Report(report: report),
+        data: (report) => ordersPage != null && ordersPage.orders.isEmpty
+            ? ContentEmpty(
+                icon: Icons.query_stats_outlined,
+                title: 'No sales yet',
+                message:
+                    'When a 3ZERO Champion buys one of your products, the order '
+                    'and its value appear here.',
+                actionLabel: 'Go to your listings',
+                onAction: () => context.go('/seller/products'),
+              )
+            : _Report(report: report),
       ),
     );
   }

@@ -130,7 +130,9 @@ class _AdminBinsViewState extends ConsumerState<AdminBinsView> {
       _lat.text.trim().isNotEmpty ||
       _lng.text.trim().isNotEmpty ||
       _radius.text.trim() != '50' ||
-      _fix != null;
+      // A denied/unavailable location result is guidance, not a draft. Do not
+      // ask the admin to "discard" it when there is no captured fix to lose.
+      _fix?.hasFix == true;
 
   /// Whether the fix is too imprecise for the radius it will be the centre of.
   /// The rule itself is domain logic — see [isFixTooRoughForRadius].

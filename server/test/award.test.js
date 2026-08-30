@@ -423,6 +423,30 @@ describe('verification must have run before a payout', () => {
     expect(fake.writesTo('transactions/')).toHaveLength(0);
   });
 
+  it('does not let a later clean verifier overwrite a flagged review result', async () => {
+    const fake = fakeFirestore(
+      baseSeed({
+        'disposals/d1': pendingDisposal({ flags: ['lowConfidence'] }),
+      }),
+    );
+
+    await expect(
+      approveDisposal({
+        disposalId: 'd1',
+        verificationEvidence: {
+          photoHash: 'different-clean-hash',
+          distanceMeters: 4,
+          verificationCompleted: true,
+          screenConfidence: 0.99,
+          screenItemCount: 4,
+        },
+      }),
+    ).rejects.toThrow(/already been routed to manual review/i);
+
+    expect(fake.writesTo('wallets/')).toHaveLength(0);
+    expect(fake.writesTo('transactions/')).toHaveLength(0);
+  });
+
   it('keeps a closed-bin submission available for a manual decision', async () => {
     const fake = fakeFirestore(
       baseSeed({ 'bins/bin1': { active: false } }),

@@ -1,4 +1,7 @@
-const { persistReviewEvidence } = require('../src/verify');
+const {
+  committedVerificationOutcome,
+  persistReviewEvidence,
+} = require('../src/verify');
 
 function fakeTransaction(latest) {
   const update = jest.fn();
@@ -92,5 +95,71 @@ describe('review-evidence persistence race', () => {
       }),
     ).rejects.toThrow(/belongs to someone else/i);
     expect(fake.update).not.toHaveBeenCalled();
+  });
+});
+
+describe('automatic-award race recovery', () => {
+  function latestRef(latest) {
+    return {
+      get: jest.fn().mockResolvedValue({
+        exists: latest !== undefined,
+        data: () => latest,
+      }),
+    };
+  }
+
+  test('returns a decision that committed while screening was in flight', async () => {
+    const ref = latestRef({
+      userId: 'u1',
+      status: 'autoApproved',
+      pointsAwarded: 50,
+      flags: [],
+    });
+
+    await expect(
+      committedVerificationOutcome({
+        disposalId: 'd1',
+        callerUid: 'u1',
+        disposalRef: ref,
+      }),
+    ).resolves.toMatchObject({
+      status: 'autoApproved',
+      alreadyDecided: true,
+      pointsAwarded: 50,
+    });
+  });
+
+  test('returns the first flagged result instead of overwriting it', async () => {
+    const ref = latestRef({
+      userId: 'u1',
+      status: 'pending',
+      verificationCompleted: true,
+      photoHash: 'winner',
+      flags: ['lowConfidence'],
+    });
+
+    await expect(
+      committedVerificationOutcome({
+        disposalId: 'd1',
+        callerUid: 'u1',
+        disposalRef: ref,
+      }),
+    ).resolves.toMatchObject({
+      status: 'pending',
+      alreadyVerified: true,
+      flags: ['lowConfidence'],
+    });
+  });
+
+  test('does not hide an award failure when nothing else committed', async () => {
+    const ref = latestRef({ userId: 'u1', status: 'pending' });
+
+    await expect(
+      committedVerificationOutcome({
+        disposalId: 'd1',
+        callerUid: 'u1',
+        disposalRef: ref,
+      }),
+    ).resolves.toBeNull();
   });
 });

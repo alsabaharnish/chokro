@@ -52,6 +52,10 @@ class WalletLedgerView extends ConsumerWidget {
                 }
               },
               child: ListView(
+                // A short or empty ledger still needs to accept the pull
+                // gesture; otherwise the visible refresh affordance appears
+                // dead precisely for a new account waiting on its first entry.
+                physics: const AlwaysScrollableScrollPhysics(),
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
                 children: [
                   _BalanceHeader(balance: balance, recentEarned: earned),

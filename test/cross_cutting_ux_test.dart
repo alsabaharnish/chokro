@@ -313,6 +313,14 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text('9223372036854775807'), findsOneWidget);
+    final walletList = find.descendant(
+      of: find.byType(RefreshIndicator),
+      matching: find.byType(ListView),
+    );
+    expect(
+      tester.widget<ListView>(walletList).physics,
+      isA<AlwaysScrollableScrollPhysics>(),
+    );
     expect(tester.takeException(), isNull);
   });
 

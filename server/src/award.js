@@ -161,6 +161,20 @@ async function approveDisposal({
       );
     }
 
+    // Two verification requests can overlap while hashing and image screening
+    // are in flight. If one of them has already committed flags for a human to
+    // review, a later clean result must not overwrite that evidence and pay the
+    // submission automatically. Manual review is still allowed, and a legacy
+    // verified document with no flags may still use the recovery path below.
+    if (adminUid === null && hasCompletedVerification(disposal)) {
+      const storedFlags = Array.isArray(disposal.flags) ? disposal.flags : [];
+      if (storedFlags.length > 0) {
+        throw new Error(
+          'That submission has already been routed to manual review.',
+        );
+      }
+    }
+
     // Verification performs paid network calls before reaching this transaction.
     // A 3ZERO Admin can close the bin during that window. Re-read the control in
     // the same transaction as an automatic payout so closing a bin and crediting

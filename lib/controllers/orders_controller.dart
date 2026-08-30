@@ -11,12 +11,27 @@ import 'wallet_controller.dart';
 final orderServiceProvider = Provider<OrderService>((ref) => OrderService());
 
 /// Orders the signed-in user has placed (F4.6, F4.7).
-final buyerOrdersProvider = StreamProvider.autoDispose<List<OrderModel>>((ref) {
+class BuyerOrderLimitController extends Notifier<int> {
+  @override
+  int build() => QueryLimits.orders;
+
+  void loadOlder() => state += QueryLimits.orders;
+}
+
+final buyerOrderLimitProvider =
+    NotifierProvider.autoDispose<BuyerOrderLimitController, int>(
+      BuyerOrderLimitController.new,
+    );
+
+final buyerOrdersProvider = StreamProvider.autoDispose<BuyerOrderPage>((ref) {
   final uid = ref.watch(currentUidProvider);
+  final limit = ref.watch(buyerOrderLimitProvider);
   if (uid == null) {
-    return Stream<List<OrderModel>>.value(const <OrderModel>[]);
+    return Stream<BuyerOrderPage>.value(
+      const BuyerOrderPage(orders: <OrderModel>[], truncated: false),
+    );
   }
-  return ref.watch(orderServiceProvider).watchBuyerOrders(uid);
+  return ref.watch(orderServiceProvider).watchBuyerOrders(uid, limit: limit);
 });
 
 class SellerOrderLimitController extends Notifier<int> {
@@ -49,7 +64,9 @@ final sellerOrdersProvider = StreamProvider.autoDispose<SellerOrderPage>((ref) {
 /// holding up the cycle, and the points they are owed are sitting behind it.
 final ordersAwaitingConfirmationProvider =
     Provider.autoDispose<List<OrderModel>>((ref) {
-      final orders = ref.watch(buyerOrdersProvider).asData?.value ?? const [];
+      final orders =
+          ref.watch(buyerOrdersProvider).asData?.value.orders ??
+          const <OrderModel>[];
       return orders
           .where((order) => order.status == OrderStatus.delivered)
           .toList();

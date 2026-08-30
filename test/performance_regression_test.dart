@@ -92,7 +92,11 @@ void main() {
         ProviderScope(
           overrides: [
             currentUserProvider.overrideWith((ref) => Stream.value(_buyer)),
-            buyerOrdersProvider.overrideWith((ref) => Stream.value(orders)),
+            buyerOrdersProvider.overrideWith(
+              (ref) => Stream.value(
+                BuyerOrderPage(orders: orders, truncated: false),
+              ),
+            ),
             cartCountProvider.overrideWith((ref) => 0),
             adminWorkloadProvider.overrideWith((ref) => AdminWorkload.empty),
             activeAccountProfileProvider.overrideWith(
@@ -149,6 +153,39 @@ void main() {
         reason: 'the growing fulfilment queue built every order at once',
       );
       expect(built, greaterThan(0));
+    });
+
+    testWidgets('a capped buyer history offers its older orders', (
+      tester,
+    ) async {
+      final orders = List.generate(40, _order);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            currentUserProvider.overrideWith((ref) => Stream.value(_buyer)),
+            buyerOrdersProvider.overrideWith(
+              (ref) =>
+                  Stream.value(BuyerOrderPage(orders: orders, truncated: true)),
+            ),
+            cartCountProvider.overrideWith((ref) => 0),
+            adminWorkloadProvider.overrideWith((ref) => AdminWorkload.empty),
+            activeAccountProfileProvider.overrideWith(
+              (ref) => AccountProfile.champion,
+            ),
+          ],
+          child: _app(const BuyerOrdersView()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      await tester.scrollUntilVisible(
+        find.text('Load 40 older orders'),
+        700,
+        scrollable: find.byType(Scrollable).last,
+      );
+      expect(find.text('Load 40 older orders'), findsOneWidget);
+      expect(tester.takeException(), isNull);
     });
   });
 

@@ -70,6 +70,10 @@ Widget _app({required List<OrderModel> orders, bool truncated = false}) {
         builder: (_, _) => const Scaffold(body: Text('Orders to fulfil')),
       ),
       GoRoute(
+        path: '/seller/products',
+        builder: (_, _) => const Scaffold(body: Text('Your listings')),
+      ),
+      GoRoute(
         path: '/seller/sales',
         builder: (_, _) => const SellerSalesView(),
       ),
@@ -188,7 +192,7 @@ void main() {
     expect(find.textContaining('floors rather than totals'), findsOneWidget);
   });
 
-  testWidgets('an empty period renders zeroes without breaking', (
+  testWidgets('a seller with no orders gets a useful empty state', (
     tester,
   ) async {
     _sizeAs(tester, width: 400);
@@ -196,7 +200,35 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 100));
 
+    expect(find.text('No sales yet'), findsOneWidget);
+    expect(find.text('Go to your listings'), findsOneWidget);
+    expect(find.textContaining('Orders placed today'), findsNothing);
+    await tester.tap(find.text('Go to your listings'));
+    await tester.pumpAndSettle();
+    expect(find.text('Your listings'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('an empty selected period still renders its zero report', (
+    tester,
+  ) async {
+    _sizeAs(tester, width: 400);
+    await tester.pumpWidget(
+      _app(
+        orders: [
+          _order(
+            id: 'older',
+            subtotal: 100,
+            createdAt: DateTime.now().subtract(const Duration(days: 20)),
+          ),
+        ],
+      ),
+    );
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
+
     expect(find.textContaining('Orders placed today'), findsOneWidget);
+    expect(find.text('No sales yet'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 

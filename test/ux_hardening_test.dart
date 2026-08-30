@@ -14,6 +14,7 @@ import 'package:chokro/models/appeal_model.dart';
 import 'package:chokro/models/disposal_model.dart';
 import 'package:chokro/models/user_model.dart';
 import 'package:chokro/controllers/orders_controller.dart';
+import 'package:chokro/services/order_service.dart';
 import 'package:chokro/views/admin/admin_appeals_view.dart';
 import 'package:chokro/views/appeals/appeals_view.dart';
 import 'package:chokro/views/orders/buyer_orders_view.dart';
@@ -493,7 +494,11 @@ void main() {
             cartCountProvider.overrideWithValue(0),
             adminWorkloadProvider.overrideWithValue(AdminWorkload.empty),
             userAppealsProvider.overrideWith((ref) => Stream.value(const [])),
-            buyerOrdersProvider.overrideWith((ref) => Stream.value(const [])),
+            buyerOrdersProvider.overrideWith(
+              (ref) => Stream.value(
+                const BuyerOrderPage(orders: [], truncated: false),
+              ),
+            ),
           ],
           child: MaterialApp.router(
             theme: AppTheme.light(),

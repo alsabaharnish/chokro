@@ -1,5 +1,9 @@
 # Outstanding UI/UX findings — updated 2026-08-26
 
+> Historical snapshot: this list is no longer the current audit status. See
+> `AUDIT_2026-08-30.md` for the verified fixes, final checks, and remaining
+> release note.
+
 ## What happened to the previous version of this file
 
 The 2026-08-24 edition listed 44 findings from six of eleven planned areas of
@@ -471,4 +475,3 @@ While `userApplicationsProvider` resolves — a first Firestore read on a cold c
 A Champion whose disposal was just approved opens Wallet, sees 'Your wallet is ready', and pulls down repeatedly with nothing happening. The list is a live Firestore stream so the data is not actually stale - but an affordance that visibly does nothing reads as a broken screen.
 
 *Suggested:* Add `physics: const AlwaysScrollableScrollPhysics(),` to the ListView at line 48 so a short list still accepts the overscroll. The ErrorRetry branch already carries its own retry button, so it needs no change.
-
