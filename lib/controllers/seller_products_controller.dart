@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/constants.dart';
 import '../models/product_model.dart';
 import '../services/photo_upload_service.dart';
 import '../services/product_service.dart';
@@ -17,14 +18,31 @@ final productPhotoUploadProvider = Provider<PhotoUploadService>((ref) {
 /// (§6.2), so a seller who could not see their delisted products would have no
 /// way to bring one back and would reasonably conclude the delete had worked
 /// like a delete.
-final sellerProductsProvider = StreamProvider.autoDispose<List<ProductModel>>((
+class SellerProductLimitController extends Notifier<int> {
+  @override
+  int build() => QueryLimits.sellerListings;
+
+  void loadOlder() => state += QueryLimits.sellerListings;
+}
+
+final sellerProductLimitProvider =
+    NotifierProvider.autoDispose<SellerProductLimitController, int>(
+      SellerProductLimitController.new,
+    );
+
+final sellerProductsProvider = StreamProvider.autoDispose<SellerProductPage>((
   ref,
 ) {
   final uid = ref.watch(currentUidProvider);
+  final limit = ref.watch(sellerProductLimitProvider);
   if (uid == null) {
-    return Stream<List<ProductModel>>.value(const <ProductModel>[]);
+    return Stream<SellerProductPage>.value(
+      const SellerProductPage(products: <ProductModel>[], truncated: false),
+    );
   }
-  return ref.watch(productServiceProvider).watchSellerProducts(uid);
+  return ref
+      .watch(productServiceProvider)
+      .watchSellerProducts(uid, limit: limit);
 });
 
 /// Create, edit, delist and photograph a listing.

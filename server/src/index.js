@@ -46,6 +46,7 @@ const donationsModule = require('./donations');
 const listingsModule = require('./listings');
 const { rateLimit } = require('./rateLimit');
 const { parseAllowedOrigins, isAllowedOrigin } = require('./cors');
+const { requestBodyErrorResponse } = require('./httpErrors');
 
 const app = express();
 
@@ -173,7 +174,8 @@ const writeLimit = rateLimit({ name: 'writes', windowMs: 60 * 1000, max: 30 });
 // Body parsing
 // ---------------------------------------------------------------------------
 //
-// Registered AFTER cors and, for the photo routes, after authentication.
+// Registered AFTER cors and, for the photo routes, after authentication and the
+// per-user rate limit.
 //
 // A single global `express.json({ limit: '12mb' })` used to sit above
 // everything, which meant an **unauthenticated** POST to any path — including
@@ -182,23 +184,13 @@ const writeLimit = rateLimit({ name: 'writes', windowMs: 60 * 1000, max: 30 });
 // photo uploads (base64 inflates a payload by about a third), but only the
 // purpose-specific photo routes need it.
 //
-// So the token is verified first and the large limit is mounted only on
-// `/photos`. Everything else gets 64 KB, which is ample for a decision, a policy
-// or a checkout request.
-//
-// `req.method !== 'POST'` is load-bearing, not tidiness: an OPTIONS preflight
-// carries no Authorization header, so gating it on `requireAuth` would 401 every
-// cross-origin upload from the web build before the browser ever sent the real
-// request. `GET /photos/limits` is public for the same reason it always was.
-app.use('/photos', (req, res, next) => {
-  if (req.method !== 'POST') return next();
-  return requireAuth(req, res, next);
-});
-app.use('/photos', express.json({ limit: '12mb' }));
-
-// The second parser is a no-op for anything the first already handled — Express
-// skips a body that is already parsed.
-app.use(express.json({ limit: '64kb' }));
+// Each exact photo POST attaches these in the order auth -> rate limit -> parser.
+// That ordering matters twice: a rate-limited account does not get to make the
+// process decode another 12 MB body, and an unauthenticated GET/PUT/unknown path
+// below `/photos` never inherits the large ceiling. OPTIONS does not match a POST
+// route, so browser preflights remain unauthenticated.
+const photoJson = express.json({ limit: '12mb' });
+const regularJson = express.json({ limit: '64kb' });
 
 // ---------------------------------------------------------------------------
 // Health and diagnostics
@@ -287,14 +279,25 @@ function photoUploadHandler(kind, { saveAsProfile = false } = {}) {
   };
 }
 
-// No `requireAuth` here: the `/photos` mount above already ran it, before the
-// body was buffered. Repeating it would cost a second token verification and a
-// second Firestore read on the hottest path in the app.
-app.post('/photos/disposal', photoLimit, photoUploadHandler('disposals'));
-app.post('/photos/claim', photoLimit, photoUploadHandler('claims'));
+app.post(
+  '/photos/disposal',
+  requireAuth,
+  photoLimit,
+  photoJson,
+  photoUploadHandler('disposals'),
+);
+app.post(
+  '/photos/claim',
+  requireAuth,
+  photoLimit,
+  photoJson,
+  photoUploadHandler('claims'),
+);
 app.post(
   '/photos/profile',
+  requireAuth,
   photoLimit,
+  photoJson,
   photoUploadHandler('profiles', { saveAsProfile: true }),
 );
 
@@ -311,12 +314,23 @@ app.post(
  * web-primary (§5.5), so an upload that only worked on a phone would be the
  * wrong way round.
  */
-app.post('/photos/product', requireSeller, photoLimit, photoUploadHandler('products'));
+app.post(
+  '/photos/product',
+  requireAuth,
+  requireSeller,
+  photoLimit,
+  photoJson,
+  photoUploadHandler('products'),
+);
 
 /** Lets the client show a sensible limit without hard-coding it twice. */
 app.get('/photos/limits', (req, res) => {
   res.json({ maxBytes: MAX_BYTES });
 });
+
+// All remaining request bodies are small decisions, settings or checkout
+// intent. Photo bodies have already terminated in their exact routes above.
+app.use(regularJson);
 
 // ---------------------------------------------------------------------------
 // Disposal review (F2.8)
@@ -847,12 +861,25 @@ app.use((req, res) => {
   res.status(404).json({ error: 'not_found', path: req.path });
 });
 
-// Express error handler. Four arguments is what marks it as one — do not remove
-// `next` even though it is unused.
-// eslint-disable-next-line no-unused-vars
+// Express error handler. Four arguments is what marks it as one.
 app.use((err, req, res, next) => {
+  if (res.headersSent) return next(err);
+
+  const requestError = requestBodyErrorResponse(err);
+  if (requestError) {
+    // Do not log `err.message`: JSON parse errors can echo a fragment of the
+    // request body. The type and path are enough to diagnose this class.
+    console.warn(
+      `[request] ${req.method} ${req.path} rejected: ${requestError.error}`,
+    );
+    return res.status(requestError.status).json({
+      error: requestError.error,
+      message: requestError.message,
+    });
+  }
+
   console.error('Unhandled error:', err);
-  res.status(500).json({
+  return res.status(500).json({
     error: 'internal',
     message: 'Something went wrong. Check the server logs.',
   });

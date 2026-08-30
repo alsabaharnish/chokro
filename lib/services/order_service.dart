@@ -59,12 +59,22 @@ class OrderService {
       .snapshots()
       .map((snap) => snap.docs.map(_fromDoc).toList());
 
-  Stream<List<OrderModel>> watchSellerOrders(String uid) => _orders
+  Stream<SellerOrderPage> watchSellerOrders(
+    String uid, {
+    int limit = QueryLimits.orders,
+  }) => _orders
       .where('sellerId', isEqualTo: uid)
       .orderBy('createdAt', descending: true)
-      .limit(QueryLimits.orders)
+      .limit(limit + 1)
       .snapshots()
-      .map((snap) => snap.docs.map(_fromDoc).toList());
+      .map((snap) {
+        final truncated = snap.docs.length > limit;
+        final docs = truncated ? snap.docs.take(limit) : snap.docs;
+        return SellerOrderPage(
+          orders: docs.map(_fromDoc).toList(),
+          truncated: truncated,
+        );
+      });
 
   /// Every order a seller has, up to [QueryLimits.salesReport], for the sales
   /// report to total.

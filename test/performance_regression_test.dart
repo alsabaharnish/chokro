@@ -12,9 +12,11 @@ import 'package:chokro/core/theme.dart';
 import 'package:chokro/models/order_model.dart';
 import 'package:chokro/models/product_model.dart';
 import 'package:chokro/models/user_model.dart';
+import 'package:chokro/services/order_service.dart';
 import 'package:chokro/views/market/product_card.dart';
 import 'package:chokro/views/orders/buyer_orders_view.dart';
 import 'package:chokro/views/orders/order_card.dart';
+import 'package:chokro/views/seller/seller_orders_view.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -31,6 +33,14 @@ const _buyer = UserModel(
   name: 'Nadia Islam',
   email: 'nadia@example.com',
   role: AppConstants.roleBuyer,
+  status: AppConstants.statusActive,
+);
+
+const _seller = UserModel(
+  uid: 'seller-1',
+  name: 'Rafiq Ahmed',
+  email: 'rafiq@example.com',
+  role: AppConstants.roleSeller,
   status: AppConstants.statusActive,
 );
 
@@ -103,6 +113,40 @@ void main() {
         built,
         lessThan(orders.length),
         reason: 'every order card was built, so nothing is virtualised',
+      );
+      expect(built, greaterThan(0));
+    });
+
+    testWidgets('the growing seller queue still builds rows lazily', (
+      tester,
+    ) async {
+      final orders = List.generate(40, _order);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            currentUserProvider.overrideWith((ref) => Stream.value(_seller)),
+            sellerOrdersProvider.overrideWith(
+              (ref) => Stream.value(
+                SellerOrderPage(orders: orders, truncated: true),
+              ),
+            ),
+            cartCountProvider.overrideWith((ref) => 0),
+            adminWorkloadProvider.overrideWith((ref) => AdminWorkload.empty),
+            activeAccountProfileProvider.overrideWith(
+              (ref) => AccountProfile.greenpreneur,
+            ),
+          ],
+          child: _app(const SellerOrdersView()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final built = tester.widgetList(find.byType(OrderCard)).length;
+      expect(
+        built,
+        lessThan(orders.length),
+        reason: 'the growing fulfilment queue built every order at once',
       );
       expect(built, greaterThan(0));
     });

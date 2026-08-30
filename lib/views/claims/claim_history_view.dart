@@ -2,7 +2,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../controllers/account_profile_controller.dart';
+import '../../core/account_profile.dart';
 import '../../core/theme.dart';
+import '../shared/account_profile_switcher.dart';
 import '../shared/app_shell.dart';
 import 'claim_submit_view.dart' show ClaimHistoryList;
 
@@ -25,6 +28,8 @@ class ClaimHistoryView extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
+    final activeProfile = ref.watch(activeAccountProfileProvider);
+    final canLogAction = activeProfile == AccountProfile.champion;
 
     return AppShell(
       title: 'Eco-actions',
@@ -61,9 +66,23 @@ class ClaimHistoryView extends ConsumerWidget {
 
               const SizedBox(height: AppTheme.gapLg),
               OutlinedButton.icon(
-                onPressed: () => context.push('/claims/new'),
-                icon: const Icon(Icons.add),
-                label: const Text('Log another eco-action'),
+                onPressed: () async {
+                  if (!canLogAction) {
+                    await showAccountProfilePicker(context, ref);
+                    if (!context.mounted ||
+                        ref.read(activeAccountProfileProvider) !=
+                            AccountProfile.champion) {
+                      return;
+                    }
+                  }
+                  if (context.mounted) context.push('/claims/new');
+                },
+                icon: Icon(canLogAction ? Icons.add : Icons.swap_horiz),
+                label: Text(
+                  canLogAction
+                      ? 'Log another eco-action'
+                      : 'Switch to 3ZERO Champion to log an action',
+                ),
               ),
             ],
           ),

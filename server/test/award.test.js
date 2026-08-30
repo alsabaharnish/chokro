@@ -141,6 +141,7 @@ function pendingDisposal(overrides = {}) {
 function baseSeed(overrides = {}) {
   return {
     'disposals/d1': pendingDisposal(),
+    'bins/bin1': { active: true },
     'wallets/u1': { balance: 100 },
     'config/points': null,
     ...overrides,
@@ -398,6 +399,39 @@ describe('verification must have run before a payout', () => {
         verificationEvidence: { photoHash: 'not-enough' },
       }),
     ).rejects.toThrow(/Verification is still running/i);
+  });
+
+  it('refuses an automatic payout when the bin closed during verification', async () => {
+    const fake = fakeFirestore(
+      baseSeed({ 'bins/bin1': { active: false } }),
+    );
+
+    await expect(
+      approveDisposal({
+        disposalId: 'd1',
+        verificationEvidence: {
+          photoHash: 'fresh-hash',
+          distanceMeters: 8.5,
+          verificationCompleted: true,
+          screenConfidence: 0.96,
+          screenItemCount: 4,
+        },
+      }),
+    ).rejects.toThrow(/no longer in service/i);
+
+    expect(fake.writesTo('wallets/')).toHaveLength(0);
+    expect(fake.writesTo('transactions/')).toHaveLength(0);
+  });
+
+  it('keeps a closed-bin submission available for a manual decision', async () => {
+    const fake = fakeFirestore(
+      baseSeed({ 'bins/bin1': { active: false } }),
+    );
+
+    await expect(
+      approveDisposal({ disposalId: 'd1', adminUid: 'admin_1' }),
+    ).resolves.toMatchObject({ status: 'manualApproved' });
+    expect(fake.readPaths()).not.toContain('bins/bin1');
   });
 });
 

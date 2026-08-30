@@ -9,7 +9,9 @@ import '../../core/theme.dart';
 import '../../models/user_model.dart';
 import '../shared/app_shell.dart';
 import '../shared/app_snackbar.dart';
+import '../shared/content_state.dart';
 import '../shared/error_retry.dart';
+import '../shared/notice_card.dart';
 import '../../core/network_errors.dart';
 
 /// Administrator account management (F5.2) with temporary suspension (F5.3).
@@ -32,6 +34,7 @@ enum _Filter { all, active, suspended }
 class _AdminUsersViewState extends ConsumerState<AdminUsersView> {
   final TextEditingController _search = TextEditingController();
   _Filter _filter = _Filter.all;
+  final Set<String> _busyUids = <String>{};
 
   @override
   void dispose() {
@@ -74,12 +77,40 @@ class _AdminUsersViewState extends ConsumerState<AdminUsersView> {
     return filtered;
   }
 
+  bool _looksLikeEmail(String value) =>
+      RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$').hasMatch(value.trim());
+
+  void _clearSearchAndFilter() {
+    setState(() {
+      _search.clear();
+      _filter = _Filter.all;
+    });
+  }
+
   Future<void> _suspend(UserModel user) async {
+    final consequences = <String>[
+      if (user.isSeller)
+        'Their listings will be hidden from the shop while this lasts, and '
+            'restored when you reinstate them.',
+      if (user.isAdmin)
+        'This is a 3ZERO Admin. Suspending them revokes every administrative '
+            'privilege until reinstated.',
+    ];
     final choice = await showDialog<Duration?>(
       context: context,
       builder: (context) => SimpleDialog(
         title: Text('Suspend ${user.name}'),
         children: [
+          if (consequences.isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(24, 0, 24, 12),
+              child: Text(
+                consequences.join('\n\n'),
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                  color: Theme.of(context).colorScheme.error,
+                ),
+              ),
+            ),
           for (final option in const [
             (label: '24 hours', duration: Duration(hours: 24)),
             (label: '7 days', duration: Duration(days: 7)),
@@ -106,6 +137,10 @@ class _AdminUsersViewState extends ConsumerState<AdminUsersView> {
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('Cancel'),
+          ),
         ],
       ),
     );
@@ -123,6 +158,7 @@ class _AdminUsersViewState extends ConsumerState<AdminUsersView> {
       () => ref
           .read(adminUserActionsProvider)
           .suspend(user.uid, until: until, isSeller: user.isSeller),
+      name: user.name,
       success: until == null
           ? '${user.name} suspended indefinitely.'
           : '${user.name} suspended until ${formatDateTime(until)}.',
@@ -136,6 +172,7 @@ class _AdminUsersViewState extends ConsumerState<AdminUsersView> {
       () => ref
           .read(adminUserActionsProvider)
           .reinstate(user.uid, isSeller: user.isSeller),
+      name: user.name,
       success: '${user.name} reinstated.',
       hiding: false,
     );
@@ -156,15 +193,16 @@ class _AdminUsersViewState extends ConsumerState<AdminUsersView> {
   /// flipped to the opposite state and offered the *opposite* button while the
   /// sweep was still running: an admin could press Reinstate on an account
   /// whose listings were still being hidden.
-  String? _busyUid;
-
   Future<void> _run(
     String uid,
     Future<SuspensionOutcome> Function() action, {
+    required String name,
     required String success,
     required bool hiding,
   }) async {
-    setState(() => _busyUid = uid);
+    if (_busyUids.contains(uid)) return;
+    setState(() => _busyUids.add(uid));
+    final notify = AppSnackBar.of(context);
     try {
       final outcome = await action();
       if (!mounted) return;
@@ -186,23 +224,21 @@ class _AdminUsersViewState extends ConsumerState<AdminUsersView> {
         );
       }
 
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(message.toString()),
-          duration: outcome.sweptCleanly
-              ? const Duration(seconds: 4)
-              // A partial failure needs long enough to read and act on.
-              : const Duration(seconds: 8),
-        ),
-      );
+      if (outcome.sweptCleanly) {
+        notify.success(message.toString());
+      } else {
+        // The account write landed but its security-related catalogue sweep
+        // did not. That is a partial failure, not a success with a footnote.
+        notify.failure(message.toString());
+      }
     } catch (error) {
       if (!mounted) return;
-      // `failure`, not a neutral bar: this reports that a security-relevant
-      // action did not happen, and the plain SnackBar said so in the same tone
-      // as the successes above it.
-      AppSnackBar.of(context).failure(friendlyErrorMessage(error));
+      notify.failure(
+        '$name was not ${hiding ? 'suspended' : 'reinstated'}. '
+        '${friendlyErrorMessage(error)}',
+      );
     } finally {
-      if (mounted) setState(() => _busyUid = null);
+      if (mounted) setState(() => _busyUids.remove(uid));
     }
   }
 
@@ -225,8 +261,21 @@ class _AdminUsersViewState extends ConsumerState<AdminUsersView> {
               title: 'Accounts',
               onRetry: () => ref.invalidate(allUsersProvider),
             ),
-            data: (users) {
-              final visible = _visible(users);
+            data: (page) {
+              final exactQuery = _search.text.trim();
+              final query = exactQuery.toLowerCase();
+              final searchesWholeDirectory =
+                  page.truncated && _looksLikeEmail(exactQuery);
+              final exactAsync = searchesWholeDirectory
+                  ? ref.watch(adminUserByEmailProvider(exactQuery))
+                  : null;
+              final candidates = [...page.users];
+              final exactMatch = exactAsync?.value;
+              if (exactMatch != null &&
+                  candidates.every((user) => user.uid != exactMatch.uid)) {
+                candidates.add(exactMatch);
+              }
+              final visible = _visible(candidates);
               return Column(
                 children: [
                   Padding(
@@ -234,10 +283,19 @@ class _AdminUsersViewState extends ConsumerState<AdminUsersView> {
                     child: TextField(
                       controller: _search,
                       onChanged: (_) => setState(() {}),
-                      decoration: const InputDecoration(
-                        prefixIcon: Icon(Icons.search),
-                        hintText: 'Search by name or email',
+                      decoration: InputDecoration(
+                        prefixIcon: const Icon(Icons.search),
+                        hintText: 'Search by name or exact email',
                         isDense: true,
+                        suffixIcon: _search.text.isEmpty
+                            ? null
+                            : IconButton(
+                                tooltip: 'Clear search',
+                                onPressed: () {
+                                  setState(_search.clear);
+                                },
+                                icon: const Icon(Icons.clear),
+                              ),
                       ),
                     ),
                   ),
@@ -246,21 +304,56 @@ class _AdminUsersViewState extends ConsumerState<AdminUsersView> {
                     child: _FilterBar(
                       selected: _filter,
                       visibleCount: visible.length,
-                      totalCount: users.length,
+                      totalCount: page.users.length,
+                      atCap: page.truncated,
                       onSelected: (filter) => setState(() => _filter = filter),
                     ),
                   ),
+                  if (page.truncated)
+                    const Padding(
+                      padding: EdgeInsets.fromLTRB(16, 8, 16, 0),
+                      child: NoticeCard(
+                        icon: Icons.info_outline,
+                        title: 'The account directory is capped',
+                        message:
+                            'Showing the first 200 accounts in name order. '
+                            'Enter a complete email address to search every '
+                            'account.',
+                      ),
+                    ),
                   const SizedBox(height: 8),
                   Expanded(
-                    child: visible.isEmpty
-                        ? const Center(child: Text('No accounts match.'))
+                    child: exactAsync?.isLoading == true && visible.isEmpty
+                        ? const ContentLoading(label: 'Searching all accounts…')
+                        : exactAsync?.hasError == true && visible.isEmpty
+                        ? ErrorRetry(
+                            error: exactAsync!.error!,
+                            title: 'Account search',
+                            onRetry: () => ref.invalidate(
+                              adminUserByEmailProvider(exactQuery),
+                            ),
+                          )
+                        : visible.isEmpty
+                        ? ContentEmpty(
+                            icon: Icons.person_search_outlined,
+                            title: 'No accounts match',
+                            message: page.truncated && query.isNotEmpty
+                                ? _looksLikeEmail(query)
+                                      ? 'No account has that exact email address.'
+                                      : 'No loaded account matches. Enter a '
+                                            'complete email address to search '
+                                            'the full directory.'
+                                : 'No account matches this search and filter.',
+                            actionLabel: 'Clear search and filter',
+                            onAction: _clearSearchAndFilter,
+                          )
                         : ListView.separated(
                             padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
                             itemCount: visible.length,
                             separatorBuilder: (_, _) =>
                                 const SizedBox(height: 8),
                             itemBuilder: (context, index) => _UserCard(
-                              isBusy: visible[index].uid == _busyUid,
+                              isBusy: _busyUids.contains(visible[index].uid),
                               user: visible[index],
                               isSelf: visible[index].uid == currentUid,
                               onSuspend: () => _suspend(visible[index]),
@@ -283,12 +376,14 @@ class _FilterBar extends StatelessWidget {
     required this.selected,
     required this.visibleCount,
     required this.totalCount,
+    required this.atCap,
     required this.onSelected,
   });
 
   final _Filter selected;
   final int visibleCount;
   final int totalCount;
+  final bool atCap;
   final ValueChanged<_Filter> onSelected;
 
   @override
@@ -306,7 +401,7 @@ class _FilterBar extends StatelessWidget {
       ],
     );
     final count = Text(
-      '$visibleCount of $totalCount',
+      '$visibleCount of $totalCount${atCap ? '+' : ''}',
       style: Theme.of(context).textTheme.labelSmall,
     );
 

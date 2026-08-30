@@ -13,6 +13,14 @@ import '../core/product_taxonomy.dart';
 import '../core/wire_values.dart';
 import '../models/product_model.dart';
 
+/// A bounded seller-console read and whether an older listing exists.
+class SellerProductPage {
+  const SellerProductPage({required this.products, required this.truncated});
+
+  final List<ProductModel> products;
+  final bool truncated;
+}
+
 /// Marketplace listings (F4.1, F4.2).
 ///
 /// Unlike the disposal and claim services, the writes here are Firestore writes
@@ -125,12 +133,22 @@ class ProductService {
 
   /// Everything one seller has listed, active or not — the seller console shows
   /// their delisted products too, since delisting is how F4.1 deletes.
-  Stream<List<ProductModel>> watchSellerProducts(String sellerId) => _products
+  Stream<SellerProductPage> watchSellerProducts(
+    String sellerId, {
+    int limit = QueryLimits.sellerListings,
+  }) => _products
       .where('sellerId', isEqualTo: sellerId)
       .orderBy('createdAt', descending: true)
-      .limit(QueryLimits.sellerListings)
+      .limit(limit + 1)
       .snapshots()
-      .map((snap) => snap.docs.map(_fromDoc).toList());
+      .map((snap) {
+        final truncated = snap.docs.length > limit;
+        final docs = truncated ? snap.docs.take(limit) : snap.docs;
+        return SellerProductPage(
+          products: docs.map(_fromDoc).toList(),
+          truncated: truncated,
+        );
+      });
 
   // ---------------------------------------------------------------------------
   // Seller writes (F4.1)

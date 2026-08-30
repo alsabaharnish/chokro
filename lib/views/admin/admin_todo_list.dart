@@ -65,8 +65,9 @@ class AdminTodoList extends ConsumerWidget {
                 ),
                 if (workload.pendingTotal > 0)
                   _CountPill(
-                    count: workload.pendingTotal,
-                    label: 'remaining',
+                    label:
+                        '${workload.pendingTotal}'
+                        '${workload.hasCappedPending ? '+' : ''} remaining',
                     background: scheme.errorContainer,
                     foreground: scheme.onErrorContainer,
                   ),
@@ -113,12 +114,16 @@ class AdminTodoList extends ConsumerWidget {
       return 'No reviews are waiting right now.';
     }
     if (workload.pendingTotal == 0) {
-      return '${workload.completedTodayTotal} completed today. Everything is clear.';
+      return '${workload.hasCappedCompleted ? 'At least ' : ''}'
+          '${workload.completedTodayTotal} completed today. Everything is clear.';
     }
     if (workload.completedTodayTotal == 0) {
-      return '${workload.pendingTotal} waiting for your decision.';
+      return '${workload.hasCappedPending ? 'At least ' : ''}'
+          '${workload.pendingTotal} waiting for your decision.';
     }
-    return '${workload.completedTodayTotal} done today · '
+    return '${workload.hasCappedCompleted ? 'At least ' : ''}'
+        '${workload.completedTodayTotal} done today · '
+        '${workload.hasCappedPending ? 'at least ' : ''}'
         '${workload.pendingTotal} still waiting.';
   }
 }
@@ -138,7 +143,9 @@ class _TaskRow extends StatelessWidget {
     return Semantics(
       button: canOpen,
       label:
-          '${_label(kind)}. ${progress.pending} waiting. '
+          '${_label(kind)}. '
+          '${progress.atCap ? 'At least ' : ''}${progress.pending} waiting. '
+          '${progress.completedAtCap ? 'At least ' : ''}'
           '${progress.completedToday} completed today.',
       child: InkWell(
         onTap: canOpen ? () => context.push(_path(kind)) : null,
@@ -183,14 +190,16 @@ class _TaskRow extends StatelessWidget {
                         if (progress.pending > 0)
                           _StatusPill(
                             icon: Icons.schedule_rounded,
-                            label: '${progress.pending} waiting',
+                            label: '${progress.badgeLabel} waiting',
                             background: scheme.errorContainer,
                             foreground: scheme.onErrorContainer,
                           ),
                         if (progress.completedToday > 0)
                           _StatusPill(
                             icon: Icons.check_circle_rounded,
-                            label: '${progress.completedToday} done today',
+                            label:
+                                '${progress.completedToday}'
+                                '${progress.completedAtCap ? '+' : ''} done today',
                             background: scheme.successContainer,
                             foreground: scheme.onSuccessContainer,
                           ),
@@ -290,13 +299,11 @@ class _StatusPill extends StatelessWidget {
 
 class _CountPill extends StatelessWidget {
   const _CountPill({
-    required this.count,
     required this.label,
     required this.background,
     required this.foreground,
   });
 
-  final int count;
   final String label;
   final Color background;
   final Color foreground;
@@ -309,7 +316,7 @@ class _CountPill extends StatelessWidget {
       borderRadius: BorderRadius.circular(999),
     ),
     child: Text(
-      '$count $label',
+      label,
       style: Theme.of(context).textTheme.labelSmall?.copyWith(
         color: foreground,
         fontWeight: FontWeight.w800,

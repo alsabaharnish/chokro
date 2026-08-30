@@ -2,12 +2,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../controllers/seller_application_controller.dart';
 import '../../core/constants.dart';
+import '../../core/network_errors.dart';
 import '../../core/theme.dart';
 import '../../core/validators.dart';
 import '../../models/seller_application_model.dart';
 import '../shared/app_snackbar.dart';
 import '../shared/app_shell.dart';
+import '../shared/content_state.dart';
 import '../shared/error_retry.dart';
+import '../shared/unsaved_changes.dart';
 
 class SellerApplicationView extends ConsumerStatefulWidget {
   const SellerApplicationView({super.key});
@@ -53,18 +56,10 @@ class _SellerApplicationViewState extends ConsumerState<SellerApplicationView> {
     if (error == null) {
       notify.success('Application submitted for review');
     } else {
-      // Not every failure is the network. The rules refuse a second
-      // application while one is still pending, and telling that applicant to
-      // check their connection sends them to fix the wrong thing.
-      final denied = error.toString().contains('permission-denied');
-      notify.failure(
-        denied
-            ? 'Your application could not be sent. If you already have an '
-                  'application waiting, that is why — check your profile for '
-                  'its status.'
-            : 'Your application could not be sent. Check your connection and '
-                  'try again.',
-      );
+      // The controller carries specific, user-facing failures (including the
+      // already-pending case). Preserve those instead of labelling every
+      // refusal as a connection problem.
+      notify.failure(friendlyErrorMessage(error));
     }
 
     if (error == null) {
@@ -82,8 +77,9 @@ class _SellerApplicationViewState extends ConsumerState<SellerApplicationView> {
         false;
     final theme = Theme.of(context);
 
-    return AppShell(
+    final shell = AppShell(
       title: 'Become a 3ZERO Greenpreneur',
+      rootBackToHome: false,
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
         child: Center(
@@ -138,7 +134,10 @@ class _SellerApplicationViewState extends ConsumerState<SellerApplicationView> {
                 ),
                 const SizedBox(height: AppTheme.gapLg),
                 applicationsAsync.when(
-                  loading: () => const SizedBox.shrink(),
+                  loading: () => const Padding(
+                    padding: EdgeInsets.symmetric(vertical: AppTheme.gapXl),
+                    child: ContentLoading(label: 'Checking your applications…'),
+                  ),
                   // The last raw `$error` surface in `lib/views/`. This one is
                   // shown to an applicant, so a Firestore vendor prefix was
                   // being offered as feedback on their business application.
@@ -271,6 +270,29 @@ class _SellerApplicationViewState extends ConsumerState<SellerApplicationView> {
             ),
           ),
         ),
+      ),
+    );
+
+    // Protect the only substantial prose form in the onboarding flow. The
+    // guard is armed only while the form itself is available; loading and
+    // under-review states should still leave immediately.
+    if (!applicationsAsync.hasValue || hasPending) return shell;
+
+    return ListenableBuilder(
+      listenable: Listenable.merge([
+        _businessNameController,
+        _descriptionController,
+      ]),
+      child: shell,
+      builder: (context, child) => UnsavedChangesGuard(
+        hasChanges:
+            _businessNameController.text.trim().isNotEmpty ||
+            _descriptionController.text.trim().isNotEmpty,
+        title: 'Discard this application?',
+        message:
+            'What you have written has not been sent, and leaving now loses '
+            'it.',
+        child: child!,
       ),
     );
   }

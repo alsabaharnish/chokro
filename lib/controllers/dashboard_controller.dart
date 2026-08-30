@@ -30,6 +30,7 @@ class AccountTotals {
     this.sellers = 0,
     this.admins = 0,
     this.suspended = 0,
+    this.truncated = false,
   });
 
   final int total;
@@ -42,34 +43,39 @@ class AccountTotals {
   /// counted as still in force (F5.3).
   final int suspended;
 
+  /// True when every total is a floor because the account directory is capped.
+  final bool truncated;
+
   static const AccountTotals empty = AccountTotals();
 }
 
-final accountTotalsProvider = Provider.autoDispose<AccountTotals>((ref) {
-  final users = ref.watch(allUsersProvider).asData?.value;
-  if (users == null) return AccountTotals.empty;
+final accountTotalsProvider = Provider.autoDispose<AsyncValue<AccountTotals>>((
+  ref,
+) {
+  return ref.watch(allUsersProvider).whenData((page) {
+    final now = DateTime.now();
+    var buyers = 0;
+    var sellers = 0;
+    var admins = 0;
+    var suspended = 0;
 
-  final now = DateTime.now();
-  var buyers = 0;
-  var sellers = 0;
-  var admins = 0;
-  var suspended = 0;
+    for (final user in page.users) {
+      // Profile totals are inclusive. Every account is a Champion, a
+      // Greenpreneur retains the Champion profile, and a 3ZERO Admin holds all
+      // three. Exclusive security tiers would understate those profile counts.
+      buyers += 1;
+      if (user.isGreenpreneur) sellers += 1;
+      if (user.isAdmin) admins += 1;
+      if (!user.isActiveAt(now)) suspended += 1;
+    }
 
-  for (final user in users) {
-    // Profile totals are inclusive. Every account is a Champion, a
-    // Greenpreneur retains the Champion profile, and a 3ZERO Admin holds all
-    // three. Exclusive security tiers would understate those profile counts.
-    buyers += 1;
-    if (user.isGreenpreneur) sellers += 1;
-    if (user.isAdmin) admins += 1;
-    if (!user.isActiveAt(now)) suspended += 1;
-  }
-
-  return AccountTotals(
-    total: users.length,
-    buyers: buyers,
-    sellers: sellers,
-    admins: admins,
-    suspended: suspended,
-  );
+    return AccountTotals(
+      total: page.users.length,
+      buyers: buyers,
+      sellers: sellers,
+      admins: admins,
+      suspended: suspended,
+      truncated: page.truncated,
+    );
+  });
 });

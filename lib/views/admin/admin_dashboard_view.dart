@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../controllers/admin_users_controller.dart';
 import '../../controllers/dashboard_controller.dart';
 import '../../core/label_format.dart';
 import '../../core/theme.dart';
@@ -32,7 +33,7 @@ class AdminDashboardView extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final statsAsync = ref.watch(platformStatsProvider);
-    final accounts = ref.watch(accountTotalsProvider);
+    final accountsAsync = ref.watch(accountTotalsProvider);
 
     return AppShell(
       title: 'Dashboard',
@@ -176,33 +177,52 @@ class AdminDashboardView extends ConsumerWidget {
                       'Accounts',
                       icon: Icons.people_outline,
                     ),
-                    _StatGrid(
-                      tiles: [
-                        _Stat(
-                          label: 'Accounts',
-                          value: '${accounts.total}',
-                          detail: 'Counted live, not a counter',
-                          icon: Icons.person_outline,
-                        ),
-                        _Stat(
-                          label: '3ZERO Greenpreneurs',
-                          value: '${accounts.sellers}',
-                          detail:
-                              '${accounts.buyers} Champions, '
-                              '${accounts.admins} 3ZERO Admins',
-                          icon: Icons.storefront_outlined,
-                        ),
-                        _Stat(
-                          label: 'Cannot act',
-                          value: '${accounts.suspended}',
-                          detail: 'Suspended now — lapsed ones excluded',
-                          icon: Icons.pause_circle_outline,
-                        ),
-                      ],
+                    accountsAsync.when(
+                      loading: () =>
+                          const ContentLoading(label: 'Counting accounts…'),
+                      error: (error, _) => ErrorRetry(
+                        error: error,
+                        title: 'Account totals',
+                        onRetry: () => ref.invalidate(allUsersProvider),
+                      ),
+                      data: (accounts) => _StatGrid(
+                        tiles: [
+                          _Stat(
+                            label: 'Accounts',
+                            value:
+                                '${accounts.total}${accounts.truncated ? '+' : ''}',
+                            detail: accounts.truncated
+                                ? 'At least this many, counted live'
+                                : 'Counted live, not a counter',
+                            icon: Icons.person_outline,
+                          ),
+                          _Stat(
+                            label: '3ZERO Greenpreneurs',
+                            value:
+                                '${accounts.sellers}${accounts.truncated ? '+' : ''}',
+                            detail:
+                                '${accounts.buyers}${accounts.truncated ? '+' : ''} Champions, '
+                                '${accounts.admins}${accounts.truncated ? '+' : ''} 3ZERO Admins',
+                            icon: Icons.storefront_outlined,
+                          ),
+                          _Stat(
+                            label: 'Cannot act',
+                            value:
+                                '${accounts.suspended}${accounts.truncated ? '+' : ''}',
+                            detail: accounts.truncated
+                                ? 'At least this many suspended now'
+                                : 'Suspended now — lapsed ones excluded',
+                            icon: Icons.pause_circle_outline,
+                          ),
+                        ],
+                      ),
                     ),
 
                     const SizedBox(height: AppTheme.gapLg),
-                    _ProvenanceNote(stats: stats),
+                    _ProvenanceNote(
+                      stats: stats,
+                      accountTotalsAvailable: accountsAsync.hasValue,
+                    ),
 
                     const SizedBox(height: AppTheme.gapLg),
                     const SectionHeading('Go to', icon: Icons.shield_outlined),
@@ -367,9 +387,13 @@ class _StatTile extends StatelessWidget {
 /// Worth the space on a screen an examiner will ask about: a dashboard that
 /// cannot explain its own provenance is a dashboard nobody should trust.
 class _ProvenanceNote extends StatelessWidget {
-  const _ProvenanceNote({required this.stats});
+  const _ProvenanceNote({
+    required this.stats,
+    required this.accountTotalsAvailable,
+  });
 
   final PlatformStats stats;
+  final bool accountTotalsAvailable;
 
   @override
   Widget build(BuildContext context) {
@@ -397,12 +421,12 @@ class _ProvenanceNote extends StatelessWidget {
                     ? 'No counter has been incremented yet, so these read zero '
                           'rather than being unavailable. They are written by the '
                           'trusted service inside the same transactions that '
-                          'award and spend points — no client can write them, an '
+                          'award and spend points — no client can write them, a '
                           '3ZERO Admin included.'
                     : 'Platform counters are written by the trusted service '
                           'inside the same transactions that award and spend '
-                          'points, so this screen is one document read. Account '
-                          'totals are counted live from the accounts list. No '
+                          'points, so this screen is one document read. '
+                          '${accountTotalsAvailable ? 'Account totals are counted live from the accounts list. ' : ''}No '
                           'client can write a counter, a 3ZERO Admin included.',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: scheme.onSurfaceVariant,

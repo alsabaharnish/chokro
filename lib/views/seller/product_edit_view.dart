@@ -8,6 +8,7 @@ import 'package:image_picker/image_picker.dart';
 
 import '../../controllers/auth_controller.dart';
 import '../../controllers/catalog_controller.dart';
+import '../../controllers/current_user_provider.dart';
 import '../../controllers/seller_products_controller.dart';
 import '../../core/network_errors.dart';
 import '../../core/product_taxonomy.dart';
@@ -165,6 +166,25 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
             ),
           );
         }
+        final uid = ref.watch(currentUidProvider);
+        if (uid == null || product.sellerId != uid) {
+          // The route accepts a document id from a URL. Active products are
+          // readable by every signed-in shopper, so a Greenpreneur can paste
+          // another shop's id here even though the rules will (correctly)
+          // refuse the eventual write. Do not present a fully working editor
+          // that waits until Save to reveal that it was a dead end.
+          return _scaffold(
+            child: ContentEmpty(
+              icon: Icons.lock_outline,
+              title: 'This is not your listing',
+              message:
+                  'Only the Greenpreneur who published this listing can edit '
+                  'it.',
+              actionLabel: 'Back to your listings',
+              onAction: _leaveEditor,
+            ),
+          );
+        }
         _seed(product);
         return _scaffold(child: _form(existing: product));
       },
@@ -192,7 +212,8 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
   String? _pristine;
 
   bool get _hasUnsavedChanges =>
-      _pristine != null && _snapshot() != _pristine && !_saving;
+      !_saving &&
+      (_uploading || (_pristine != null && _snapshot() != _pristine));
 
   Widget _scaffold({required Widget child}) {
     // `PopScope.canPop` is read when the widget builds, and typing into a
@@ -233,201 +254,239 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
   Widget _form({ProductModel? existing}) {
     final theme = Theme.of(context);
 
-    return Form(
-      key: _formKey,
-      child: ListView(
-        padding: const EdgeInsets.fromLTRB(
-          AppTheme.gapMd,
-          AppTheme.gapMd,
-          AppTheme.gapMd,
-          AppTheme.gap2Xl,
-        ),
-        children: [
-          Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(
-                maxWidth: AppTheme.maxContentWidth,
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  _PhotoStrip(
-                    urls: _imageUrls,
-                    uploading: _uploading,
-                    onAdd: _pickPhoto,
-                    onRemove: (url) => setState(
-                      () => _imageUrls = [..._imageUrls]..remove(url),
-                    ),
-                  ),
-
-                  const SizedBox(height: AppTheme.gapLg),
-                  TextFormField(
-                    controller: _title,
-                    // The first thing a seller wants to type, focused on open
-                    // so a desktop browser does not present a form with no
-                    // cursor in it.
-                    autofocus: _isNew,
-                    textInputAction: TextInputAction.next,
-                    onFieldSubmitted: (_) => _shopNameFocus.requestFocus(),
-                    textCapitalization: TextCapitalization.sentences,
-                    decoration: const InputDecoration(
-                      labelText: 'Title',
-                      helperText: 'What a Champion searches for',
-                    ),
-                    maxLength: ProductLimits.titleMax,
-                    validator: (value) =>
-                        (value ?? '').trim().length < ProductLimits.titleMin
-                        ? 'Give the product a name'
-                        : null,
-                  ),
-
-                  TextFormField(
-                    controller: _shopName,
-                    focusNode: _shopNameFocus,
-                    textInputAction: TextInputAction.next,
-                    onFieldSubmitted: (_) => _priceFocus.requestFocus(),
-                    textCapitalization: TextCapitalization.words,
-                    decoration: const InputDecoration(
-                      labelText: 'Shop name',
-                      helperText: 'Shown on every listing you publish',
-                    ),
-                    maxLength: 80,
-                    validator: (value) => (value ?? '').trim().length < 2
-                        ? 'Enter the name Champions will see'
-                        : null,
-                  ),
-
-                  const SizedBox(height: AppTheme.gapSm),
-                  DropdownButtonFormField<ProductCategory>(
-                    initialValue: _category,
-                    decoration: const InputDecoration(labelText: 'Category'),
-                    items: [
-                      for (final category in ProductCategory.values)
-                        DropdownMenuItem(
-                          value: category,
-                          child: Text(category.label),
-                        ),
-                    ],
-                    onChanged: (value) =>
-                        setState(() => _category = value ?? _category),
-                  ),
-
-                  const SizedBox(height: AppTheme.gapMd),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: TextFormField(
-                          controller: _price,
-                          focusNode: _priceFocus,
-                          textInputAction: TextInputAction.next,
-                          onFieldSubmitted: (_) => _stockFocus.requestFocus(),
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [
-                            FilteringTextInputFormatter.digitsOnly,
-                          ],
-                          decoration: const InputDecoration(
-                            labelText: 'Price',
-                            prefixText: '৳ ',
-                            // Whole taka, because the points economy is integer
-                            // arithmetic end to end (§7.3).
-                            helperText: 'Whole taka',
-                          ),
-                          validator: _validatePrice,
-                        ),
+    // Freeze the draft once the write starts. Without this, a seller could type
+    // after [draft] had been snapshotted, see the new text on screen, and then
+    // be navigated away after a successful save that did not contain it.
+    return AbsorbPointer(
+      absorbing: _saving,
+      child: Form(
+        key: _formKey,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(
+            AppTheme.gapMd,
+            AppTheme.gapMd,
+            AppTheme.gapMd,
+            AppTheme.gap2Xl,
+          ),
+          children: [
+            Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(
+                  maxWidth: AppTheme.maxContentWidth,
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    _PhotoStrip(
+                      urls: _imageUrls,
+                      uploading: _uploading,
+                      onAdd: _pickPhoto,
+                      onRemove: (url) => setState(
+                        () => _imageUrls = [..._imageUrls]..remove(url),
                       ),
-                      const SizedBox(width: AppTheme.gapMd),
-                      Expanded(
-                        child: TextFormField(
-                          controller: _stock,
-                          focusNode: _stockFocus,
-                          textInputAction: TextInputAction.next,
-                          onFieldSubmitted: (_) =>
-                              _descriptionFocus.requestFocus(),
-                          keyboardType: TextInputType.number,
-                          inputFormatters: [
-                            FilteringTextInputFormatter.digitsOnly,
-                          ],
-                          decoration: const InputDecoration(
-                            labelText: 'Stock',
-                            helperText: 'Zero is allowed',
-                          ),
-                          validator: _validateStock,
-                        ),
+                    ),
+
+                    const SizedBox(height: AppTheme.gapLg),
+                    TextFormField(
+                      controller: _title,
+                      // The first thing a seller wants to type, focused on open
+                      // so a desktop browser does not present a form with no
+                      // cursor in it.
+                      autofocus: _isNew,
+                      textInputAction: TextInputAction.next,
+                      onFieldSubmitted: (_) => _shopNameFocus.requestFocus(),
+                      textCapitalization: TextCapitalization.sentences,
+                      decoration: const InputDecoration(
+                        labelText: 'Title',
+                        helperText: 'What a Champion searches for',
                       ),
-                    ],
-                  ),
-
-                  const SizedBox(height: AppTheme.gapMd),
-                  TextFormField(
-                    controller: _description,
-                    focusNode: _descriptionFocus,
-                    textCapitalization: TextCapitalization.sentences,
-                    minLines: 3,
-                    maxLines: 8,
-                    maxLength: ProductLimits.descriptionMax,
-                    decoration: const InputDecoration(
-                      labelText: 'Description',
-                      alignLabelWithHint: true,
+                      maxLength: ProductLimits.titleMax,
+                      validator: (value) =>
+                          (value ?? '').trim().length < ProductLimits.titleMin
+                          ? 'Give the product a name'
+                          : null,
                     ),
-                    validator: (value) =>
-                        (value ?? '').trim().length <
-                            ProductLimits.descriptionMin
-                        ? 'Describe the product in at least '
-                              '${ProductLimits.descriptionMin} characters'
-                        : null,
-                  ),
 
-                  TextFormField(
-                    controller: _tags,
-                    focusNode: _tagsFocus,
-                    // The last field, so its action key saves rather than
-                    // moving on to nothing.
-                    textInputAction: TextInputAction.done,
-                    onFieldSubmitted: (_) =>
-                        _saving || _uploading ? null : _save(existing),
-                    decoration: const InputDecoration(
-                      labelText: 'Tags',
-                      helperText:
-                          'Comma separated. Tidied up and indexed for search — '
-                          'at most ${ProductLimits.maxTags}.',
+                    TextFormField(
+                      controller: _shopName,
+                      focusNode: _shopNameFocus,
+                      textInputAction: TextInputAction.next,
+                      onFieldSubmitted: (_) => _priceFocus.requestFocus(),
+                      textCapitalization: TextCapitalization.words,
+                      decoration: const InputDecoration(
+                        labelText: 'Shop name',
+                        helperText: 'Shown on every listing you publish',
+                      ),
+                      maxLength: 80,
+                      validator: (value) => (value ?? '').trim().length < 2
+                          ? 'Enter the name Champions will see'
+                          : null,
                     ),
-                  ),
 
-                  const SizedBox(height: AppTheme.gapLg),
-                  Text(
-                    'Search matches whole words from the title, the tags and '
-                    'the category. There is no full-text search behind this, so '
-                    'name the product the way a Champion would look for it.',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                      height: 1.45,
+                    const SizedBox(height: AppTheme.gapSm),
+                    DropdownButtonFormField<ProductCategory>(
+                      initialValue: _category,
+                      isExpanded: true,
+                      decoration: const InputDecoration(labelText: 'Category'),
+                      items: [
+                        for (final category in ProductCategory.values)
+                          DropdownMenuItem(
+                            value: category,
+                            child: Text(
+                              category.label,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                      ],
+                      onChanged: (value) =>
+                          setState(() => _category = value ?? _category),
                     ),
-                  ),
 
-                  const SizedBox(height: AppTheme.gapLg),
-                  FilledButton.icon(
-                    onPressed: _saving ? null : () => _save(existing),
-                    icon: _saving
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.save_outlined),
-                    label: Text(
-                      _saving
-                          ? 'Saving…'
-                          : _isNew
-                          ? 'Publish listing'
-                          : 'Save changes',
+                    const SizedBox(height: AppTheme.gapMd),
+                    _priceAndStockFields(),
+
+                    const SizedBox(height: AppTheme.gapMd),
+                    TextFormField(
+                      controller: _description,
+                      focusNode: _descriptionFocus,
+                      textCapitalization: TextCapitalization.sentences,
+                      minLines: 3,
+                      maxLines: 8,
+                      maxLength: ProductLimits.descriptionMax,
+                      decoration: const InputDecoration(
+                        labelText: 'Description',
+                        alignLabelWithHint: true,
+                      ),
+                      validator: (value) =>
+                          (value ?? '').trim().length <
+                              ProductLimits.descriptionMin
+                          ? 'Describe the product in at least '
+                                '${ProductLimits.descriptionMin} characters'
+                          : null,
                     ),
-                  ),
-                ],
+
+                    TextFormField(
+                      controller: _tags,
+                      focusNode: _tagsFocus,
+                      // The last field, so its action key saves rather than
+                      // moving on to nothing.
+                      textInputAction: TextInputAction.done,
+                      onFieldSubmitted: (_) =>
+                          _saving || _uploading ? null : _save(existing),
+                      decoration: const InputDecoration(
+                        labelText: 'Tags',
+                        helperText:
+                            'Comma separated. Tidied up and indexed for search — '
+                            'at most ${ProductLimits.maxTags}.',
+                      ),
+                    ),
+
+                    const SizedBox(height: AppTheme.gapLg),
+                    Text(
+                      'Search matches whole words from the title, the tags and '
+                      'the category. There is no full-text search behind this, so '
+                      'name the product the way a Champion would look for it.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                        height: 1.45,
+                      ),
+                    ),
+
+                    const SizedBox(height: AppTheme.gapLg),
+                    FilledButton.icon(
+                      // A product stores image URLs, so saving while an upload is
+                      // still producing one publishes the listing without the
+                      // photo and then abandons the completed upload as the route
+                      // closes. The keyboard action already guarded this race;
+                      // the visible button must do the same.
+                      onPressed: _saving || _uploading
+                          ? null
+                          : () => _save(existing),
+                      icon: _saving || _uploading
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.save_outlined),
+                      label: Text(
+                        _saving
+                            ? 'Saving…'
+                            : _uploading
+                            ? 'Finishing photo upload…'
+                            : _isNew
+                            ? 'Publish listing'
+                            : 'Save changes',
+                      ),
+                    ),
+                    if (_saving) const SlowServerNote(),
+                  ],
+                ),
               ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
+    );
+  }
+
+  /// Keeps the two short numeric fields side by side when they genuinely fit,
+  /// and stacks them on narrow phones or at a larger accessibility text size.
+  /// Error copy is longer than either value, so testing only the labels made
+  /// this row overflow precisely when the seller most needed to read it.
+  Widget _priceAndStockFields() {
+    Widget priceField() => TextFormField(
+      controller: _price,
+      focusNode: _priceFocus,
+      textInputAction: TextInputAction.next,
+      onFieldSubmitted: (_) => _stockFocus.requestFocus(),
+      keyboardType: TextInputType.number,
+      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+      decoration: const InputDecoration(
+        labelText: 'Price',
+        prefixText: '৳ ',
+        // Whole taka, because the points economy is integer arithmetic end to
+        // end (§7.3).
+        helperText: 'Whole taka',
+      ),
+      validator: _validatePrice,
+    );
+
+    Widget stockField() => TextFormField(
+      controller: _stock,
+      focusNode: _stockFocus,
+      textInputAction: TextInputAction.next,
+      onFieldSubmitted: (_) => _descriptionFocus.requestFocus(),
+      keyboardType: TextInputType.number,
+      inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+      decoration: const InputDecoration(
+        labelText: 'Stock',
+        helperText: 'Zero is allowed',
+      ),
+      validator: _validateStock,
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final largeText = MediaQuery.textScalerOf(context).scale(16) > 20;
+        if (constraints.maxWidth < 420 || largeText) {
+          return Column(
+            children: [
+              priceField(),
+              const SizedBox(height: AppTheme.gapSm),
+              stockField(),
+            ],
+          );
+        }
+        return Row(
+          children: [
+            Expanded(child: priceField()),
+            const SizedBox(width: AppTheme.gapMd),
+            Expanded(child: stockField()),
+          ],
+        );
+      },
     );
   }
 
@@ -469,9 +528,10 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
         imageQuality: 90,
       );
       // Cancelling is not an error.
-      if (picked == null) return;
+      if (picked == null || !mounted) return;
 
       final original = await picked.readAsBytes();
+      if (!mounted) return;
 
       // Compressed on the same path the disposal and claim flows use.
       //
@@ -492,6 +552,7 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
         minHeight: 1080,
         keepExif: false,
       );
+      if (!mounted) return;
 
       if (bytes.isEmpty) {
         messenger.showSnackBar(
@@ -508,8 +569,10 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
       if (!mounted) return;
       setState(() => _imageUrls = [..._imageUrls, url]);
     } on PhotoUploadException catch (error) {
+      if (!mounted) return;
       messenger.showSnackBar(SnackBar(content: Text(error.message)));
     } on PlatformException catch (error) {
+      if (!mounted) return;
       // The common cause, in the same words disposal_controller.dart uses.
       messenger.showSnackBar(
         SnackBar(
@@ -522,6 +585,7 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
         ),
       );
     } catch (error) {
+      if (!mounted) return;
       messenger.showSnackBar(
         SnackBar(
           content: Text(
@@ -547,6 +611,7 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
     return showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
+        scrollable: true,
         title: const Text('Stock changed while you were editing'),
         content: Text(
           'You opened this listing with $opened in stock and typed $typed. '
@@ -568,9 +633,10 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
   }
 
   Future<void> _save(ProductModel? existing) async {
+    if (_saving || _uploading) return;
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
-    final uid = ref.read(currentUserProvider).value?.uid;
+    final uid = ref.read(currentUidProvider);
     if (uid == null) return;
 
     // Reconcile the one field the server also owns. `existing` comes from a
@@ -635,6 +701,7 @@ class _ProductEditViewState extends ConsumerState<ProductEditView> {
 
       saved = true;
     } catch (error) {
+      if (!mounted) return;
       messenger.showSnackBar(
         SnackBar(content: Text(_saveFailureMessage(error))),
       );
@@ -711,6 +778,8 @@ class _PhotoStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final full = urls.length >= ProductLimits.maxImages;
+    final textScale = MediaQuery.textScalerOf(context).scale(14) / 14;
+    final addTileWidth = 110.0 * textScale.clamp(1.0, 2.5);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -743,7 +812,10 @@ class _PhotoStrip extends StatelessWidget {
               ],
               if (!full)
                 SizedBox(
-                  width: 110,
+                  // A fixed 110 px tile forced the accessible-size label onto
+                  // several lines inside a fixed-height button. Let this one
+                  // horizontal item grow; the strip already scrolls.
+                  width: addTileWidth,
                   height: 110,
                   child: OutlinedButton(
                     onPressed: uploading ? null : onAdd,
@@ -758,7 +830,7 @@ class _PhotoStrip extends StatelessWidget {
                             children: [
                               Icon(Icons.add_a_photo_outlined),
                               SizedBox(height: 4),
-                              Text('Add photo'),
+                              Text('Add photo', maxLines: 1),
                             ],
                           ),
                   ),
@@ -789,6 +861,12 @@ class _PhotoStrip extends StatelessWidget {
             color: theme.colorScheme.onSurfaceVariant,
           ),
         ),
+        if (uploading)
+          const SlowServerNote(
+            message:
+                'The photo is still being prepared and uploaded. Keep this '
+                'screen open; saving unlocks when it finishes.',
+          ),
       ],
     );
   }

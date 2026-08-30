@@ -1,8 +1,10 @@
 import 'package:chokro/controllers/auth_controller.dart';
+import 'package:chokro/controllers/push_controller.dart';
 import 'package:chokro/core/constants.dart';
 import 'package:chokro/core/theme.dart';
 import 'package:chokro/models/user_model.dart';
 import 'package:chokro/services/user_service.dart';
+import 'package:chokro/services/push_service.dart';
 import 'package:chokro/views/profile/profile_view.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
@@ -47,6 +49,7 @@ UserModel _user({
 Future<_RecordingUserService> _pump(
   WidgetTester tester, {
   required UserModel user,
+  PushPermissionStatus pushPermission = PushPermissionStatus.enabled,
 }) async {
   tester.view.physicalSize = const Size(800, 1400);
   tester.view.devicePixelRatio = 1;
@@ -75,6 +78,7 @@ Future<_RecordingUserService> _pump(
       overrides: [
         userServiceProvider.overrideWithValue(service),
         currentUserProvider.overrideWith((ref) => Stream.value(user)),
+        pushPermissionProvider.overrideWithValue(AsyncData(pushPermission)),
       ],
       child: MaterialApp.router(theme: AppTheme.light(), routerConfig: router),
     ),
@@ -224,6 +228,24 @@ void main() {
   testWidgets('a Greenpreneur is not offered it again', (tester) async {
     await _pump(tester, user: _user(role: AppConstants.roleSeller));
     expect(find.text('Become a 3ZERO Greenpreneur'), findsNothing);
+  });
+
+  testWidgets('a notification denial has a clear recovery path', (
+    tester,
+  ) async {
+    await _pump(
+      tester,
+      user: _user(),
+      pushPermission: PushPermissionStatus.denied,
+    );
+
+    await tester.scrollUntilVisible(
+      find.text('Open device settings'),
+      160,
+      scrollable: find.byType(Scrollable).last,
+    );
+    expect(find.text('Notifications are off'), findsOneWidget);
+    expect(find.text('Open device settings'), findsOneWidget);
   });
 }
 

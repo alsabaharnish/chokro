@@ -17,10 +17,12 @@ class AdminTaskProgress {
     this.pending = 0,
     this.completedToday = 0,
     this.atCap = false,
+    this.completedAtCap = false,
   });
 
   final int pending;
   final int completedToday;
+  final bool completedAtCap;
 
   /// True when [pending] is a floor rather than a total.
   ///
@@ -75,6 +77,16 @@ class AdminWorkload {
       claims.completedToday +
       appeals.completedToday +
       applications.completedToday;
+
+  bool get hasCappedPending => AdminTaskKind.values.any(
+    (kind) => progressFor(kind).pending > 0 && progressFor(kind).atCap,
+  );
+
+  bool get hasCappedCompleted => AdminTaskKind.values.any(
+    (kind) =>
+        progressFor(kind).completedToday > 0 &&
+        progressFor(kind).completedAtCap,
+  );
 }
 
 final adminWorkloadServiceProvider = Provider<AdminWorkloadService>((ref) {
@@ -92,43 +104,53 @@ final adminWorkdayProvider = Provider.autoDispose<DateTime>((ref) {
   return now;
 });
 
-final _completedDisposalsTodayProvider = StreamProvider.autoDispose<int>((ref) {
-  final user = ref.watch(currentUserProvider).value;
-  if (user == null || !user.isAdmin) return Stream.value(0);
-  final day = ref.watch(adminWorkdayProvider);
-  return ref
-      .watch(adminWorkloadServiceProvider)
-      .watchCompletedDisposals(adminUid: user.uid, day: day);
-});
+final _completedDisposalsTodayProvider =
+    StreamProvider.autoDispose<AdminCompletedCount>((ref) {
+      final user = ref.watch(currentUserProvider).value;
+      if (user == null || !user.isAdmin) {
+        return Stream.value(const AdminCompletedCount(count: 0, atCap: false));
+      }
+      final day = ref.watch(adminWorkdayProvider);
+      return ref
+          .watch(adminWorkloadServiceProvider)
+          .watchCompletedDisposals(adminUid: user.uid, day: day);
+    });
 
-final _completedClaimsTodayProvider = StreamProvider.autoDispose<int>((ref) {
-  final user = ref.watch(currentUserProvider).value;
-  if (user == null || !user.isAdmin) return Stream.value(0);
-  final day = ref.watch(adminWorkdayProvider);
-  return ref
-      .watch(adminWorkloadServiceProvider)
-      .watchCompletedClaims(adminUid: user.uid, day: day);
-});
+final _completedClaimsTodayProvider =
+    StreamProvider.autoDispose<AdminCompletedCount>((ref) {
+      final user = ref.watch(currentUserProvider).value;
+      if (user == null || !user.isAdmin) {
+        return Stream.value(const AdminCompletedCount(count: 0, atCap: false));
+      }
+      final day = ref.watch(adminWorkdayProvider);
+      return ref
+          .watch(adminWorkloadServiceProvider)
+          .watchCompletedClaims(adminUid: user.uid, day: day);
+    });
 
-final _completedAppealsTodayProvider = StreamProvider.autoDispose<int>((ref) {
-  final user = ref.watch(currentUserProvider).value;
-  if (user == null || !user.isAdmin) return Stream.value(0);
-  final day = ref.watch(adminWorkdayProvider);
-  return ref
-      .watch(adminWorkloadServiceProvider)
-      .watchCompletedAppeals(adminUid: user.uid, day: day);
-});
+final _completedAppealsTodayProvider =
+    StreamProvider.autoDispose<AdminCompletedCount>((ref) {
+      final user = ref.watch(currentUserProvider).value;
+      if (user == null || !user.isAdmin) {
+        return Stream.value(const AdminCompletedCount(count: 0, atCap: false));
+      }
+      final day = ref.watch(adminWorkdayProvider);
+      return ref
+          .watch(adminWorkloadServiceProvider)
+          .watchCompletedAppeals(adminUid: user.uid, day: day);
+    });
 
-final _completedApplicationsTodayProvider = StreamProvider.autoDispose<int>((
-  ref,
-) {
-  final user = ref.watch(currentUserProvider).value;
-  if (user == null || !user.isAdmin) return Stream.value(0);
-  final day = ref.watch(adminWorkdayProvider);
-  return ref
-      .watch(adminWorkloadServiceProvider)
-      .watchCompletedApplications(adminUid: user.uid, day: day);
-});
+final _completedApplicationsTodayProvider =
+    StreamProvider.autoDispose<AdminCompletedCount>((ref) {
+      final user = ref.watch(currentUserProvider).value;
+      if (user == null || !user.isAdmin) {
+        return Stream.value(const AdminCompletedCount(count: 0, atCap: false));
+      }
+      final day = ref.watch(adminWorkdayProvider);
+      return ref
+          .watch(adminWorkloadServiceProvider)
+          .watchCompletedApplications(adminUid: user.uid, day: day);
+    });
 
 /// One reactive view of all work that feeds badges and the dashboard to-do list.
 /// Queue streams remain the authority for what is pending; the audit streams
@@ -159,12 +181,16 @@ final adminWorkloadProvider = Provider.autoDispose<AdminWorkload>((ref) {
 
   // Every one of these four queues is read with `.limit(QueryLimits.reviewQueue)`,
   // so a length that has reached the limit means "at least this many".
-  AdminTaskProgress progress(AsyncValue<List<Object?>> queue, int? done) {
+  AdminTaskProgress progress(
+    AsyncValue<List<Object?>> queue,
+    AdminCompletedCount? done,
+  ) {
     final pending = queue.value?.length ?? 0;
     return AdminTaskProgress(
       pending: pending,
       atCap: pending >= QueryLimits.reviewQueue,
-      completedToday: done ?? 0,
+      completedToday: done?.count ?? 0,
+      completedAtCap: done?.atCap ?? false,
     );
   }
 

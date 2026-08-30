@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../controllers/admin_review_controller.dart';
+import '../../core/constants.dart';
 import '../../core/geo.dart';
 import '../../core/label_format.dart';
 import '../../core/submitter_record.dart';
@@ -10,6 +11,7 @@ import '../../core/theme.dart';
 import '../../models/disposal_model.dart';
 import '../shared/app_shell.dart';
 import '../shared/app_snackbar.dart';
+import '../shared/content_state.dart';
 import '../shared/rejection_reason_dialog.dart';
 import '../shared/error_retry.dart';
 
@@ -47,7 +49,7 @@ class AdminDisposalsView extends ConsumerWidget {
     return AppShell(
       title: 'Disposal review',
       child: pending.when(
-        loading: () => const Center(child: CircularProgressIndicator()),
+        loading: () => const ContentLoading(label: 'Loading the queue…'),
         error: (err, _) => ErrorRetry(
           error: err,
           title: 'The review queue',
@@ -82,14 +84,20 @@ class AdminDisposalsView extends ConsumerWidget {
 
           return ListView.builder(
             padding: const EdgeInsets.all(16),
-            itemCount: disposals.length,
+            itemCount: disposals.length + 1,
             itemBuilder: (context, index) => Center(
               child: ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 720),
-                child: _DisposalCard(
-                  disposal: disposals[index],
-                  isBusy: ui.isBusy(disposals[index].id ?? ''),
-                ),
+                child: index == 0
+                    ? _QueueNotice(
+                        count: disposals.length,
+                        atCap: disposals.length >= QueryLimits.reviewQueue,
+                      )
+                    : _DisposalCard(
+                        key: ValueKey(disposals[index - 1].id),
+                        disposal: disposals[index - 1],
+                        isBusy: ui.isBusy(disposals[index - 1].id ?? ''),
+                      ),
               ),
             ),
           );
@@ -103,7 +111,11 @@ class _DisposalCard extends ConsumerWidget {
   final DisposalModel disposal;
   final bool isBusy;
 
-  const _DisposalCard({required this.disposal, required this.isBusy});
+  const _DisposalCard({
+    super.key,
+    required this.disposal,
+    required this.isBusy,
+  });
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -111,6 +123,11 @@ class _DisposalCard extends ConsumerWidget {
     final controller = ref.read(adminReviewControllerProvider.notifier);
     final submitter = ref.watch(submitterProvider(disposal.userId));
     final bin = ref.watch(binForReviewProvider(disposal.binId));
+    final verificationStalled =
+        !disposal.verificationCompleted &&
+        disposal.createdAt != null &&
+        DateTime.now().difference(disposal.createdAt!) >
+            const Duration(minutes: 5);
 
     return Card(
       clipBehavior: Clip.antiAlias,
@@ -246,14 +263,26 @@ class _DisposalCard extends ConsumerWidget {
                   Card(
                     color: theme.colorScheme.surfaceContainerHighest,
                     child: ListTile(
-                      leading: const SizedBox(
-                        width: 20,
-                        height: 20,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                      leading: verificationStalled
+                          ? const Icon(Icons.sync_problem_outlined)
+                          : const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            ),
+                      title: Text(
+                        verificationStalled
+                            ? 'Verification did not complete'
+                            : 'Verification is still running',
                       ),
-                      title: const Text('Verification is still running'),
-                      subtitle: const Text(
-                        'Approval will unlock when the server evidence arrives.',
+                      subtitle: Text(
+                        verificationStalled
+                            ? 'This submission cannot be approved. The '
+                                  'submitter can retry verification from their '
+                                  'history; you can still reject it with a '
+                                  'reason.'
+                            : 'Approval will unlock when the server evidence '
+                                  'arrives.',
                       ),
                     ),
                   ),
@@ -262,7 +291,22 @@ class _DisposalCard extends ConsumerWidget {
                 const SizedBox(height: 16),
 
                 if (isBusy)
-                  const Center(child: CircularProgressIndicator())
+                  const Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          SizedBox.square(
+                            dimension: 20,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                          SizedBox(width: AppTheme.gapSm),
+                          Text('Recording the decision…'),
+                        ],
+                      ),
+                      SlowServerNote(),
+                    ],
+                  )
                 else
                   Row(
                     children: [
@@ -280,7 +324,10 @@ class _DisposalCard extends ConsumerWidget {
                       Expanded(
                         child: FilledButton.icon(
                           onPressed: disposal.verificationCompleted
-                              ? () => controller.approve(disposal.id ?? '')
+                              ? () => controller.approve(
+                                  disposal.id ?? '',
+                                  submitterUid: disposal.userId,
+                                )
                               : null,
                           icon: const Icon(Icons.check),
                           label: const Text('Approve'),
@@ -314,7 +361,45 @@ class _DisposalCard extends ConsumerWidget {
 
     // Already trimmed and length-checked by the dialog; null means cancelled.
     if (reason == null) return;
-    await controller.reject(disposal.id ?? '', reason);
+    await controller.reject(
+      disposal.id ?? '',
+      reason,
+      submitterUid: disposal.userId,
+    );
+  }
+}
+
+class _QueueNotice extends StatelessWidget {
+  const _QueueNotice({required this.count, required this.atCap});
+
+  final int count;
+  final bool atCap;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Card(
+      margin: const EdgeInsets.only(bottom: AppTheme.gapMd),
+      color: theme.colorScheme.surfaceContainerHighest,
+      child: Padding(
+        padding: const EdgeInsets.all(AppTheme.gapMd),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(Icons.info_outline, color: theme.colorScheme.onSurfaceVariant),
+            const SizedBox(width: AppTheme.gapSm),
+            Expanded(
+              child: Text(
+                '${atCap ? 'At least ' : ''}$count waiting, oldest first.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

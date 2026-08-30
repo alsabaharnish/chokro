@@ -9,6 +9,7 @@ import '../../controllers/admin_bins_controller.dart';
 import '../../core/bin_label_pdf.dart';
 import '../../core/geo.dart';
 import '../../core/label_format.dart';
+import '../../core/network_errors.dart';
 import '../../core/pdf_fonts.dart';
 import '../../core/theme.dart';
 import '../../models/bin_model.dart';
@@ -16,7 +17,10 @@ import '../../services/bin_admin_service.dart';
 import '../../services/location_service.dart';
 import '../shared/content_state.dart';
 import '../shared/app_shell.dart';
+import '../shared/app_snackbar.dart';
+import '../shared/error_retry.dart';
 import '../shared/notice_card.dart';
+import '../shared/unsaved_changes.dart';
 
 /// Bin registration and printable QR generation (F2.1).
 ///
@@ -46,6 +50,7 @@ class _AdminBinsViewState extends ConsumerState<AdminBinsView> {
   bool _saving = false;
   bool _locating = false;
   bool _printingAll = false;
+  final Set<String> _togglingBinIds = <String>{};
   List<String> _problems = const [];
 
   /// The last GPS fix, kept so its accuracy can be judged against the radius.
@@ -120,6 +125,13 @@ class _AdminBinsViewState extends ConsumerState<AdminBinsView> {
 
   double? get _radiusValue => double.tryParse(_radius.text.trim());
 
+  bool get _isDirty =>
+      _label.text.trim().isNotEmpty ||
+      _lat.text.trim().isNotEmpty ||
+      _lng.text.trim().isNotEmpty ||
+      _radius.text.trim() != '50' ||
+      _fix != null;
+
   /// Whether the fix is too imprecise for the radius it will be the centre of.
   /// The rule itself is domain logic — see [isFixTooRoughForRadius].
   bool get _fixTooRoughForRadius => isFixTooRoughForRadius(
@@ -157,19 +169,42 @@ class _AdminBinsViewState extends ConsumerState<AdminBinsView> {
   }
 
   Future<void> _register() async {
+    final label = _label.text.trim();
     final lat = double.tryParse(_lat.text.trim());
     final lng = double.tryParse(_lng.text.trim());
     final radius = _radiusValue;
 
     final local = <String>[
-      if (_label.text.trim().isEmpty) 'Bin label is required.',
+      if (label.isEmpty) 'Bin label is required.',
+      if (label.length > 120) 'Bin label may not exceed 120 characters.',
       if (lat == null) 'Latitude must be a number.',
       if (lng == null) 'Longitude must be a number.',
       if (radius == null) 'Radius must be a number.',
     ];
 
-    if (local.isNotEmpty) {
-      setState(() => _problems = local);
+    if (lat != null && lng != null && radius != null) {
+      final candidate = BinModel(
+        label: label,
+        lat: lat,
+        lng: lng,
+        radiusMeters: radius,
+        qrPayload: 'pending',
+        active: true,
+        createdBy: 'pending',
+      );
+      local.addAll(
+        candidate.validate().where(
+          (problem) => problem != 'Bin label is required.' || label.isNotEmpty,
+        ),
+      );
+    }
+
+    // The label check above and BinModel both report an empty label. Keep the
+    // form concise if several fields are wrong at once.
+    final uniqueLocal = local.toSet().toList(growable: false);
+
+    if (uniqueLocal.isNotEmpty) {
+      setState(() => _problems = uniqueLocal);
       return;
     }
 
@@ -181,12 +216,7 @@ class _AdminBinsViewState extends ConsumerState<AdminBinsView> {
     try {
       final bin = await ref
           .read(adminBinActionsProvider)
-          .register(
-            label: _label.text.trim(),
-            lat: lat!,
-            lng: lng!,
-            radiusMeters: radius!,
-          );
+          .register(label: label, lat: lat!, lng: lng!, radiusMeters: radius!);
 
       if (!mounted) return;
       setState(() {
@@ -207,9 +237,24 @@ class _AdminBinsViewState extends ConsumerState<AdminBinsView> {
       await _showQr(bin);
     } on BinAdminException catch (error) {
       if (!mounted) return;
+      final timedOut =
+          error.problems.isEmpty && error.message == slowServerMessage;
       setState(() {
         _saving = false;
-        _problems = error.problems.isEmpty ? [error.message] : error.problems;
+        _problems = error.problems.isEmpty
+            ? [
+                error.message,
+                if (timedOut)
+                  'The bin may still have been created. Check “Registered '
+                      'bins” below before registering it again.',
+              ]
+            : error.problems;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _problems = [friendlyErrorMessage(error)];
       });
     }
   }
@@ -223,26 +268,26 @@ class _AdminBinsViewState extends ConsumerState<AdminBinsView> {
 
   Future<void> _toggle(BinModel bin) async {
     final id = bin.id;
-    if (id == null) return;
+    if (id == null || _togglingBinIds.contains(id)) return;
 
-    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _togglingBinIds.add(id));
+    final notify = AppSnackBar.of(context);
     try {
       await ref
           .read(adminBinActionsProvider)
           .setActive(binId: id, active: !bin.active);
       if (!mounted) return;
-      messenger.hideCurrentSnackBar();
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            bin.active ? '${bin.label} closed.' : '${bin.label} reopened.',
-          ),
-        ),
+      notify.info(
+        bin.active ? '${bin.label} closed.' : '${bin.label} reopened.',
       );
     } on BinAdminException catch (error) {
       if (!mounted) return;
-      messenger.hideCurrentSnackBar();
-      messenger.showSnackBar(SnackBar(content: Text(error.message)));
+      notify.failure(error.message);
+    } catch (error) {
+      if (!mounted) return;
+      notify.failure(friendlyErrorMessage(error));
+    } finally {
+      if (mounted) setState(() => _togglingBinIds.remove(id));
     }
   }
 
@@ -254,12 +299,9 @@ class _AdminBinsViewState extends ConsumerState<AdminBinsView> {
     final open = [...bins.where((b) => b.active)]
       ..sort((a, b) => a.label.compareTo(b.label));
 
-    final messenger = ScaffoldMessenger.of(context);
+    final notify = AppSnackBar.of(context);
     if (open.isEmpty) {
-      messenger.hideCurrentSnackBar();
-      messenger.showSnackBar(
-        const SnackBar(content: Text('No open bins to print.')),
-      );
+      notify.info('No open bins to print.');
       return;
     }
 
@@ -274,10 +316,7 @@ class _AdminBinsViewState extends ConsumerState<AdminBinsView> {
       );
     } catch (error) {
       if (!mounted) return;
-      messenger.hideCurrentSnackBar();
-      messenger.showSnackBar(
-        const SnackBar(content: Text('The labels could not be printed.')),
-      );
+      notify.failure('The labels could not be printed.');
     } finally {
       if (mounted) setState(() => _printingAll = false);
     }
@@ -289,170 +328,194 @@ class _AdminBinsViewState extends ConsumerState<AdminBinsView> {
     final bins = async.value;
     final theme = Theme.of(context);
 
-    return AppShell(
-      title: 'Bins',
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: AppTheme.maxContentWidth),
-          child: ListView(
-            padding: const EdgeInsets.fromLTRB(
-              AppTheme.gapMd,
-              AppTheme.gapMd,
-              AppTheme.gapMd,
-              AppTheme.gapXl,
+    return UnsavedChangesGuard(
+      hasChanges: _isDirty,
+      child: AppShell(
+        title: 'Bins',
+        rootBackToHome: false,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(
+              maxWidth: AppTheme.maxContentWidth,
             ),
-            children: [
-              Text(
-                'Register a bin',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.bold,
-                ),
+            child: ListView(
+              padding: const EdgeInsets.fromLTRB(
+                AppTheme.gapMd,
+                AppTheme.gapMd,
+                AppTheme.gapMd,
+                AppTheme.gapXl,
               ),
-              const SizedBox(height: AppTheme.gapXs),
-              Text(
-                'Stand at the bin and capture its position. The QR payload is '
-                'generated by the server, so it is unique across every bin.',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
+              children: [
+                Text(
+                  'Register a bin',
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
-              ),
-              const SizedBox(height: AppTheme.gapMd),
-              TextField(
-                controller: _label,
-                textCapitalization: TextCapitalization.words,
-                decoration: const InputDecoration(
-                  labelText: 'Label',
-                  hintText: 'Merul Badda — Block C gate',
-                  isDense: true,
+                const SizedBox(height: AppTheme.gapXs),
+                Text(
+                  'Stand at the bin and capture its position. The QR payload is '
+                  'generated by the server, so it is unique across every bin.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
                 ),
-              ),
-              const SizedBox(height: AppTheme.gapMd),
-
-              _LocationField(
-                lat: _lat,
-                lng: _lng,
-                radius: _radius,
-                locating: _locating,
-                onUseMyLocation: _useMyLocation,
-              ),
-
-              if (_fix != null) ...[
-                const SizedBox(height: AppTheme.gapSm),
-                _FixNote(
-                  fix: _fix!,
-                  tooRoughForRadius: _fixTooRoughForRadius,
-                  radius: _radiusValue,
-                  onOpenLocationSettings: ref
-                      .read(adminBinActionsProvider)
-                      .openLocationSettings,
-                  onOpenAppSettings: ref
-                      .read(adminBinActionsProvider)
-                      .openAppSettings,
-                ),
-              ],
-
-              const SizedBox(height: AppTheme.gapSm),
-              Text(
-                'A tight radius is a stronger proof of presence. 50 m suits a '
-                'street bin; an open compound may need more.',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-              ),
-
-              if (_problems.isNotEmpty) ...[
                 const SizedBox(height: AppTheme.gapMd),
-                for (final problem in _problems)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: AppTheme.gapXs),
-                    child: Text(
-                      '• $problem',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.error,
-                      ),
-                    ),
+                TextField(
+                  controller: _label,
+                  textCapitalization: TextCapitalization.words,
+                  inputFormatters: [LengthLimitingTextInputFormatter(120)],
+                  onChanged: (_) => setState(() {
+                    _problems = const [];
+                  }),
+                  decoration: const InputDecoration(
+                    labelText: 'Label',
+                    hintText: 'Merul Badda — Block C gate',
+                    isDense: true,
                   ),
-              ],
+                ),
+                const SizedBox(height: AppTheme.gapMd),
 
-              const SizedBox(height: AppTheme.gapMd),
-              FilledButton.icon(
-                onPressed: _saving ? null : _register,
-                icon: _saving
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.add_location_alt_outlined),
-                label: Text(_saving ? 'Registering…' : 'Register bin'),
-              ),
-              // A bin registration is a server call, so it inherits the
-              // ninety-second cold-start allowance. Without this the button says
-              // "Registering…" for a minute and a half and the administrator
-              // reasonably concludes the page is broken.
-              if (_saving) const SlowServerNote(),
+                _LocationField(
+                  lat: _lat,
+                  lng: _lng,
+                  radius: _radius,
+                  locating: _locating,
+                  onChanged: () => setState(() {
+                    _problems = const [];
+                  }),
+                  onUseMyLocation: _useMyLocation,
+                ),
 
-              const SizedBox(height: AppTheme.gapXl),
-              Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      'Registered bins',
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
+                if (_fix != null) ...[
+                  const SizedBox(height: AppTheme.gapSm),
+                  _FixNote(
+                    fix: _fix!,
+                    tooRoughForRadius: _fixTooRoughForRadius,
+                    radius: _radiusValue,
+                    onOpenLocationSettings: ref
+                        .read(adminBinActionsProvider)
+                        .openLocationSettings,
+                    onOpenAppSettings: ref
+                        .read(adminBinActionsProvider)
+                        .openAppSettings,
                   ),
-                  if (bins != null && bins.any((b) => b.active))
-                    TextButton.icon(
-                      onPressed: _printingAll ? null : () => _printAll(bins),
-                      icon: _printingAll
-                          ? const SizedBox(
-                              width: 16,
-                              height: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.print_outlined, size: 18),
-                      label: Text(
-                        _printingAll ? 'Preparing…' : 'Print all labels',
+                ],
+
+                const SizedBox(height: AppTheme.gapSm),
+                Text(
+                  'A tight radius is a stronger proof of presence. 50 m suits a '
+                  'street bin; an open compound may need more.',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+
+                if (_problems.isNotEmpty) ...[
+                  const SizedBox(height: AppTheme.gapMd),
+                  for (final problem in _problems)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: AppTheme.gapXs),
+                      child: Text(
+                        '• $problem',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.error,
+                        ),
                       ),
                     ),
                 ],
-              ),
-              const SizedBox(height: AppTheme.gapSm),
-              async.when(
-                loading: () => const Padding(
-                  padding: EdgeInsets.all(AppTheme.gapLg),
-                  child: Center(child: CircularProgressIndicator()),
+
+                const SizedBox(height: AppTheme.gapMd),
+                FilledButton.icon(
+                  onPressed: _saving ? null : _register,
+                  icon: _saving
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.add_location_alt_outlined),
+                  label: Text(_saving ? 'Registering…' : 'Register bin'),
                 ),
-                error: (error, _) => Text(
-                  'Bins did not load. Check your connection and try again.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: theme.colorScheme.error,
-                  ),
-                ),
-                data: (bins) {
-                  if (bins.isEmpty) {
-                    return Text(
-                      'No bins yet. Nothing can be scanned until one exists.',
-                      style: theme.textTheme.bodySmall,
-                    );
-                  }
-                  final sorted = [...bins]
-                    ..sort((a, b) => a.label.compareTo(b.label));
-                  return Column(
-                    children: [
-                      for (final bin in sorted)
-                        _BinCard(
-                          bin: bin,
-                          onShowQr: () => _showQr(bin),
-                          onToggle: () => _toggle(bin),
+                // A bin registration is a server call, so it inherits the
+                // ninety-second cold-start allowance. Without this the button says
+                // "Registering…" for a minute and a half and the administrator
+                // reasonably concludes the page is broken.
+                if (_saving) const SlowServerNote(),
+
+                const SizedBox(height: AppTheme.gapXl),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'Registered bins',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
                         ),
-                    ],
-                  );
-                },
-              ),
-            ],
+                      ),
+                    ),
+                    if (bins != null && bins.any((b) => b.active))
+                      Tooltip(
+                        message:
+                            'Open bins only. Closed bins remain available from '
+                            'their own QR button.',
+                        child: TextButton.icon(
+                          onPressed: _printingAll
+                              ? null
+                              : () => _printAll(bins),
+                          icon: _printingAll
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : const Icon(Icons.print_outlined, size: 18),
+                          label: Text(
+                            _printingAll
+                                ? 'Preparing…'
+                                : 'Print labels '
+                                      '(${bins.where((b) => b.active).length})',
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+                const SizedBox(height: AppTheme.gapSm),
+                async.when(
+                  loading: () => const ContentLoading(label: 'Loading bins…'),
+                  error: (error, _) => ErrorRetry(
+                    title: 'Bins',
+                    error: error,
+                    onRetry: () => ref.invalidate(allBinsProvider),
+                  ),
+                  data: (bins) {
+                    if (bins.isEmpty) {
+                      return Text(
+                        'No bins yet. Nothing can be scanned until one exists.',
+                        style: theme.textTheme.bodySmall,
+                      );
+                    }
+                    final sorted = [...bins]
+                      ..sort((a, b) => a.label.compareTo(b.label));
+                    return Column(
+                      children: [
+                        for (final bin in sorted)
+                          _BinCard(
+                            bin: bin,
+                            busy:
+                                bin.id != null &&
+                                _togglingBinIds.contains(bin.id),
+                            onShowQr: () => _showQr(bin),
+                            onToggle: () => _toggle(bin),
+                          ),
+                      ],
+                    );
+                  },
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -467,6 +530,7 @@ class _LocationField extends StatelessWidget {
     required this.lng,
     required this.radius,
     required this.locating,
+    required this.onChanged,
     required this.onUseMyLocation,
   });
 
@@ -474,6 +538,7 @@ class _LocationField extends StatelessWidget {
   final TextEditingController lng;
   final TextEditingController radius;
   final bool locating;
+  final VoidCallback onChanged;
   final VoidCallback onUseMyLocation;
 
   @override
@@ -489,48 +554,68 @@ class _LocationField extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Row(
-          children: [
-            Expanded(
-              child: TextField(
-                controller: lat,
-                keyboardType: coordinateKeyboard,
-                inputFormatters: coordinateFilter,
-                decoration: const InputDecoration(
-                  labelText: 'Latitude',
-                  hintText: '23.7808',
-                  isDense: true,
-                ),
+        LayoutBuilder(
+          builder: (context, constraints) {
+            Widget coordinate(
+              TextEditingController controller,
+              String label,
+              String hint,
+            ) => TextField(
+              controller: controller,
+              keyboardType: coordinateKeyboard,
+              inputFormatters: coordinateFilter,
+              onChanged: (_) => onChanged(),
+              decoration: InputDecoration(
+                labelText: label,
+                hintText: hint,
+                isDense: true,
               ),
-            ),
-            const SizedBox(width: AppTheme.gapMd),
-            Expanded(
-              child: TextField(
-                controller: lng,
-                keyboardType: coordinateKeyboard,
-                inputFormatters: coordinateFilter,
-                decoration: const InputDecoration(
-                  labelText: 'Longitude',
-                  hintText: '90.4074',
-                  isDense: true,
-                ),
+            );
+
+            Widget radiusField() => TextField(
+              controller: radius,
+              keyboardType: TextInputType.number,
+              inputFormatters: [
+                FilteringTextInputFormatter.digitsOnly,
+                LengthLimitingTextInputFormatter(4),
+              ],
+              onChanged: (_) => onChanged(),
+              decoration: const InputDecoration(
+                labelText: 'Radius',
+                suffixText: 'm',
+                isDense: true,
               ),
-            ),
-            const SizedBox(width: AppTheme.gapMd),
-            SizedBox(
-              width: 110,
-              child: TextField(
-                controller: radius,
-                keyboardType: TextInputType.number,
-                inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                decoration: const InputDecoration(
-                  labelText: 'Radius',
-                  suffixText: 'm',
-                  isDense: true,
+            );
+
+            final largeText = MediaQuery.textScalerOf(context).scale(16) > 20;
+            if (constraints.maxWidth < 420 || largeText) {
+              return Column(
+                children: [
+                  coordinate(lat, 'Latitude', '23.7808'),
+                  const SizedBox(height: AppTheme.gapSm),
+                  coordinate(lng, 'Longitude', '90.4074'),
+                  const SizedBox(height: AppTheme.gapSm),
+                  radiusField(),
+                ],
+              );
+            }
+
+            return Row(
+              children: [
+                Expanded(
+                  flex: 2,
+                  child: coordinate(lat, 'Latitude', '23.7808'),
                 ),
-              ),
-            ),
-          ],
+                const SizedBox(width: AppTheme.gapMd),
+                Expanded(
+                  flex: 2,
+                  child: coordinate(lng, 'Longitude', '90.4074'),
+                ),
+                const SizedBox(width: AppTheme.gapMd),
+                Expanded(child: radiusField()),
+              ],
+            );
+          },
         ),
         const SizedBox(height: AppTheme.gapSm),
         Align(
@@ -623,11 +708,13 @@ class _FixNote extends StatelessWidget {
 class _BinCard extends StatelessWidget {
   const _BinCard({
     required this.bin,
+    required this.busy,
     required this.onShowQr,
     required this.onToggle,
   });
 
   final BinModel bin;
+  final bool busy;
   final VoidCallback onShowQr;
   final VoidCallback onToggle;
 
@@ -678,13 +765,24 @@ class _BinCard extends StatelessWidget {
               ),
             ),
             IconButton(
-              tooltip: 'Show and print QR code',
-              onPressed: onShowQr,
+              tooltip: 'Show and print QR code for ${bin.label}',
+              onPressed: busy ? null : onShowQr,
               icon: const Icon(Icons.qr_code_2),
             ),
-            TextButton(
-              onPressed: onToggle,
-              child: Text(bin.active ? 'Close' : 'Reopen'),
+            Semantics(
+              button: true,
+              label: bin.active ? 'Close ${bin.label}' : 'Reopen ${bin.label}',
+              child: ExcludeSemantics(
+                child: TextButton(
+                  onPressed: busy ? null : onToggle,
+                  child: busy
+                      ? const SizedBox.square(
+                          dimension: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : Text(bin.active ? 'Close' : 'Reopen'),
+                ),
+              ),
             ),
           ],
         ),
@@ -721,13 +819,12 @@ class _QrDialogState extends State<_QrDialog> {
   /// thrown error is worth a message.
   Future<void> _run(Future<void> Function() action, String failure) async {
     setState(() => _busy = true);
-    final messenger = ScaffoldMessenger.of(context);
+    final notify = AppSnackBar.of(context);
     try {
       await action();
     } catch (error) {
       if (!mounted) return;
-      messenger.hideCurrentSnackBar();
-      messenger.showSnackBar(SnackBar(content: Text(failure)));
+      notify.failure(failure);
     } finally {
       if (mounted) setState(() => _busy = false);
     }
@@ -817,14 +914,11 @@ class _QrDialogState extends State<_QrDialog> {
         TextButton(
           onPressed: _busy
               ? null
-              : () {
-                  final messenger = ScaffoldMessenger.of(context);
-                  Clipboard.setData(ClipboardData(text: bin.qrPayload));
-                  messenger.hideCurrentSnackBar();
-                  messenger.showSnackBar(
-                    const SnackBar(content: Text('Payload copied.')),
-                  );
-                },
+              : () => _run(() async {
+                  final notify = AppSnackBar.of(context);
+                  await Clipboard.setData(ClipboardData(text: bin.qrPayload));
+                  notify.success('Payload copied.');
+                }, 'The payload could not be copied.'),
           child: const Text('Copy payload'),
         ),
         TextButton(

@@ -11,7 +11,9 @@ import '../../models/donation_model.dart';
 import '../../models/payment_model.dart';
 import '../../models/wallet_model.dart';
 import '../shared/app_shell.dart';
+import '../shared/app_snackbar.dart';
 import '../shared/content_state.dart';
+import '../shared/notice_card.dart';
 import '../shared/prototype_payment_dialog.dart';
 
 enum DonationMode { points, prototypeOnline }
@@ -91,6 +93,7 @@ class _DonationViewState extends ConsumerState<DonationView> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (dialogContext) => AlertDialog(
+        scrollable: true,
         title: const Text('Confirm point donation'),
         content: Text(
           'Donate $points points to ${_initiative.label}? Your balance will be '
@@ -178,6 +181,7 @@ class _DonationViewState extends ConsumerState<DonationView> {
           ? pointDonation
           : prototypeDonation;
       child = ListView(
+        key: const Key('donation-form-scroll'),
         padding: const EdgeInsets.fromLTRB(
           AppTheme.gapMd,
           AppTheme.gapMd,
@@ -238,6 +242,8 @@ class _DonationViewState extends ConsumerState<DonationView> {
                   _changeDraft(() => _points.text = '$points'),
               onSubmit: _submitPoints,
               onRetryWallet: () => ref.invalidate(walletProvider),
+              onUsePrototype: () =>
+                  _changeDraft(() => _mode = DonationMode.prototypeOnline),
             )
           else
             _PrototypePaymentEditor(
@@ -372,6 +378,7 @@ class _PointEditor extends StatelessWidget {
     required this.onUseAmount,
     required this.onSubmit,
     required this.onRetryWallet,
+    required this.onUsePrototype,
   });
 
   final GlobalKey<FormState> formKey;
@@ -382,6 +389,7 @@ class _PointEditor extends StatelessWidget {
   final ValueChanged<int> onUseAmount;
   final Future<void> Function(int) onSubmit;
   final VoidCallback onRetryWallet;
+  final VoidCallback onUsePrototype;
 
   @override
   Widget build(BuildContext context) {
@@ -448,6 +456,22 @@ class _PointEditor extends StatelessWidget {
                 },
               ),
             ),
+            if (balance < _DonationViewState._minimum) ...[
+              const SizedBox(height: AppTheme.gapMd),
+              NoticeCard(
+                icon: Icons.info_outline,
+                title: 'Not enough points yet',
+                message:
+                    'Point donations start at ${_DonationViewState._minimum} '
+                    'points. You can keep earning, or try the payment '
+                    'simulation without using real money.',
+                tone: NoticeTone.warning,
+                action: NoticeAction(
+                  label: 'Use online prototype',
+                  onPressed: onUsePrototype,
+                ),
+              ),
+            ],
             if (state.hasError) ...[
               const SizedBox(height: AppTheme.gapMd),
               _DonationError(message: state.error.toString()),
@@ -616,24 +640,31 @@ class _DonationError extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.all(AppTheme.gapMd),
-      decoration: BoxDecoration(
-        color: scheme.errorContainer,
-        borderRadius: BorderRadius.circular(AppTheme.radiusSm),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Icon(Icons.error_outline, color: scheme.onErrorContainer),
-          const SizedBox(width: AppTheme.gapSm),
-          Expanded(
-            child: Text(
-              message,
-              style: TextStyle(color: scheme.onErrorContainer),
-            ),
+    return Semantics(
+      container: true,
+      liveRegion: true,
+      label: 'Donation failed. $message',
+      child: ExcludeSemantics(
+        child: Container(
+          padding: const EdgeInsets.all(AppTheme.gapMd),
+          decoration: BoxDecoration(
+            color: scheme.errorContainer,
+            borderRadius: BorderRadius.circular(AppTheme.radiusSm),
           ),
-        ],
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.error_outline, color: scheme.onErrorContainer),
+              const SizedBox(width: AppTheme.gapSm),
+              Expanded(
+                child: Text(
+                  message,
+                  style: TextStyle(color: scheme.onErrorContainer),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -660,6 +691,7 @@ class _PointDonationSuccess extends StatelessWidget {
       primaryLabel: 'View wallet activity',
       onPrimary: onViewWallet,
       onDonateAgain: onDonateAgain,
+      reference: outcome.donationId,
     );
   }
 }
@@ -680,10 +712,11 @@ class _PrototypeDonationSuccess extends StatelessWidget {
       message:
           '${formatTaka(outcome.amountTaka)} for ${outcome.initiative.label} was '
           'simulated with ${outcome.settlementMethod.shortLabel}. No real money '
-          'moved.\n\nReference: ${outcome.paymentReference}',
+          'moved.',
       primaryLabel: 'Back to Champion home',
       onPrimary: () => context.go('/home'),
       onDonateAgain: onDonateAgain,
+      reference: outcome.paymentReference,
     );
   }
 }
@@ -695,6 +728,7 @@ class _SuccessLayout extends StatelessWidget {
     required this.primaryLabel,
     required this.onPrimary,
     required this.onDonateAgain,
+    required this.reference,
   });
 
   final String title;
@@ -702,6 +736,7 @@ class _SuccessLayout extends StatelessWidget {
   final String primaryLabel;
   final VoidCallback onPrimary;
   final VoidCallback onDonateAgain;
+  final String reference;
 
   @override
   Widget build(BuildContext context) {
@@ -724,6 +759,8 @@ class _SuccessLayout extends StatelessWidget {
         ),
         const SizedBox(height: AppTheme.gapSm),
         Text(message, textAlign: TextAlign.center),
+        const SizedBox(height: AppTheme.gapLg),
+        _CopyableReference(reference: reference),
         const SizedBox(height: AppTheme.gapXl),
         FilledButton(onPressed: onPrimary, child: Text(primaryLabel)),
         const SizedBox(height: AppTheme.gapSm),
@@ -732,6 +769,71 @@ class _SuccessLayout extends StatelessWidget {
           child: const Text('Support another initiative'),
         ),
       ],
+    );
+  }
+}
+
+class _CopyableReference extends StatelessWidget {
+  const _CopyableReference({required this.reference});
+
+  final String reference;
+
+  Future<void> _copy(BuildContext context) async {
+    final notify = AppSnackBar.of(context);
+    try {
+      await Clipboard.setData(ClipboardData(text: reference));
+      if (!context.mounted) return;
+      notify.success('Donation reference copied.');
+    } catch (_) {
+      if (!context.mounted) return;
+      notify.failure(
+        'The reference could not be copied. Press and hold it to select it.',
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Semantics(
+      container: true,
+      label: 'Donation reference',
+      child: Container(
+        padding: const EdgeInsets.fromLTRB(
+          AppTheme.gapMd,
+          AppTheme.gapSm,
+          AppTheme.gapSm,
+          AppTheme.gapSm,
+        ),
+        decoration: BoxDecoration(
+          color: theme.colorScheme.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(AppTheme.radiusSm),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Donation reference',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: theme.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: AppTheme.gapXs),
+                  SelectableText(reference, style: theme.textTheme.bodyMedium),
+                ],
+              ),
+            ),
+            IconButton(
+              tooltip: 'Copy donation reference',
+              onPressed: () => _copy(context),
+              icon: const Icon(Icons.copy_outlined),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

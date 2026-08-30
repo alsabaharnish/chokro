@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -9,6 +11,7 @@ import 'package:image_picker/image_picker.dart';
 import '../../controllers/auth_controller.dart';
 import '../../controllers/account_profile_controller.dart';
 import '../../controllers/profile_controller.dart';
+import '../../controllers/push_controller.dart';
 import '../../core/account_profile.dart';
 import '../../core/image_delivery.dart';
 import '../../core/constants.dart';
@@ -16,10 +19,13 @@ import '../../core/label_format.dart';
 import '../../core/theme.dart';
 import '../../core/validators.dart';
 import '../../models/user_model.dart';
+import '../../services/push_service.dart';
 import '../shared/account_profile_switcher.dart';
 import '../shared/app_shell.dart';
+import '../shared/app_snackbar.dart';
 import '../shared/content_state.dart';
 import '../shared/error_retry.dart';
+import '../shared/notice_card.dart';
 
 /// Profile management (F1.1).
 ///
@@ -39,17 +45,36 @@ class ProfileView extends ConsumerStatefulWidget {
   ConsumerState<ProfileView> createState() => _ProfileViewState();
 }
 
-class _ProfileViewState extends ConsumerState<ProfileView> {
+class _ProfileViewState extends ConsumerState<ProfileView>
+    with WidgetsBindingObserver {
   final _formKey = GlobalKey<FormState>();
   final _name = TextEditingController();
+  bool _notificationBusy = false;
 
   /// The name as stored, so "Save" can be offered only when something changed.
   String? _storedName;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _name.dispose();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed && PushService.isSupported) {
+      // A denied permission can only be restored in system settings. Recheck
+      // as soon as the user returns so the card updates and the device token is
+      // registered without requiring another sign-in.
+      unawaited(ref.read(pushRegistrarProvider).refreshPermission());
+    }
   }
 
   /// Seeds the field from the profile, and re-seeds when the stored name
@@ -167,12 +192,112 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
     }
   }
 
+  Future<void> _enableNotifications() async {
+    if (_notificationBusy) return;
+    setState(() => _notificationBusy = true);
+    final notify = AppSnackBar.of(context);
+    final granted = await ref.read(pushRegistrarProvider).enableNotifications();
+    if (!mounted) return;
+    setState(() => _notificationBusy = false);
+    ref.invalidate(pushPermissionProvider);
+    if (granted) {
+      notify.success('Notifications are enabled on this device.');
+    } else {
+      notify.info(
+        'Notifications remain off. You can enable them later from device settings.',
+      );
+    }
+  }
+
+  Future<void> _openNotificationSettings() async {
+    final opened = await ref.read(pushServiceProvider).openAppSettings();
+    if (!mounted || opened) return;
+    AppSnackBar.of(context).failure(
+      'Device settings could not be opened. Open Chokro in Settings and allow notifications.',
+    );
+  }
+
+  Widget _notificationControl(AsyncValue<PushPermissionStatus> permission) {
+    return permission.when(
+      loading: () => const NoticeCard(
+        icon: Icons.notifications_outlined,
+        title: 'Checking notifications',
+        message: 'Reading this device’s notification setting…',
+      ),
+      error: (_, _) => NoticeCard(
+        icon: Icons.sync_problem_outlined,
+        title: 'Notification setting unavailable',
+        message:
+            'The setting could not be read. Your in-app history still '
+            'shows every decision.',
+        tone: NoticeTone.warning,
+        action: NoticeAction(
+          label: 'Check again',
+          onPressed: () => ref.invalidate(pushPermissionProvider),
+        ),
+      ),
+      data: (status) => switch (status) {
+        PushPermissionStatus.unsupported => const SizedBox.shrink(),
+        PushPermissionStatus.enabled => const _Fact(
+          icon: Icons.notifications_active_outlined,
+          label: 'Notifications',
+          value: 'Enabled on this device',
+          note:
+              'Chokro can alert you when a disposal or eco-action is decided.',
+        ),
+        PushPermissionStatus.notDetermined => NoticeCard(
+          icon: Icons.notifications_outlined,
+          title: _notificationBusy
+              ? 'Enabling notifications…'
+              : 'Know when a decision is ready',
+          message:
+              'Allow Chokro to alert you when a disposal or eco-action is '
+              'approved or rejected. Your submission history remains '
+              'available either way.',
+          action: _notificationBusy
+              ? null
+              : NoticeAction(
+                  label: 'Enable notifications',
+                  onPressed: _enableNotifications,
+                ),
+        ),
+        PushPermissionStatus.denied => NoticeCard(
+          icon: Icons.notifications_off_outlined,
+          title: 'Notifications are off',
+          message:
+              'Decision alerts are blocked for this device. Your histories '
+              'still contain every result; device settings can restore alerts.',
+          tone: NoticeTone.warning,
+          action: NoticeAction(
+            label: 'Open device settings',
+            onPressed: _openNotificationSettings,
+          ),
+        ),
+        PushPermissionStatus.unavailable => NoticeCard(
+          icon: Icons.sync_problem_outlined,
+          title: 'Notification setting unavailable',
+          message:
+              'The setting could not be read. Your in-app history still shows '
+              'every decision.',
+          tone: NoticeTone.warning,
+          action: NoticeAction(
+            label: 'Check again',
+            onPressed: () => ref.invalidate(pushPermissionProvider),
+          ),
+        ),
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final async = ref.watch(currentUserProvider);
     final saving = ref.watch(profileControllerProvider).isLoading;
     final activeProfile = ref.watch(activeAccountProfileProvider);
+    final notificationPermission = PushService.isSupported
+        ? ref.watch(pushPermissionProvider)
+        : null;
 
     return AppShell(
       title: 'Profile',
@@ -307,6 +432,11 @@ class _ProfileViewState extends ConsumerState<ProfileView> {
                         ? 'Just now'
                         : formatDate(user.createdAt!),
                   ),
+
+                  if (notificationPermission != null) ...[
+                    _notificationControl(notificationPermission),
+                    const SizedBox(height: AppTheme.gapMd),
+                  ],
 
                   if (user.role == AppConstants.roleBuyer) ...[
                     const SizedBox(height: AppTheme.gapLg),

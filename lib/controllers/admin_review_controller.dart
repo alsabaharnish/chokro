@@ -98,7 +98,7 @@ class AdminReviewController extends Notifier<ReviewUiState> {
 
   void clearMessages() => state = ReviewUiState(busyIds: state.busyIds);
 
-  Future<void> approve(String disposalId) async {
+  Future<void> approve(String disposalId, {String? submitterUid}) async {
     state = state.busy(disposalId);
     try {
       final outcome = await ref.read(reviewServiceProvider).approve(disposalId);
@@ -106,6 +106,9 @@ class AdminReviewController extends Notifier<ReviewUiState> {
         disposalId,
         message: 'Approved — ${outcome.pointsAwarded ?? 0} points credited.',
       );
+      if (submitterUid?.isNotEmpty == true) {
+        ref.invalidate(submitterRecordProvider(submitterUid!));
+      }
     } on ReviewException catch (err) {
       state = state.done(disposalId, failure: err.message);
     } catch (_) {
@@ -116,7 +119,11 @@ class AdminReviewController extends Notifier<ReviewUiState> {
     }
   }
 
-  Future<void> reject(String disposalId, String reason) async {
+  Future<void> reject(
+    String disposalId,
+    String reason, {
+    String? submitterUid,
+  }) async {
     if (reason.trim().isEmpty) {
       state = ReviewUiState(
         busyIds: state.busyIds,
@@ -132,6 +139,9 @@ class AdminReviewController extends Notifier<ReviewUiState> {
         disposalId,
         message: 'Rejected, and the user told why.',
       );
+      if (submitterUid?.isNotEmpty == true) {
+        ref.invalidate(submitterRecordProvider(submitterUid!));
+      }
     } on ReviewException catch (err) {
       state = state.done(disposalId, failure: err.message);
     } catch (_) {

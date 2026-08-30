@@ -19,6 +19,7 @@
 const { db, admin, serverTimestamp } = require('./firebase');
 const policyModule = require('./pointsPolicy');
 const { hasCompletedVerification } = require('./decide');
+const { normalizeRejectionReason } = require('./reviewReason');
 // Push on a decision (F7.1). No cycle: award.js -> push.js -> firebase.js, and
 // push.js requires nothing else.
 const pushModule = require('./push');
@@ -158,6 +159,27 @@ async function approveDisposal({
       throw new Error(
         'Verification is still running. Wait for its evidence before approving.',
       );
+    }
+
+    // Verification performs paid network calls before reaching this transaction.
+    // A 3ZERO Admin can close the bin during that window. Re-read the control in
+    // the same transaction as an automatic payout so closing a bin and crediting
+    // against it cannot both win. Manual review remains available for evidence
+    // collected earlier; a later closure must not erase a person's ability to
+    // decide an already-flagged submission.
+    if (adminUid === null) {
+      if (typeof disposal.binId !== 'string' || disposal.binId.length === 0) {
+        throw new Error('That submission no longer names a valid bin.');
+      }
+      const binSnap = await txn.get(
+        firestore.collection('bins').doc(disposal.binId),
+      );
+      if (!binSnap.exists) {
+        throw new Error('That bin is no longer registered.');
+      }
+      if (binSnap.data().active === false) {
+        throw new Error('That bin is no longer in service.');
+      }
     }
 
     const uid = disposal.userId;
@@ -340,9 +362,7 @@ async function approveDisposal({
  * lockout released so a legitimate retry is possible (§7.4).
  */
 async function rejectDisposal({ disposalId, adminUid, reason, flags = null }) {
-  if (!reason || !reason.trim()) {
-    throw new Error('A rejection must record a reason.');
-  }
+  const rejectionReason = normalizeRejectionReason(reason);
 
   const firestore = db();
   const disposalRef = firestore.collection('disposals').doc(disposalId);
@@ -379,7 +399,7 @@ async function rejectDisposal({ disposalId, adminUid, reason, flags = null }) {
 
     txn.update(disposalRef, {
       status: 'rejected',
-      rejectionReason: reason.trim(),
+      rejectionReason,
       // Preserved, not cleared — see the note in `approveDisposal`. A rejection
       // is precisely the decision whose justification most needs to survive.
       flags: flags ?? disposal.flags ?? [],
@@ -409,7 +429,7 @@ async function rejectDisposal({ disposalId, adminUid, reason, flags = null }) {
       { merge: true },
     );
 
-    return { disposalId, status: 'rejected', reason: reason.trim() };
+    return { disposalId, status: 'rejected', reason: rejectionReason };
   });
 
   // §7.4 requires the reason to reach the user, and this is the only channel

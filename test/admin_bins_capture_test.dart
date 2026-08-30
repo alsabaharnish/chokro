@@ -237,7 +237,7 @@ void main() {
       bins: [_bin(active: true)],
     );
 
-    expect(find.text('Print all labels'), findsOneWidget);
+    expect(find.text('Print labels (1)'), findsOneWidget);
   });
 
   testWidgets('print-all is withheld when every bin is closed', (tester) async {
@@ -249,13 +249,13 @@ void main() {
 
     // A closed bin's label on the street produces a scan, a walk and a refusal,
     // so there is nothing worth printing.
-    expect(find.text('Print all labels'), findsNothing);
+    expect(find.textContaining('Print labels'), findsNothing);
   });
 
   testWidgets('print-all is withheld when there are no bins', (tester) async {
     await _pump(tester, const LocationResult(outcome: LocationOutcome.idle));
 
-    expect(find.text('Print all labels'), findsNothing);
+    expect(find.textContaining('Print labels'), findsNothing);
     expect(
       find.textContaining('Nothing can be scanned until one exists'),
       findsOneWidget,
@@ -280,7 +280,7 @@ void main() {
       bins: [bin],
     );
 
-    final showQr = find.byTooltip('Show and print QR code');
+    final showQr = find.byTooltip('Show and print QR code for ${bin.label}');
     final binList = find
         .descendant(
           of: find.byType(ListView),

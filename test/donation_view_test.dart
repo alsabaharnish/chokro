@@ -128,4 +128,74 @@ void main() {
     expect(tester.takeException(), isNull);
     semantics.dispose();
   });
+
+  testWidgets('a low point balance explains the available alternative', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+
+    const user = UserModel(
+      uid: 'champion-1',
+      name: 'Nabil',
+      email: 'nabil@example.com',
+      role: AppConstants.roleBuyer,
+      status: AppConstants.statusActive,
+    );
+    final router = GoRouter(
+      initialLocation: '/donate',
+      routes: [
+        GoRoute(path: '/donate', builder: (_, _) => const DonationView()),
+      ],
+    );
+    addTearDown(router.dispose);
+
+    await tester.pumpWidget(
+      ProviderScope(
+        overrides: [
+          currentUserProvider.overrideWithValue(const AsyncData(user)),
+          walletProvider.overrideWithValue(
+            const AsyncData(WalletModel(userId: 'champion-1', balance: 5)),
+          ),
+          cartCountProvider.overrideWithValue(0),
+        ],
+        child: MaterialApp.router(
+          theme: AppTheme.light(),
+          routerConfig: router,
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final donationScroll = find.descendant(
+      of: find.byKey(const Key('donation-form-scroll')),
+      matching: find.byType(Scrollable),
+    );
+    await tester.scrollUntilVisible(
+      find.text('Use online prototype'),
+      160,
+      scrollable: donationScroll,
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Not enough points yet'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.widgetWithText(FilledButton, 'Review donation'),
+          )
+          .onPressed,
+      isNull,
+    );
+
+    tester
+        .widget<OutlinedButton>(
+          find.widgetWithText(OutlinedButton, 'Use online prototype'),
+        )
+        .onPressed
+        ?.call();
+    await tester.pumpAndSettle();
+    expect(find.text('Choose a prototype payment method'), findsOneWidget);
+  });
 }

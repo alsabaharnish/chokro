@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../controllers/orders_controller.dart';
+import '../../core/constants.dart';
 import '../../core/theme.dart';
 import '../../models/order_model.dart';
 import '../../services/order_service.dart';
@@ -39,7 +40,8 @@ class SellerOrdersView extends ConsumerWidget {
           title: 'Your orders',
           onRetry: () => ref.invalidate(sellerOrdersProvider),
         ),
-        data: (orders) {
+        data: (page) {
+          final orders = page.orders;
           if (orders.isEmpty) {
             return const ContentEmpty(
               icon: Icons.local_shipping_outlined,
@@ -50,46 +52,61 @@ class SellerOrdersView extends ConsumerWidget {
             );
           }
 
-          return ListView(
+          final headerCount = open.isNotEmpty ? 1 : 0;
+          final footerCount = page.truncated ? 1 : 0;
+
+          return ListView.builder(
             padding: const EdgeInsets.fromLTRB(
               AppTheme.gapMd,
               AppTheme.gapMd,
               AppTheme.gapMd,
               AppTheme.gapXl,
             ),
-            children: [
-              Center(
+            itemCount: orders.length + headerCount + footerCount,
+            itemBuilder: (context, index) {
+              Widget child;
+              if (headerCount == 1 && index == 0) {
+                child = _OpenBanner(
+                  count: open.length,
+                  moreOrdersExist: page.truncated,
+                );
+              } else {
+                final orderIndex = index - headerCount;
+                if (orderIndex == orders.length) {
+                  child = OutlinedButton.icon(
+                    onPressed: () =>
+                        ref.read(sellerOrderLimitProvider.notifier).loadOlder(),
+                    icon: const Icon(Icons.expand_more),
+                    label: const Text(
+                      'Load ${QueryLimits.orders} older orders',
+                    ),
+                  );
+                } else {
+                  final order = orders[orderIndex];
+                  child = OrderCard(
+                    key: ValueKey(order.id),
+                    order: order,
+                    viewerIsSeller: true,
+                    action:
+                        OrderStatus.nextFor(order.status, isSeller: true) ==
+                            null
+                        ? null
+                        : _AdvanceButton(order: order),
+                  );
+                }
+              }
+              return Center(
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(
                     maxWidth: AppTheme.maxContentWidth,
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      if (open.isNotEmpty) ...[
-                        _OpenBanner(count: open.length),
-                        const SizedBox(height: AppTheme.gapMd),
-                      ],
-                      for (final order in orders) ...[
-                        OrderCard(
-                          order: order,
-                          viewerIsSeller: true,
-                          action:
-                              OrderStatus.nextFor(
-                                    order.status,
-                                    isSeller: true,
-                                  ) ==
-                                  null
-                              ? null
-                              : _AdvanceButton(order: order),
-                        ),
-                        const SizedBox(height: AppTheme.gapMd),
-                      ],
-                    ],
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: AppTheme.gapMd),
+                    child: child,
                   ),
                 ),
-              ),
-            ],
+              );
+            },
           );
         },
       ),
@@ -98,9 +115,10 @@ class SellerOrdersView extends ConsumerWidget {
 }
 
 class _OpenBanner extends StatelessWidget {
-  const _OpenBanner({required this.count});
+  const _OpenBanner({required this.count, required this.moreOrdersExist});
 
   final int count;
+  final bool moreOrdersExist;
 
   @override
   Widget build(BuildContext context) {
@@ -118,7 +136,13 @@ class _OpenBanner extends StatelessWidget {
             const SizedBox(width: AppTheme.gapMd),
             Expanded(
               child: Text(
-                count == 1
+                moreOrdersExist
+                    ? count == 1
+                          ? 'At least 1 loaded order needs something from you. '
+                                'Load older orders to check the rest.'
+                          : 'At least $count loaded orders need something from '
+                                'you. Load older orders to check the rest.'
+                    : count == 1
                     ? '1 order needs something from you.'
                     : '$count orders need something from you.',
                 style: theme.textTheme.bodyMedium?.copyWith(
@@ -156,20 +180,26 @@ class _AdvanceButtonState extends ConsumerState<_AdvanceButton> {
         ? 'Mark as delivered'
         : 'Mark as delivered and paid';
 
-    return FilledButton.icon(
-      onPressed: _busy ? null : () => _advance(next),
-      icon: _busy
-          ? const SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : Icon(
-              next == OrderStatus.shipped
-                  ? Icons.local_shipping_outlined
-                  : Icons.payments_outlined,
-            ),
-      label: Text(_busy ? 'Updating…' : label),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        FilledButton.icon(
+          onPressed: _busy ? null : () => _advance(next),
+          icon: _busy
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : Icon(
+                  next == OrderStatus.shipped
+                      ? Icons.local_shipping_outlined
+                      : Icons.payments_outlined,
+                ),
+          label: Text(_busy ? 'Updating…' : label),
+        ),
+        if (_busy) const SlowServerNote(),
+      ],
     );
   }
 
@@ -179,6 +209,7 @@ class _AdvanceButtonState extends ConsumerState<_AdvanceButton> {
       final confirmed = await showDialog<bool>(
         context: context,
         builder: (context) => AlertDialog(
+          scrollable: true,
           title: Text(alreadyPaid ? 'Delivered?' : 'Delivered and paid?'),
           content: Text(
             alreadyPaid

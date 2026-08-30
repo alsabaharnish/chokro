@@ -2,6 +2,16 @@ import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/foundation.dart';
+import 'package:geolocator/geolocator.dart';
+
+/// The small, app-facing permission vocabulary used by the profile screen.
+enum PushPermissionStatus {
+  unsupported,
+  notDetermined,
+  enabled,
+  denied,
+  unavailable,
+}
 
 /// Push notification plumbing (F7.1).
 ///
@@ -107,6 +117,43 @@ class PushService {
           settings.authorizationStatus == AuthorizationStatus.provisional;
     } catch (err) {
       debugPrint('[push] Permission request failed: $err');
+      return false;
+    }
+  }
+
+  /// Reads notification permission without opening the operating-system prompt.
+  ///
+  /// This lets the app first explain what notifications are for and ask only
+  /// after the person taps "Enable notifications". A system sheet appearing
+  /// immediately after sign-in had no such context and offered no recovery
+  /// path after a denial.
+  Future<PushPermissionStatus> permissionStatus() async {
+    if (!isSupported) return PushPermissionStatus.unsupported;
+    try {
+      final settings = await _fcm.getNotificationSettings();
+      return switch (settings.authorizationStatus) {
+        AuthorizationStatus.authorized ||
+        AuthorizationStatus.provisional => PushPermissionStatus.enabled,
+        AuthorizationStatus.denied => PushPermissionStatus.denied,
+        AuthorizationStatus.notDetermined => PushPermissionStatus.notDetermined,
+      };
+    } catch (err) {
+      debugPrint('[push] Reading notification permission failed: $err');
+      return PushPermissionStatus.unavailable;
+    }
+  }
+
+  /// Opens this app's operating-system settings after a permission denial.
+  ///
+  /// Geolocator already supplies the platform channel for the generic app
+  /// settings page, so this does not add another settings dependency solely for
+  /// notifications.
+  Future<bool> openAppSettings() async {
+    if (!isSupported) return false;
+    try {
+      return await Geolocator.openAppSettings();
+    } catch (err) {
+      debugPrint('[push] Opening app settings failed: $err');
       return false;
     }
   }

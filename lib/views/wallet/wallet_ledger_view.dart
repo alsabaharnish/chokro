@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../controllers/ledger_controller.dart';
+import '../../controllers/wallet_controller.dart';
+import '../../core/constants.dart';
 import '../../core/label_format.dart';
 import '../../core/theme.dart';
 import '../../models/transaction_model.dart';
@@ -36,9 +38,13 @@ class WalletLedgerView extends ConsumerWidget {
               error: error,
               onRetry: () => ref.invalidate(ledgerProvider),
             ),
-            data: (entries) => RefreshIndicator(
+            data: (page) => RefreshIndicator(
               onRefresh: () async {
                 try {
+                  // The wallet document is the fallback for an empty or legacy
+                  // ledger. Refresh both sources so pull-to-refresh never
+                  // leaves that fallback stale.
+                  ref.invalidate(walletProvider);
                   final refresh = ref.refresh(ledgerProvider.future);
                   await refresh;
                 } catch (_) {
@@ -58,10 +64,21 @@ class WalletLedgerView extends ConsumerWidget {
                     ),
                   ),
                   const SizedBox(height: 8),
-                  if (entries.isEmpty)
+                  if (page.entries.isEmpty)
                     const _LedgerEmpty()
                   else
-                    ...entries.map((e) => _LedgerRow(entry: e)),
+                    ...page.entries.map((e) => _LedgerRow(entry: e)),
+                  if (page.truncated) ...[
+                    const SizedBox(height: AppTheme.gapMd),
+                    OutlinedButton.icon(
+                      onPressed: () =>
+                          ref.read(ledgerLimitProvider.notifier).loadOlder(),
+                      icon: const Icon(Icons.expand_more),
+                      label: const Text(
+                        'Load ${QueryLimits.ledger} older changes',
+                      ),
+                    ),
+                  ],
                 ],
               ),
             ),
@@ -99,29 +116,43 @@ class _BalanceHeader extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 4),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.baseline,
-            textBaseline: TextBaseline.alphabetic,
-            children: [
-              Text(
-                balance?.toString() ?? '0',
-                style: theme.textTheme.displaySmall?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: theme.colorScheme.onPrimaryContainer,
+          Semantics(
+            label: balance == null
+                ? 'Balance is loading'
+                : 'Balance: $balance points',
+            child: ExcludeSemantics(
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.baseline,
+                  textBaseline: TextBaseline.alphabetic,
+                  children: [
+                    Text(
+                      balance?.toString() ?? '—',
+                      style: theme.textTheme.displaySmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: theme.colorScheme.onPrimaryContainer,
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'points',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        color: theme.colorScheme.onPrimaryContainer,
+                      ),
+                    ),
+                  ],
                 ),
               ),
-              const SizedBox(width: 8),
-              Text(
-                'points',
-                style: theme.textTheme.titleMedium?.copyWith(
-                  color: theme.colorScheme.onPrimaryContainer,
-                ),
-              ),
-            ],
+            ),
           ),
           const SizedBox(height: 6),
           Text(
-            recentEarned > 0
+            balance == null
+                ? 'Checking your current balance…'
+                : recentEarned > 0
                 ? '+$recentEarned earned across the entries below'
                 : 'Every change to this number is listed below.',
             style: theme.textTheme.bodySmall?.copyWith(

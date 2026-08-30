@@ -38,6 +38,7 @@ class AppShell extends ConsumerWidget {
     required this.title,
     required this.child,
     this.floatingActionButton,
+    this.rootBackToHome = true,
   });
 
   final String title;
@@ -53,6 +54,11 @@ class AppShell extends ConsumerWidget {
   /// button either. The only marked way out was a "Switch to 3ZERO Champion"
   /// action, which escaped by silently changing the active profile.
   final Widget? floatingActionButton;
+
+  /// Whether a system back gesture on a one-entry, non-home route returns to
+  /// Home. Forms with their own [PopScope] set this to false so their discard
+  /// prompt remains the single owner of back navigation.
+  final bool rootBackToHome;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -241,12 +247,21 @@ class AppShell extends ConsumerWidget {
         // or any admin queue closed Chokro outright. Only that case is
         // intercepted: a pushed screen still has something to pop, and Home
         // itself is where back is supposed to exit.
-        final interceptBack = isDestination && location != '/home' && !canPop;
+        // A route reached with `go` also has a one-entry stack when it is not a
+        // navigation destination (for example the post-checkout orders screen
+        // or the appeals list). The app bar already offers "Back to home" in
+        // that case; the system back gesture must do the same instead of
+        // closing the app.
+        final interceptBack = rootBackToHome && location != '/home' && !canPop;
 
         return PopScope(
           canPop: !interceptBack,
           onPopInvokedWithResult: (didPop, _) {
-            if (didPop) return;
+            // Another PopScope may have refused the same attempt (for example
+            // an unsaved form around this shell). Only this shell's own
+            // interception is allowed to redirect to Home; otherwise it would
+            // race the discard dialog and navigate away behind it.
+            if (didPop || !interceptBack) return;
             context.go('/home');
           },
           child: Scaffold(
@@ -264,7 +279,14 @@ class AppShell extends ConsumerWidget {
               leading: !isDestination && !canPop
                   ? IconButton(
                       tooltip: 'Back to home',
-                      onPressed: () => context.go('/home'),
+                      onPressed: () async {
+                        // Give an enclosing UnsavedChangesGuard first refusal.
+                        // `maybePop` reports the attempt as handled when that
+                        // guard opens its dialog. On a clean, one-entry route it
+                        // bubbles instead, and Home is the explicit fallback.
+                        final handled = await Navigator.of(context).maybePop();
+                        if (!handled && context.mounted) context.go('/home');
+                      },
                       icon: const Icon(Icons.arrow_back),
                     )
                   : null,

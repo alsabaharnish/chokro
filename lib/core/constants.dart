@@ -45,9 +45,10 @@ class AppConstants {
 ///
 /// There is no cursor-based `startAfter` paging in this codebase. Most values
 /// are therefore the most their screen will ever show, and each realistic cap
-/// is disclosed. [photocardPage] is the one exception: its screen grows a
-/// bounded query in explicit increments so an older approved card remains
-/// reachable without opening an unbounded stream.
+/// is disclosed. [photocardPage], [ledger], [orders], and [sellerListings] are
+/// page increments: those screens grow a bounded query only when the user asks
+/// for older records, keeping history reachable without opening an unbounded
+/// stream.
 ///
 /// ## Why they exist at all
 ///
@@ -105,4 +106,7 @@ class QueryLimits {
 
   /// Accounts on the administrator's list.
   static const int accounts = 200;
+
+  /// Decisions attributed to one administrator in one local day.
+  static const int adminDailyReviews = 250;
 }

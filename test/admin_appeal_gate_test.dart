@@ -81,7 +81,13 @@ void main() {
 
     // The identity that makes State un-reusable across appeals. Without it the
     // confirmation tick migrates between cards as the queue shortens.
+    final scrollable = find.byType(Scrollable).last;
     for (final appeal in appeals) {
+      await tester.scrollUntilVisible(
+        find.byKey(ValueKey(appeal.id)),
+        260,
+        scrollable: scrollable,
+      );
       expect(
         find.byKey(ValueKey(appeal.id)),
         findsOneWidget,

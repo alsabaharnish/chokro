@@ -390,6 +390,19 @@ class _EcoActionPhotocardDialogState extends State<_EcoActionPhotocardDialog> {
                 ),
               ),
               if (_busy) const LinearProgressIndicator(minHeight: 2),
+              if (!privacyReady)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 8, 20, 0),
+                  child: Semantics(
+                    liveRegion: true,
+                    child: Text(
+                      'Confirm the privacy check above to export this anonymous card.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
                 child: Wrap(

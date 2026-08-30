@@ -4,6 +4,7 @@ import 'package:chokro/controllers/current_user_provider.dart';
 import 'package:chokro/core/constants.dart';
 import 'package:chokro/core/theme.dart';
 import 'package:chokro/models/user_model.dart';
+import 'package:chokro/services/user_service.dart';
 import 'package:chokro/views/admin/admin_users_view.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -59,19 +60,24 @@ void main() {
           currentUserProvider.overrideWith((ref) => Stream.value(admin)),
           currentUidProvider.overrideWithValue('admin'),
           allUsersProvider.overrideWith(
-            (ref) => Stream.value([
-              _user(
-                uid: 'buyer-1',
-                name: 'A user with a fairly long name',
-                email: 'long-address@example.com',
+            (ref) => Stream.value(
+              UserDirectoryPage(
+                users: [
+                  _user(
+                    uid: 'buyer-1',
+                    name: 'A user with a fairly long name',
+                    email: 'long-address@example.com',
+                  ),
+                  _user(
+                    uid: 'buyer-2',
+                    name: 'Suspended account',
+                    email: 'suspended@example.com',
+                    status: AppConstants.statusSuspended,
+                  ),
+                ],
+                truncated: false,
               ),
-              _user(
-                uid: 'buyer-2',
-                name: 'Suspended account',
-                email: 'suspended@example.com',
-                status: AppConstants.statusSuspended,
-              ),
-            ]),
+            ),
           ),
         ],
         child: MaterialApp.router(

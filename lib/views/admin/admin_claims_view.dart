@@ -3,10 +3,13 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../controllers/claim_controller.dart';
+import '../../core/constants.dart';
 import '../../core/label_format.dart';
 import '../../models/claim_model.dart';
 import 'eco_action_photocard_dialog.dart';
 import '../shared/app_shell.dart';
+import '../shared/app_snackbar.dart';
+import '../shared/content_state.dart';
 import '../shared/evidence_viewer.dart';
 import '../shared/rejection_reason_dialog.dart';
 import '../shared/error_retry.dart';
@@ -29,11 +32,14 @@ class AdminClaimsView extends ConsumerWidget {
     final ui = ref.watch(claimReviewControllerProvider);
 
     ref.listen(claimReviewControllerProvider, (previous, next) {
-      final message = next.error ?? next.lastMessage;
-      if (message == null) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
+      final notify = AppSnackBar.of(context);
+      if (next.error != null) {
+        notify.failure(next.error!);
+      } else if (next.lastMessage != null) {
+        notify.success(next.lastMessage!);
+      } else {
+        return;
+      }
       ref.read(claimReviewControllerProvider.notifier).clearMessages();
     });
 
@@ -56,6 +62,9 @@ class AdminClaimsView extends ConsumerWidget {
                         icon: Icons.fact_check_outlined,
                         label: 'Pending',
                         count: pending.value?.length,
+                        atCap:
+                            (pending.value?.length ?? 0) >=
+                            QueryLimits.reviewQueue,
                       ),
                       _TabLabel(
                         icon: Icons.photo_library_outlined,
@@ -83,11 +92,17 @@ class AdminClaimsView extends ConsumerWidget {
 }
 
 class _TabLabel extends StatelessWidget {
-  const _TabLabel({required this.icon, required this.label, this.count});
+  const _TabLabel({
+    required this.icon,
+    required this.label,
+    this.count,
+    this.atCap = false,
+  });
 
   final IconData icon;
   final String label;
   final int? count;
+  final bool atCap;
 
   @override
   Widget build(BuildContext context) {
@@ -106,7 +121,7 @@ class _TabLabel extends StatelessWidget {
                 borderRadius: BorderRadius.circular(999),
               ),
               child: Text(
-                '$count',
+                '$count${atCap ? '+' : ''}',
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
                   color: Theme.of(context).colorScheme.onPrimaryContainer,
                   fontWeight: FontWeight.w800,
@@ -129,7 +144,7 @@ class _PendingClaims extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return async.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
+      loading: () => const ContentLoading(label: 'Loading the queue…'),
       error: (error, _) => ErrorRetry(
         error: error,
         title: 'The eco-action queue',
@@ -167,7 +182,7 @@ class _ApprovedPhotocards extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final limit = ref.watch(approvedClaimLimitProvider);
     return async.when(
-      loading: () => const Center(child: CircularProgressIndicator()),
+      loading: () => const ContentLoading(label: 'Loading photocards…'),
       error: (error, _) => ErrorRetry(
         error: error,
         title: 'Approved eco-actions',
@@ -603,6 +618,7 @@ class _ClaimCard extends ConsumerWidget {
                 ),
               ],
             ),
+            if (isBusy) const SlowServerNote(),
           ],
         ),
       ),

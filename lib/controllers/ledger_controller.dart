@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/constants.dart';
 import '../models/transaction_model.dart';
 import '../services/transaction_service.dart';
 import 'current_user_provider.dart';
@@ -9,18 +10,38 @@ final transactionServiceProvider = Provider<TransactionService>((ref) {
   return TransactionService();
 });
 
-/// The signed-in user's ledger, newest first.
+class LedgerLimitController extends Notifier<int> {
+  @override
+  int build() => QueryLimits.ledger;
+
+  void loadOlder() => state += QueryLimits.ledger;
+}
+
+/// How many of the newest ledger entries the wallet currently asks for.
+///
+/// Riverpod providers auto-dispose in this project, so leaving the wallet puts
+/// the next visit back at one inexpensive page instead of retaining an ever
+/// growing live query for the rest of the session.
+final ledgerLimitProvider =
+    NotifierProvider.autoDispose<LedgerLimitController, int>(
+      LedgerLimitController.new,
+    );
+
+/// The signed-in user's bounded ledger page, newest first.
 ///
 /// Emits an empty list rather than an error when signed out, so a sign-out
 /// mid-session tears the screen down cleanly instead of flashing an error.
-final ledgerProvider = StreamProvider.autoDispose<List<TransactionModel>>((
-  ref,
-) {
+final ledgerProvider = StreamProvider.autoDispose<TransactionPage>((ref) {
   final uid = ref.watch(currentUidProvider);
+  final limit = ref.watch(ledgerLimitProvider);
   if (uid == null) {
-    return Stream<List<TransactionModel>>.value(const <TransactionModel>[]);
+    return Stream<TransactionPage>.value(
+      const TransactionPage(entries: <TransactionModel>[], truncated: false),
+    );
   }
-  return ref.watch(transactionServiceProvider).watchUserTransactions(uid);
+  return ref
+      .watch(transactionServiceProvider)
+      .watchUserTransactions(uid, limit: limit);
 });
 
 /// Balance taken from the newest ledger entry's `balanceAfter`.
@@ -44,7 +65,7 @@ final ledgerBalanceProvider = Provider.autoDispose<int?>((ref) {
   final ledger = ref.watch(ledgerProvider);
   if (ledger.isLoading && !ledger.hasValue) return null;
 
-  final entries = ledger.asData?.value;
+  final entries = ledger.asData?.value.entries;
   final fromLedger = (entries == null || entries.isEmpty)
       ? null
       : entries.first.balanceAfter;
@@ -59,7 +80,9 @@ final ledgerBalanceProvider = Provider.autoDispose<int?>((ref) {
 /// The non-decreasing lifetime Sustainability Score is a separate server-held
 /// counter and is not this number.
 final recentEarnedProvider = Provider.autoDispose<int>((ref) {
-  final entries = ref.watch(ledgerProvider).asData?.value ?? const [];
+  final entries =
+      ref.watch(ledgerProvider).asData?.value.entries ??
+      const <TransactionModel>[];
   return entries
       .where((e) => e.isCredit)
       .fold<int>(0, (sum, e) => sum + e.delta);

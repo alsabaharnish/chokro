@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../core/constants.dart';
 import '../models/order_model.dart';
 import '../services/order_service.dart';
 import 'cart_controller.dart';
@@ -18,15 +19,28 @@ final buyerOrdersProvider = StreamProvider.autoDispose<List<OrderModel>>((ref) {
   return ref.watch(orderServiceProvider).watchBuyerOrders(uid);
 });
 
-/// Orders the signed-in seller has to fulfil (F4.6).
-final sellerOrdersProvider = StreamProvider.autoDispose<List<OrderModel>>((
-  ref,
-) {
+class SellerOrderLimitController extends Notifier<int> {
+  @override
+  int build() => QueryLimits.orders;
+
+  void loadOlder() => state += QueryLimits.orders;
+}
+
+final sellerOrderLimitProvider =
+    NotifierProvider.autoDispose<SellerOrderLimitController, int>(
+      SellerOrderLimitController.new,
+    );
+
+/// A bounded page of orders the signed-in seller has to fulfil (F4.6).
+final sellerOrdersProvider = StreamProvider.autoDispose<SellerOrderPage>((ref) {
   final uid = ref.watch(currentUidProvider);
+  final limit = ref.watch(sellerOrderLimitProvider);
   if (uid == null) {
-    return Stream<List<OrderModel>>.value(const <OrderModel>[]);
+    return Stream<SellerOrderPage>.value(
+      const SellerOrderPage(orders: <OrderModel>[], truncated: false),
+    );
   }
-  return ref.watch(orderServiceProvider).watchSellerOrders(uid);
+  return ref.watch(orderServiceProvider).watchSellerOrders(uid, limit: limit);
 });
 
 /// Orders awaiting the buyer's confirmation.
@@ -43,7 +57,9 @@ final ordersAwaitingConfirmationProvider =
 
 /// Orders the seller still has something to do about.
 final sellerOpenOrdersProvider = Provider.autoDispose<List<OrderModel>>((ref) {
-  final orders = ref.watch(sellerOrdersProvider).asData?.value ?? const [];
+  final orders =
+      ref.watch(sellerOrdersProvider).asData?.value.orders ??
+      const <OrderModel>[];
   return orders
       .where(
         (order) => OrderStatus.nextFor(order.status, isSeller: true) != null,

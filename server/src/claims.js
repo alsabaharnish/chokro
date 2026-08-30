@@ -28,6 +28,7 @@ const {
 // Push on a decision (F7.1).
 const pushModule = require('./push');
 const { isTrustedImageReference } = require('./cloudinary');
+const { normalizeRejectionReason } = require('./reviewReason');
 
 /** The closed action vocabulary. Mirrors ClaimActionType in Dart. */
 const ACTION_TYPES = Object.freeze([
@@ -185,9 +186,7 @@ async function approveClaim({ claimId, adminUid }) {
  * week.
  */
 async function rejectClaim({ claimId, adminUid, reason }) {
-  if (!reason || !reason.trim()) {
-    throw new Error('A rejection must record a reason.');
-  }
+  const rejectionReason = normalizeRejectionReason(reason);
 
   const firestore = db();
   const claimRef = firestore.collection('claims').doc(claimId);
@@ -209,7 +208,7 @@ async function rejectClaim({ claimId, adminUid, reason }) {
 
     txn.update(claimRef, {
       status: 'rejected',
-      rejectionReason: reason.trim(),
+      rejectionReason,
       reviewedBy: adminUid,
       reviewedAt: serverTimestamp(),
       pointsAwarded: 0,
@@ -221,7 +220,7 @@ async function rejectClaim({ claimId, adminUid, reason }) {
       { merge: true },
     );
 
-    return { claimId, status: 'rejected', reason: reason.trim() };
+    return { claimId, status: 'rejected', reason: rejectionReason };
   });
 
   await pushModule.notifyClaimRejected({

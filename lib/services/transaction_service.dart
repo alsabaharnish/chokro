@@ -1,6 +1,19 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../core/constants.dart';
 import '../models/transaction_model.dart';
+
+/// A bounded ledger read and whether an older entry exists.
+///
+/// The extra bit matters to the wallet UI: a capped list must not look like the
+/// user's complete financial history, and it is also what lets the screen offer
+/// an explicit "load older" path without guessing from an exact page length.
+class TransactionPage {
+  const TransactionPage({required this.entries, required this.truncated});
+
+  final List<TransactionModel> entries;
+  final bool truncated;
+}
 
 /// Read-only access to the `transactions` ledger.
 ///
@@ -20,23 +33,29 @@ class TransactionService {
   /// Backed by the deployed composite index (`userId` ascending, `createdAt`
   /// descending). A missing index surfaces as a `failed-precondition` error
   /// with a console link, not as an empty list.
-  Stream<List<TransactionModel>> watchUserTransactions(
+  Stream<TransactionPage> watchUserTransactions(
     String userId, {
-    int limit = 50,
+    int limit = QueryLimits.ledger,
   }) {
     return _db
         .collection(collection)
         .where('userId', isEqualTo: userId)
         .orderBy('createdAt', descending: true)
-        .limit(limit)
+        // Read one beyond the requested window so "more" is a fact, not an
+        // inference that is wrong for a user with exactly [limit] entries.
+        .limit(limit + 1)
         .snapshots()
-        .map(_mapSnapshot);
+        .map((snapshot) {
+          final truncated = snapshot.docs.length > limit;
+          final docs = truncated ? snapshot.docs.take(limit) : snapshot.docs;
+          return TransactionPage(entries: _mapDocs(docs), truncated: truncated);
+        });
   }
 
   /// One page, for a pull-to-refresh or a non-streaming caller.
   Future<List<TransactionModel>> fetchUserTransactions(
     String userId, {
-    int limit = 50,
+    int limit = QueryLimits.ledger,
   }) async {
     final snapshot = await _db
         .collection(collection)
@@ -44,13 +63,13 @@ class TransactionService {
         .orderBy('createdAt', descending: true)
         .limit(limit)
         .get();
-    return _mapSnapshot(snapshot);
+    return _mapDocs(snapshot.docs);
   }
 
-  List<TransactionModel> _mapSnapshot(
-    QuerySnapshot<Map<String, dynamic>> snap,
+  List<TransactionModel> _mapDocs(
+    Iterable<QueryDocumentSnapshot<Map<String, dynamic>>> docs,
   ) {
-    return snap.docs
+    return docs
         .map((doc) {
           final data = Map<String, dynamic>.from(doc.data());
           // Timestamp -> DateTime happens here, never in the model.

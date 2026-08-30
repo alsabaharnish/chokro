@@ -75,6 +75,96 @@ async function approvedTodayCount(uid) {
 }
 
 /**
+ * Returns the idempotent response for a decided or already-verified document.
+ * A pending document with no server evidence returns null so verification can
+ * continue.
+ */
+async function existingVerificationOutcome(disposalId, disposal) {
+  if (disposal.status !== 'pending') {
+    return {
+      disposalId,
+      status: disposal.status,
+      alreadyDecided: true,
+      pointsAwarded: disposal.pointsAwarded ?? 0,
+      flags: disposal.flags ?? [],
+    };
+  }
+
+  if (!hasCompletedVerification(disposal)) return null;
+
+  const storedFlags = Array.isArray(disposal.flags) ? disposal.flags : [];
+
+  // Recovery for submissions caught by the old two-write auto-approval path:
+  // evidence was committed first, then the award failed. They are pending,
+  // verified and flagless. Re-enter the authoritative transaction so the
+  // daily cap, active-bin state, wallet and ledger are checked again.
+  if (storedFlags.length === 0) {
+    const result = await approveDisposal({
+      disposalId,
+      adminUid: null,
+      flags: [],
+    });
+    return {
+      disposalId,
+      status: 'autoApproved',
+      pointsAwarded: result.pointsAwarded,
+      balanceAfter: result.balanceAfter,
+      flags: [],
+      distanceMeters: disposal.distanceMeters ?? null,
+    };
+  }
+
+  return {
+    disposalId,
+    status: disposal.status,
+    alreadyVerified: true,
+    pointsAwarded: disposal.pointsAwarded ?? 0,
+    flags: storedFlags,
+    distanceMeters: disposal.distanceMeters ?? null,
+  };
+}
+
+/**
+ * Persists review evidence only while this exact submission is still pending
+ * and unverified.
+ *
+ * Hashing plus vision screening can take tens of seconds. During that time an
+ * administrator can reject the submission, or a duplicate verify request can
+ * finish first. A blind `DocumentReference.update()` after those calls used to
+ * overwrite the winner's flags/evidence and return `status: pending` even after
+ * a rejection had committed. The transaction turns the final state check and
+ * evidence write into one conditional operation.
+ */
+async function persistReviewEvidence({
+  firestore,
+  disposalRef,
+  callerUid,
+  evidence,
+}) {
+  return firestore.runTransaction(async (txn) => {
+    const latestSnap = await txn.get(disposalRef);
+    if (!latestSnap.exists) {
+      throw new Error('That submission no longer exists.');
+    }
+
+    const latest = latestSnap.data();
+    if (latest.userId !== callerUid) {
+      throw new Error('That submission belongs to someone else.');
+    }
+
+    if (latest.status !== 'pending') {
+      return { state: 'decided', disposal: latest };
+    }
+    if (hasCompletedVerification(latest)) {
+      return { state: 'verified', disposal: latest };
+    }
+
+    txn.update(disposalRef, evidence);
+    return { state: 'stored', disposal: null };
+  });
+}
+
+/**
  * Verifies a pending submission and either credits it or routes it to review.
  *
  * @param {object} args
@@ -96,64 +186,11 @@ async function verifyDisposal({ disposalId, callerUid }) {
     throw new Error('That submission belongs to someone else.');
   }
 
-  // Idempotence. A retry after a timeout must not re-credit — the client
-  // cannot tell a lost response from a lost request, so it will retry.
-  if (disposal.status !== 'pending') {
-    return {
-      disposalId,
-      status: disposal.status,
-      alreadyDecided: true,
-      pointsAwarded: disposal.pointsAwarded ?? 0,
-      flags: disposal.flags ?? [],
-    };
-  }
-
-  // A submission that has ALREADY been verified and routed to review is done
-  // with this function, even though it is still `pending`.
-  //
-  // The status check above only catches a *decided* submission. Anything flagged
-  // for review stays pending until an administrator acts, which can be hours —
-  // and every repeat call in that window re-ran the entire pipeline: a Cloudinary
-  // fetch, a fifty-document history query, and a **billed Groq vision call**. One
-  // authenticated account could drive that at request rate against a single
-  // pending document. Nothing was credited twice, so this was a cost and
-  // availability hole rather than a payout hole, but on a free tier those are the
-  // same thing.
-  //
-  // Returning the stored evidence rather than recomputing it is also the more
-  // honest answer: the flags on the document are what the reviewer is looking at.
-  if (hasCompletedVerification(disposal)) {
-    const storedFlags = Array.isArray(disposal.flags) ? disposal.flags : [];
-
-    // Recovery for submissions caught by the old two-write auto-approval path:
-    // evidence was committed first, then the award failed. They are pending,
-    // verified and flagless. Re-enter the authoritative transaction so the
-    // daily cap, wallet and ledger are checked again and committed together.
-    if (storedFlags.length === 0) {
-      const result = await approveDisposal({
-        disposalId,
-        adminUid: null,
-        flags: [],
-      });
-      return {
-        disposalId,
-        status: 'autoApproved',
-        pointsAwarded: result.pointsAwarded,
-        balanceAfter: result.balanceAfter,
-        flags: [],
-        distanceMeters: disposal.distanceMeters ?? null,
-      };
-    }
-
-    return {
-      disposalId,
-      status: disposal.status,
-      alreadyVerified: true,
-      pointsAwarded: disposal.pointsAwarded ?? 0,
-      flags: storedFlags,
-      distanceMeters: disposal.distanceMeters ?? null,
-    };
-  }
+  // Idempotence. A retry after a timeout must not re-credit or repeat the paid
+  // screening call. Pending submissions with stored evidence are already in the
+  // review queue even though their status has not changed yet.
+  const existing = await existingVerificationOutcome(disposalId, disposal);
+  if (existing) return existing;
 
   const binSnap = await firestore.collection('bins').doc(disposal.binId).get();
   if (!binSnap.exists) throw new Error('That bin is no longer registered.');
@@ -319,13 +356,32 @@ async function verifyDisposal({ disposalId, callerUid }) {
 
   // Route to review. The document stays `pending` — the wallet is untouched
   // and the user's history shows the submission as awaiting a decision.
-  await disposalRef.update({
+  const evidence = {
     photoHash,
     distanceMeters,
     verificationCompleted: true,
     flags: outcome.flags,
     ...screeningFields,
+  };
+
+  const persistence = await persistReviewEvidence({
+    firestore,
+    disposalRef,
+    callerUid,
+    evidence,
   });
+
+  if (persistence.state !== 'stored') {
+    // Another verifier or an administrator won while the network checks were in
+    // flight. Return the committed truth; never overwrite it with stale evidence
+    // or claim this request left the document pending.
+    const latest = await existingVerificationOutcome(
+      disposalId,
+      persistence.disposal,
+    );
+    if (latest) return latest;
+    throw new Error('That submission changed while it was being verified.');
+  }
 
   return {
     disposalId,
@@ -341,5 +397,7 @@ module.exports = {
   HASH_HISTORY_LIMIT,
   previousHashes,
   approvedTodayCount,
+  existingVerificationOutcome,
+  persistReviewEvidence,
   verifyDisposal,
 };

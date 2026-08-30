@@ -9,9 +9,11 @@ import '../../core/theme.dart';
 import '../../core/policy_fields.dart';
 import '../../services/points_policy_service.dart';
 import '../shared/app_shell.dart';
+import '../shared/app_snackbar.dart';
 import '../shared/content_state.dart';
 import '../shared/error_retry.dart';
 import '../shared/notice_card.dart';
+import '../shared/unsaved_changes.dart';
 
 /// Administrator editor for the points policy (F3.3).
 ///
@@ -43,6 +45,15 @@ class _PointsPolicyViewState extends ConsumerState<PointsPolicyView> {
 
   bool _saving = false;
   List<String> _serverProblems = const [];
+
+  bool get _isDirty {
+    final base = _loaded;
+    if (base == null) return false;
+    return policyFields.any(
+      (field) =>
+          (_controllers[field.key]?.text.trim() ?? '') != '${field.read(base)}',
+    );
+  }
 
   /// `updatedAt` of the document the baseline came from.
   ///
@@ -98,9 +109,13 @@ class _PointsPolicyViewState extends ConsumerState<PointsPolicyView> {
 
     for (final field in policyFields) {
       final raw = _controllers[field.key]?.text.trim() ?? '';
+      if (raw.isEmpty) {
+        errors.add('${field.label} is required.');
+        continue;
+      }
       final value = int.tryParse(raw);
       if (value == null) {
-        errors.add('${field.label} must be a whole number.');
+        errors.add('${field.label} is too large.');
         continue;
       }
       draft = field.write(draft, value);
@@ -113,6 +128,7 @@ class _PointsPolicyViewState extends ConsumerState<PointsPolicyView> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        scrollable: true,
         title: const Text('Apply these changes?'),
         content: Column(
           mainAxisSize: MainAxisSize.min,
@@ -150,6 +166,7 @@ class _PointsPolicyViewState extends ConsumerState<PointsPolicyView> {
       _saving = true;
       _serverProblems = const [];
     });
+    final notify = AppSnackBar.of(context);
 
     try {
       final stored = await ref.read(pointsPolicyEditorProvider).save(policy);
@@ -162,18 +179,21 @@ class _PointsPolicyViewState extends ConsumerState<PointsPolicyView> {
         _loadedAt = null;
         _saving = false;
       });
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('Points policy updated.')));
+      notify.success('Points policy updated.');
     } on PolicyException catch (error) {
       if (!mounted) return;
       setState(() {
         _saving = false;
         _serverProblems = error.problems;
       });
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(error.message)));
+      notify.failure(error.message);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _saving = false;
+        _serverProblems = const [];
+      });
+      notify.failure('The points policy was not updated. Try again.');
     }
   }
 
@@ -181,59 +201,61 @@ class _PointsPolicyViewState extends ConsumerState<PointsPolicyView> {
   Widget build(BuildContext context) {
     final async = ref.watch(policySnapshotProvider);
 
-    return AppShell(
-      title: 'Points policy',
-      child: Center(
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(
-            maxWidth: PointsPolicyView._maxContentWidth,
-          ),
-          child: async.when(
-            // Was a bare `CircularProgressIndicator` with no text at all — the
-            // only loading state in the app that said nothing. This screen waits
-            // on the trusted service, so it is precisely the one that needed to
-            // explain a slow start.
-            loading: () => const ContentLoading(
-              label: 'Reading the points policy…',
-              slowHint: ContentLoading.serverWakingHint,
+    return UnsavedChangesGuard(
+      hasChanges: _isDirty,
+      child: AppShell(
+        title: 'Points policy',
+        rootBackToHome: false,
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(
+              maxWidth: PointsPolicyView._maxContentWidth,
             ),
-            error: (error, _) => ErrorRetry(
-              title: 'The policy',
-              error: error,
-              onRetry: () => ref.invalidate(policySnapshotProvider),
-            ),
-            data: (snapshot) {
-              final serverAt = snapshot.provenance.updatedAt;
-              if (_loaded == null) {
-                _adoptLoaded(snapshot.policy);
-                _loadedAt = serverAt;
-              } else if (serverAt != null && serverAt != _loadedAt) {
-                // Somebody else saved while this form was open. Re-adopt only
-                // when there is nothing to protect; otherwise say so and let
-                // the admin choose, because silently replacing their typing is
-                // the same class of mistake as silently reverting the other
-                // admin's save.
-                final (policy: draft, parseErrors: _) = _readForm();
-                final dirty =
-                    draft != null && diffPolicies(_loaded!, draft).isNotEmpty;
-                if (!dirty) {
+            child: async.when(
+              // Was a bare `CircularProgressIndicator` with no text at all — the
+              // only loading state in the app that said nothing. This screen waits
+              // on the trusted service, so it is precisely the one that needed to
+              // explain a slow start.
+              loading: () => const ContentLoading(
+                label: 'Reading the points policy…',
+                slowHint: ContentLoading.serverWakingHint,
+              ),
+              error: (error, _) => ErrorRetry(
+                title: 'The policy',
+                error: error,
+                onRetry: () => ref.invalidate(policySnapshotProvider),
+              ),
+              data: (snapshot) {
+                final serverAt = snapshot.provenance.updatedAt;
+                if (_loaded == null) {
                   _adoptLoaded(snapshot.policy);
                   _loadedAt = serverAt;
-                } else {
-                  return _buildForm(
-                    context,
-                    snapshot.provenance,
-                    staleSince: serverAt,
-                    onReload: () => setState(() {
-                      _adoptLoaded(snapshot.policy);
-                      _loadedAt = serverAt;
-                      _serverProblems = const [];
-                    }),
-                  );
+                } else if (serverAt != null && serverAt != _loadedAt) {
+                  // Somebody else saved while this form was open. Re-adopt only
+                  // when there is nothing to protect; otherwise say so and let
+                  // the admin choose, because silently replacing their typing is
+                  // the same class of mistake as silently reverting the other
+                  // admin's save.
+                  final dirty = _isDirty;
+                  if (!dirty) {
+                    _adoptLoaded(snapshot.policy);
+                    _loadedAt = serverAt;
+                  } else {
+                    return _buildForm(
+                      context,
+                      snapshot.provenance,
+                      staleSince: serverAt,
+                      onReload: () => setState(() {
+                        _adoptLoaded(snapshot.policy);
+                        _loadedAt = serverAt;
+                        _serverProblems = const [];
+                      }),
+                    );
+                  }
                 }
-              }
-              return _buildForm(context, snapshot.provenance);
-            },
+                return _buildForm(context, snapshot.provenance);
+              },
+            ),
           ),
         ),
       ),
@@ -315,7 +337,9 @@ class _PointsPolicyViewState extends ConsumerState<PointsPolicyView> {
           _PolicyInput(
             field: field,
             controller: _controllers[field.key]!,
-            onChanged: () => setState(() {}),
+            onChanged: () => setState(() {
+              _serverProblems = const [];
+            }),
           ),
           const SizedBox(height: 18),
         ],
@@ -378,11 +402,15 @@ class _PointsPolicyViewState extends ConsumerState<PointsPolicyView> {
             OutlinedButton(
               onPressed: _saving
                   ? null
-                  : () => setState(() => _adoptLoaded(base)),
+                  : () => setState(() {
+                      _adoptLoaded(base);
+                      _serverProblems = const [];
+                    }),
               child: const Text('Revert'),
             ),
           ],
         ),
+        if (_saving) const SlowServerNote(),
         const SizedBox(height: 12),
         Center(
           child: TextButton(
@@ -393,6 +421,7 @@ class _PointsPolicyViewState extends ConsumerState<PointsPolicyView> {
                       _controllers[field.key]!.text =
                           '${field.read(PointsPolicy.defaults)}';
                     }
+                    _serverProblems = const [];
                   }),
             child: const Text('Load section 7.3 defaults'),
           ),
@@ -422,7 +451,10 @@ class _PolicyInput extends StatelessWidget {
         TextField(
           controller: controller,
           keyboardType: TextInputType.number,
-          inputFormatters: [FilteringTextInputFormatter.digitsOnly],
+          inputFormatters: [
+            FilteringTextInputFormatter.digitsOnly,
+            LengthLimitingTextInputFormatter(9),
+          ],
           onChanged: (_) => onChanged(),
           decoration: InputDecoration(
             labelText: field.label,

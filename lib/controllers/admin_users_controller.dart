@@ -16,9 +16,16 @@ final adminUserServiceProvider = Provider<UserService>((ref) => UserService());
 /// Unpaginated: the whole `users` collection in one stream. Fine at the scale
 /// this prototype runs at, and stated as a limitation rather than pretended
 /// away — NFR-2 asks for paginated reads, and this is not one.
-final allUsersProvider = StreamProvider.autoDispose<List<UserModel>>((ref) {
+final allUsersProvider = StreamProvider.autoDispose<UserDirectoryPage>((ref) {
   return ref.watch(adminUserServiceProvider).watchAllUsers();
 });
+
+/// Looks beyond the bounded directory when the administrator enters a complete
+/// email address.
+final adminUserByEmailProvider = FutureProvider.autoDispose
+    .family<UserModel?, String>((ref, email) {
+      return ref.watch(adminUserServiceProvider).findUserByEmail(email);
+    });
 
 /// What a suspension or reinstatement actually did.
 ///

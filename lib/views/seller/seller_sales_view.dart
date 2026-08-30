@@ -61,7 +61,18 @@ class _Report extends ConsumerWidget {
     // press now selects rather than doing nothing.
     return SelectionArea(
       child: RefreshIndicator(
-        onRefresh: () async => ref.invalidate(sellerReportOrdersProvider),
+        onRefresh: () async {
+          try {
+            // Keep the indicator visible until the replacement stream has
+            // actually produced data. Invalidating alone completed this
+            // callback immediately, so the refresh gesture looked successful
+            // before any Firestore read had finished.
+            final refresh = ref.refresh(sellerReportOrdersProvider.future);
+            await refresh;
+          } catch (_) {
+            // The provider retains the error and the report renders it.
+          }
+        },
         child: LayoutBuilder(
           builder: (context, constraints) {
             final wide = constraints.maxWidth >= 720;
@@ -162,21 +173,17 @@ class _PeriodSelector extends ConsumerWidget {
       );
     }
 
-    return SizedBox(
-      height: 44,
-      child: ListView.separated(
-        scrollDirection: Axis.horizontal,
-        itemCount: SalesPeriod.values.length,
-        separatorBuilder: (_, _) => const SizedBox(width: AppTheme.gapSm),
-        itemBuilder: (context, index) {
-          final period = SalesPeriod.values[index];
-          return ChoiceChip(
+    return Wrap(
+      spacing: AppTheme.gapSm,
+      runSpacing: AppTheme.gapSm,
+      children: [
+        for (final period in SalesPeriod.values)
+          ChoiceChip(
             label: Text(period.label),
             selected: period == selected,
             onSelected: (_) => select(period),
-          );
-        },
-      ),
+          ),
+      ],
     );
   }
 }

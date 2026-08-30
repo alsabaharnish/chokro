@@ -97,11 +97,47 @@ class UserService {
 
   // ── admin: user list ──────────────────────────────────────────────────────
 
-  Stream<List<UserModel>> watchAllUsers() => _db
+  /// A deterministic, bounded page for the administrator's account directory.
+  ///
+  /// One document past the visible limit is read so the UI can distinguish
+  /// "exactly 200 accounts" from "at least 200 accounts". Without that extra
+  /// document both the dashboard total and an empty search result claimed to be
+  /// complete when the collection had actually been truncated.
+  Stream<UserDirectoryPage> watchAllUsers() => _db
       .collection('users')
-      .limit(QueryLimits.accounts)
+      .orderBy('name')
+      .limit(QueryLimits.accounts + 1)
       .snapshots()
-      .map((snap) => snap.docs.map(UserModel.fromFirestore).toList());
+      .map((snap) {
+        final truncated = snap.docs.length > QueryLimits.accounts;
+        return UserDirectoryPage(
+          users: snap.docs
+              .take(QueryLimits.accounts)
+              .map(UserModel.fromFirestore)
+              .toList(growable: false),
+          truncated: truncated,
+        );
+      });
+
+  /// Exact-email escape hatch for a truncated administrator directory.
+  ///
+  /// Name search remains local and is explicitly labelled as partial, but an
+  /// administrator responding to a support request normally has the account's
+  /// email address. This query makes that high-value lookup complete even after
+  /// the bounded directory reaches its limit.
+  Future<UserModel?> findUserByEmail(String email) async {
+    // The profile stores Firebase Auth's canonical address verbatim because
+    // Firestore rules require equality with the token claim. Do not silently
+    // lowercase the administrator's query here: that would make an otherwise
+    // exact lookup miss an address whose provider preserved letter casing.
+    final snap = await _db
+        .collection('users')
+        .where('email', isEqualTo: email.trim())
+        .limit(1)
+        .get();
+    if (snap.docs.isEmpty) return null;
+    return UserModel.fromFirestore(snap.docs.first);
+  }
 
   Future<void> updateUserRole(String uid, String role) =>
       _db.collection('users').doc(uid).update({'role': role});
@@ -214,6 +250,14 @@ class UserService {
       .doc(uid)
       .snapshots()
       .map((doc) => doc.exists ? WalletModel.fromFirestore(doc) : null);
+}
+
+/// The bounded account-directory read and whether more accounts exist.
+class UserDirectoryPage {
+  const UserDirectoryPage({required this.users, required this.truncated});
+
+  final List<UserModel> users;
+  final bool truncated;
 }
 
 /// The profile could not be read, as distinct from not existing.

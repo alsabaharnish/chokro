@@ -4,11 +4,13 @@ import 'package:go_router/go_router.dart';
 
 import '../../controllers/auth_controller.dart';
 import '../../controllers/seller_products_controller.dart';
+import '../../core/constants.dart';
 import '../../core/network_errors.dart';
 import '../../core/theme.dart';
 import '../../models/product_model.dart';
 import '../market/product_card.dart';
 import '../shared/app_shell.dart';
+import '../shared/app_snackbar.dart';
 import '../shared/content_state.dart';
 import '../shared/error_retry.dart';
 
@@ -52,7 +54,8 @@ class SellerProductsView extends ConsumerWidget {
           title: 'Your listings',
           onRetry: () => ref.invalidate(sellerProductsProvider),
         ),
-        data: (products) {
+        data: (page) {
+          final products = page.products;
           if (products.isEmpty) {
             return ContentEmpty(
               icon: Icons.storefront_outlined,
@@ -60,8 +63,10 @@ class SellerProductsView extends ConsumerWidget {
               message:
                   'Add a product and it appears in the shop straight away. '
                   '3ZERO Champions can pay for part of it with points.',
-              actionLabel: 'Add your first listing',
-              onAction: () => context.push('/seller/products/new'),
+              actionLabel: active ? 'Add your first listing' : null,
+              onAction: active
+                  ? () => context.push('/seller/products/new')
+                  : null,
             );
           }
 
@@ -81,6 +86,8 @@ class SellerProductsView extends ConsumerWidget {
           // ListView one child, so every listing — each with a network
           // thumbnail — was laid out and painted on every frame.
           final notice = hidden > 0;
+          final headerCount = notice ? 1 : 0;
+          final footerCount = page.truncated ? 1 : 0;
 
           return Center(
             child: ConstrainedBox(
@@ -94,7 +101,7 @@ class SellerProductsView extends ConsumerWidget {
                   AppTheme.gapMd,
                   AppTheme.gap2Xl,
                 ),
-                itemCount: products.length + (notice ? 1 : 0),
+                itemCount: products.length + headerCount + footerCount,
                 itemBuilder: (context, index) {
                   if (notice && index == 0) {
                     return Padding(
@@ -102,7 +109,22 @@ class SellerProductsView extends ConsumerWidget {
                       child: _SuspensionNotice(count: hidden),
                     );
                   }
-                  final product = products[index - (notice ? 1 : 0)];
+                  final productIndex = index - headerCount;
+                  if (productIndex == products.length) {
+                    return Padding(
+                      padding: const EdgeInsets.only(top: AppTheme.gapSm),
+                      child: OutlinedButton.icon(
+                        onPressed: () => ref
+                            .read(sellerProductLimitProvider.notifier)
+                            .loadOlder(),
+                        icon: const Icon(Icons.expand_more),
+                        label: const Text(
+                          'Load ${QueryLimits.sellerListings} older listings',
+                        ),
+                      ),
+                    );
+                  }
+                  final product = products[productIndex];
                   return Padding(
                     padding: const EdgeInsets.only(bottom: AppTheme.gapSm),
                     child: ProductCard(
@@ -110,7 +132,10 @@ class SellerProductsView extends ConsumerWidget {
                       showSellerState: true,
                       onTap: () =>
                           context.push('/seller/products/${product.id}'),
-                      trailing: _ListingMenu(product: product),
+                      trailing: _ListingMenu(
+                        product: product,
+                        accountActive: active,
+                      ),
                     ),
                   );
                 },
@@ -171,14 +196,15 @@ class _SuspensionNotice extends StatelessWidget {
 }
 
 class _ListingMenu extends ConsumerWidget {
-  const _ListingMenu({required this.product});
+  const _ListingMenu({required this.product, required this.accountActive});
 
   final ProductModel product;
+  final bool accountActive;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return PopupMenuButton<String>(
-      tooltip: 'Listing actions',
+      tooltip: 'Actions for ${product.title}',
       onSelected: (value) async {
         switch (value) {
           case 'edit':
@@ -190,11 +216,28 @@ class _ListingMenu extends ConsumerWidget {
         }
       },
       itemBuilder: (context) => [
-        const PopupMenuItem(value: 'edit', child: Text('Edit')),
+        if (!accountActive)
+          const PopupMenuItem<String>(
+            enabled: false,
+            child: Text('Changes are paused while suspended'),
+          ),
+        PopupMenuItem(
+          value: 'edit',
+          enabled: accountActive,
+          child: const Text('Edit'),
+        ),
         if (product.active)
-          const PopupMenuItem(value: 'delist', child: Text('Take off the shop'))
+          PopupMenuItem(
+            value: 'delist',
+            enabled: accountActive,
+            child: const Text('Take off the shop'),
+          )
         else
-          const PopupMenuItem(value: 'relist', child: Text('Put back on sale')),
+          PopupMenuItem(
+            value: 'relist',
+            enabled: accountActive,
+            child: const Text('Put back on sale'),
+          ),
       ],
     );
   }
@@ -204,29 +247,29 @@ class _ListingMenu extends ConsumerWidget {
     WidgetRef ref,
     bool active,
   ) async {
-    final messenger = ScaffoldMessenger.of(context);
+    final notify = AppSnackBar.of(context);
     try {
       await ref
           .read(sellerProductActionsProvider)
           .setActive(product.id!, active);
-      messenger.showSnackBar(
-        SnackBar(
-          content: Text(
-            active
-                ? '${product.title} is back on the shop.'
-                : '${product.title} is off the shop. Nothing has been deleted, '
-                      'and past orders keep their record.',
-          ),
-        ),
+      if (!context.mounted) return;
+      notify.success(
+        active
+            ? '${product.title} is back on the shop.'
+            : '${product.title} is off the shop. Nothing has been deleted, '
+                  'and past orders keep their record.',
       );
     } catch (error) {
-      messenger.showSnackBar(
+      if (!context.mounted) return;
+      final message = error.toString().contains('permission-denied')
+          ? 'That change was refused. Check that your Greenpreneur profile is '
+                'active; listing changes are paused during a suspension.'
+          : 'That did not save. ${friendlyErrorMessage(error)}';
+      notify.failure(
         // Interpreted, not printed. `setActive` is a bare Firestore write, so
         // `$error` put `[cloud_firestore/permission-denied] Missing or
         // insufficient permissions.` in front of a seller.
-        SnackBar(
-          content: Text('That did not save. ${friendlyErrorMessage(error)}'),
-        ),
+        message,
       );
     }
   }

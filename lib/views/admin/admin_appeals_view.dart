@@ -3,12 +3,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../controllers/appeals_controller.dart';
+import '../../core/constants.dart';
 import '../../core/label_format.dart';
 import '../../core/network_errors.dart';
 import '../../core/theme.dart';
 import '../../models/appeal_model.dart';
 import '../appeals/appeals_view.dart';
 import '../shared/app_shell.dart';
+import '../shared/app_snackbar.dart';
 import '../shared/content_state.dart';
 import '../shared/error_retry.dart';
 
@@ -47,46 +49,40 @@ class AdminAppealsView extends ConsumerWidget {
             );
           }
 
-          return ListView(
+          return ListView.builder(
             padding: const EdgeInsets.fromLTRB(
               AppTheme.gapMd,
               AppTheme.gapMd,
               AppTheme.gapMd,
               AppTheme.gapXl,
             ),
-            children: [
-              Center(
+            itemCount: appeals.length + 1,
+            itemBuilder: (context, index) {
+              final child = index == 0
+                  ? _QueueNotice(
+                      count: appeals.length,
+                      atCap: appeals.length >= QueryLimits.reviewQueue,
+                    )
+                  : _AdminAppealCard(
+                      // Keyed by appeal id, and that is load-bearing rather
+                      // than tidiness. Resolving one appeal shifts every later
+                      // row up, so an unkeyed confirmation could otherwise be
+                      // reused for evidence the admin had not reviewed.
+                      key: ValueKey(appeals[index - 1].id),
+                      appeal: appeals[index - 1],
+                    );
+              return Center(
                 child: ConstrainedBox(
                   constraints: const BoxConstraints(
                     maxWidth: AppTheme.maxDashboardWidth,
                   ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      _QueueNotice(count: appeals.length),
-                      const SizedBox(height: AppTheme.gapMd),
-                      for (final appeal in appeals) ...[
-                        // Keyed by appeal id, and that is load-bearing rather
-                        // than tidiness. `_AdminAppealCardState` holds the
-                        // whole safety gate in local state — `_photoLoaded`
-                        // and the "I reviewed the photograph" `_confirmed`
-                        // tick. Resolving an appeal removes it from this
-                        // stream, so every later appeal shifts up one
-                        // position, and unkeyed reconciliation matches State
-                        // objects by index: the tick an admin gave to appeal
-                        // #1 was reused for appeal #2, arming Uphold and
-                        // Decline on evidence nobody had looked at.
-                        _AdminAppealCard(
-                          key: ValueKey(appeal.id),
-                          appeal: appeal,
-                        ),
-                        const SizedBox(height: AppTheme.gapMd),
-                      ],
-                    ],
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: AppTheme.gapMd),
+                    child: child,
                   ),
                 ),
-              ),
-            ],
+              );
+            },
           );
         },
       ),
@@ -453,9 +449,10 @@ class _EvidencePanel extends StatelessWidget {
 }
 
 class _QueueNotice extends StatelessWidget {
-  const _QueueNotice({required this.count});
+  const _QueueNotice({required this.count, required this.atCap});
 
   final int count;
+  final bool atCap;
 
   @override
   Widget build(BuildContext context) {
@@ -474,7 +471,8 @@ class _QueueNotice extends StatelessWidget {
             const SizedBox(width: AppTheme.gapMd),
             Expanded(
               child: Text(
-                '$count waiting, oldest first. Upholding an appeal records that '
+                '${atCap ? 'At least ' : ''}$count waiting, oldest first. '
+                'Upholding an appeal records that '
                 'the decision was wrong; it credits nothing. The user submits '
                 'again and the verification runs properly — the lockout was '
                 'already released when their submission was rejected.',
@@ -505,7 +503,8 @@ class _DecisionButtons extends ConsumerStatefulWidget {
 }
 
 class _DecisionButtonsState extends ConsumerState<_DecisionButtons> {
-  bool _busy = false;
+  /// Null while idle; otherwise the outcome currently being recorded.
+  bool? _busyUphold;
 
   @override
   Widget build(BuildContext context) {
@@ -525,31 +524,37 @@ class _DecisionButtonsState extends ConsumerState<_DecisionButtons> {
           children: [
             Expanded(
               child: OutlinedButton.icon(
-                onPressed: _busy || !widget.evidenceConfirmed
+                onPressed: _busyUphold != null || !widget.evidenceConfirmed
                     ? null
                     : () => _decide(uphold: false),
-                icon: const Icon(Icons.thumb_down_outlined),
-                label: const Text('Decline'),
+                icon: _busyUphold == false
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.thumb_down_outlined),
+                label: Text(_busyUphold == false ? 'Declining…' : 'Decline'),
               ),
             ),
             const SizedBox(width: AppTheme.gapSm),
             Expanded(
               child: FilledButton.icon(
-                onPressed: _busy || !widget.evidenceConfirmed
+                onPressed: _busyUphold != null || !widget.evidenceConfirmed
                     ? null
                     : () => _decide(uphold: true),
-                icon: _busy
+                icon: _busyUphold == true
                     ? const SizedBox(
                         width: 18,
                         height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2),
                       )
                     : const Icon(Icons.thumb_up_outlined),
-                label: const Text('Uphold'),
+                label: Text(_busyUphold == true ? 'Upholding…' : 'Uphold'),
               ),
             ),
           ],
         ),
+        if (_busyUphold != null) const SlowServerNote(),
       ],
     );
   }
@@ -558,8 +563,8 @@ class _DecisionButtonsState extends ConsumerState<_DecisionButtons> {
     final response = await _askForAnswer(uphold: uphold);
     if (response == null || !mounted) return;
 
-    setState(() => _busy = true);
-    final messenger = ScaffoldMessenger.of(context);
+    setState(() => _busyUphold = uphold);
+    final notify = AppSnackBar.of(context);
     try {
       await ref
           .read(appealActionsProvider)
@@ -568,24 +573,15 @@ class _DecisionButtonsState extends ConsumerState<_DecisionButtons> {
             uphold: uphold,
             response: response,
           );
-      messenger.showSnackBar(
-        SnackBar(content: Text(uphold ? 'Appeal upheld.' : 'Appeal declined.')),
-      );
+      notify.success(uphold ? 'Appeal upheld.' : 'Appeal declined.');
     } on AppealValidationException catch (error) {
-      messenger.showSnackBar(SnackBar(content: Text(error.message)));
+      notify.failure(error.message);
     } catch (error) {
-      messenger.showSnackBar(
-        // Resolving an appeal is a Firestore write the rules can refuse for
-        // several reasons at once, and `$error` handed the administrator the
-        // vendor prefix instead of any of them.
-        SnackBar(
-          content: Text(
-            'The decision was not recorded. ${friendlyErrorMessage(error)}',
-          ),
-        ),
+      notify.failure(
+        'The decision was not recorded. ${friendlyErrorMessage(error)}',
       );
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _busyUphold = null);
     }
   }
 
@@ -634,6 +630,7 @@ class _AnswerDialogState extends State<_AnswerDialog> {
     final problem = AppealModel.validateResponse(_controller.text);
 
     return AlertDialog(
+      scrollable: true,
       title: Text(widget.uphold ? 'Uphold this appeal' : 'Decline this appeal'),
       content: Column(
         mainAxisSize: MainAxisSize.min,

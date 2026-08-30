@@ -89,6 +89,10 @@ class _RejectionReasonDialogState extends State<_RejectionReasonDialog> {
     final remaining = _minLength - _reason.length;
 
     return AlertDialog(
+      // The keyboard and accessibility text can otherwise push the helper
+      // text—and the explanation for a disabled Reject button—below the
+      // viewport with no way to reach it.
+      scrollable: true,
       title: Text(widget.title),
       content: Column(
         mainAxisSize: MainAxisSize.min,

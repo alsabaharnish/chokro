@@ -152,16 +152,22 @@ class _ConfirmButtonState extends ConsumerState<_ConfirmButton> {
 
   @override
   Widget build(BuildContext context) {
-    return FilledButton.icon(
-      onPressed: _busy ? null : _confirm,
-      icon: _busy
-          ? const SizedBox(
-              width: 18,
-              height: 18,
-              child: CircularProgressIndicator(strokeWidth: 2),
-            )
-          : const Icon(Icons.check_circle_outline),
-      label: Text(_busy ? 'Confirming…' : 'Confirm receipt'),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        FilledButton.icon(
+          onPressed: _busy ? null : _confirm,
+          icon: _busy
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              : const Icon(Icons.check_circle_outline),
+          label: Text(_busy ? 'Confirming…' : 'Confirm receipt'),
+        ),
+        if (_busy) const SlowServerNote(),
+      ],
     );
   }
 
@@ -169,6 +175,7 @@ class _ConfirmButtonState extends ConsumerState<_ConfirmButton> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
+        scrollable: true,
         title: const Text('Confirm you received this?'),
         content: const Text(
           'This closes the order and credits your purchase points. It cannot '
