@@ -13,6 +13,33 @@ enum PushPermissionStatus {
   unavailable,
 }
 
+/// Runs both halves of push cleanup independently.
+///
+/// Deleting the Firestore registration can time out while offline. That must
+/// never prevent retiring the FCM token itself: otherwise the same token may be
+/// registered to the next account that signs in on a shared phone while the old
+/// account's device document can still send to it.
+@visibleForTesting
+Future<void> retirePushRegistration({
+  Future<void> Function()? deleteRegistration,
+  required Future<void> Function() deleteMessagingToken,
+  void Function(String step, Object error)? onFailure,
+}) async {
+  Future<void> attempt(String step, Future<void> Function() action) async {
+    try {
+      await action();
+    } catch (error) {
+      onFailure?.call(step, error);
+    }
+  }
+
+  await Future.wait([
+    if (deleteRegistration != null)
+      attempt('device registration', deleteRegistration),
+    attempt('messaging token', deleteMessagingToken),
+  ]);
+}
+
 /// Push notification plumbing (F7.1).
 ///
 /// ## What this class may and may not do
@@ -233,24 +260,32 @@ class PushService {
   /// therefore never signed out, on a handset this file's own notes describe as
   /// often shared or borrowed.
   ///
-  /// A stale device document is a far smaller problem than that: the next
-  /// sign-in re-registers, and `pushMessageProvider` is uid-scoped, so the
-  /// worst case is one unused row.
+  /// The Firestore delete and FCM token retirement are independent. In
+  /// particular, a queued/offline Firestore delete must not skip
+  /// [FirebaseMessaging.deleteToken]; doing so can leave one live token attached
+  /// to both the account that signed out and the next account on a shared phone.
   Future<void> unregisterDevice(String uid) async {
     if (!isSupported || uid.isEmpty) return;
 
+    String? token;
     try {
-      final token = await _fcm.getToken().timeout(_cleanupTimeout);
-      if (token != null && token.isNotEmpty) {
-        await _devices(uid).doc(token).delete().timeout(_cleanupTimeout);
-      }
-      await _fcm.deleteToken().timeout(_cleanupTimeout);
+      token = await _fcm.getToken().timeout(_cleanupTimeout);
     } on TimeoutException {
-      // Offline, or FCM is not answering. Sign out anyway.
-      debugPrint('[push] Device unregistration timed out; signing out anyway.');
+      debugPrint('[push] Reading the token timed out; retiring it anyway.');
     } catch (err) {
-      debugPrint('[push] Device unregistration failed: $err');
+      debugPrint('[push] Reading the token for cleanup failed: $err');
     }
+
+    await retirePushRegistration(
+      deleteRegistration: token == null || token.isEmpty
+          ? null
+          : () => _devices(uid).doc(token).delete().timeout(_cleanupTimeout),
+      deleteMessagingToken: () => _fcm.deleteToken().timeout(_cleanupTimeout),
+      onFailure: (step, error) {
+        final reason = error is TimeoutException ? 'timed out' : 'failed';
+        debugPrint('[push] Retiring the $step $reason: $error');
+      },
+    );
   }
 
   /// Long enough for a healthy round trip, short enough that nobody waits.

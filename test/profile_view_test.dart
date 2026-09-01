@@ -193,12 +193,14 @@ void main() {
       tester,
       user: _user(
         status: AppConstants.statusSuspended,
-        suspendedUntil: DateTime(2026, 9, 1),
+        // Keep this safely in the future: the UI intentionally hides a
+        // temporary-suspension notice once its exact end instant has passed.
+        suspendedUntil: DateTime(2100, 9, 1),
       ),
     );
 
     expect(find.text('Account suspended'), findsOneWidget);
-    expect(find.textContaining('1 Sep 2026'), findsOneWidget);
+    expect(find.textContaining('1 Sep 2100'), findsOneWidget);
   });
 
   testWidgets('an indefinite suspension names no date', (tester) async {

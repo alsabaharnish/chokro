@@ -4,4 +4,8 @@
          to allow setting breakpoints, to provide hot reload, etc.
     -->
     <uses-permission android:name="android.permission.INTERNET"/>
+
+    <!-- Local development uses an HTTP server on the host machine. Keep this
+         exception out of release builds, whose trusted-service URL is HTTPS. -->
+    <application android:usesCleartextTraffic="true"/>
 </manifest>
