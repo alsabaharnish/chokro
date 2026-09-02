@@ -22,7 +22,12 @@ class AppTheme {
 
   /// A warm counterpoint to the emerald. Used sparingly for reward moments so
   /// the product feels like an impact platform rather than a monochrome utility.
-  static const Color reward = Color(0xFFE4A11B);
+  ///
+  /// Prefer `Theme.of(context).colorScheme.reward`, which picks the tone that
+  /// suits the theme. This constant is the light-theme value and is kept only
+  /// for the fixed-palette photocard export, which is always light paper and
+  /// therefore does not want a brightness-aware colour.
+  static const Color reward = Color(0xFFF0B94A);
 
   /// Standard gaps, so vertical rhythm is a choice from a set rather than a
   /// number typed at each call site. The home screen had a doubled `16` and a
@@ -438,4 +443,28 @@ extension AppSemanticColors on ColorScheme {
   Color get onWarningContainer => brightness == Brightness.light
       ? const Color(0xFF3D2F00)
       : const Color(0xFFFFE08A);
+
+  /// The warm accent for a reward moment — today the sparkle beside the points
+  /// balance on Home.
+  ///
+  /// The brightness branch is INVERTED relative to [success] and [warning], and
+  /// that is not a mistake. Those sit on `surface`, which is light in the light
+  /// theme. This one sits on the balance card's `primary` -> `tertiary`
+  /// gradient, and `primary` is a dark emerald (#156348) in the light theme but
+  /// a *light* mint (#8dd5b3) in the dark theme. The surface under this colour
+  /// therefore gets lighter exactly where every other surface gets darker.
+  ///
+  /// Which is what made the previous single constant a defect. `#E4A11B` was
+  /// chosen against the dark emerald, where it measures 3.23:1 and passes the
+  /// 3:1 floor for a meaningful graphic (WCAG 1.4.11). In the dark theme the
+  /// same amber landed on the light mint at **1.31:1** — an invisible icon,
+  /// while `onPrimary` beside it correctly inverted to a dark green. A constant
+  /// cannot be right on both.
+  ///
+  /// Measured against both gradient stops: 4.04:1 light, 4.84:1 dark. The light
+  /// value is also the `gold` the photocard export already uses, so the warm
+  /// accent is now one tone across the product rather than two near-misses.
+  Color get reward => brightness == Brightness.light
+      ? const Color(0xFFF0B94A)
+      : const Color(0xFF6E4600);
 }

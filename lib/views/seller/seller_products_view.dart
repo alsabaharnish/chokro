@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -211,7 +213,8 @@ class _ListingMenu extends ConsumerWidget {
       onSelected: (value) async {
         switch (value) {
           case 'edit':
-            context.push('/seller/products/${product.id}');
+            // `unawaited`: the editor's pop result is not used here.
+            unawaited(context.push('/seller/products/${product.id}'));
           case 'delist':
             await _setActive(context, ref, false);
           case 'relist':

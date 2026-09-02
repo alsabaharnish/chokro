@@ -671,10 +671,13 @@ class _BalanceValue extends StatelessWidget {
       children: [
         Row(
           children: [
-            const Icon(
+            Icon(
               Icons.auto_awesome_rounded,
               size: 16,
-              color: AppTheme.reward,
+              // Scheme-aware: this sits on the balance card's primary gradient,
+              // which is dark emerald in the light theme and light mint in the
+              // dark one. See `AppSemanticColors.reward`.
+              color: theme.colorScheme.reward,
             ),
             const SizedBox(width: 7),
             // Matches what _BalanceValue's number Row already does.

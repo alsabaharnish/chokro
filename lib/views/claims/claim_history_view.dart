@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -75,7 +77,9 @@ class ClaimHistoryView extends ConsumerWidget {
                       return;
                     }
                   }
-                  if (context.mounted) context.push('/claims/new');
+                  // `unawaited`: `push` completes with the new route's pop
+                  // result, which this button has no use for.
+                  if (context.mounted) unawaited(context.push('/claims/new'));
                 },
                 icon: Icon(canLogAction ? Icons.add : Icons.swap_horiz),
                 label: Text(

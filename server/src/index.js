@@ -170,6 +170,20 @@ const verifyLimit = rateLimit({ name: 'verify', windowMs: 60 * 60 * 1000, max: 2
 const photoLimit = rateLimit({ name: 'photos', windowMs: 60 * 60 * 1000, max: 40 });
 const writeLimit = rateLimit({ name: 'writes', windowMs: 60 * 1000, max: 30 });
 
+// Authenticated reads.
+//
+// Set high, because its job is not to meter these endpoints — it is to make sure
+// none of them is *unlimited*. Every authenticated request, including one that
+// goes on to 404, already costs a `verifyIdToken(checkRevoked: true)` round trip
+// to Google plus a `users/{uid}` read before any handler runs (see `auth.js`).
+// An endpoint with no limiter therefore hands one account an unbounded lever on
+// this single free instance even when its own handler is cheap.
+//
+// 60/minute is roughly two orders of magnitude above what the app does: the
+// policy is fetched once per session and cached by `policySnapshotProvider`, and
+// the claim quota is read once before composing a claim.
+const readLimit = rateLimit({ name: 'reads', windowMs: 60 * 1000, max: 60 });
+
 // ---------------------------------------------------------------------------
 // Body parsing
 // ---------------------------------------------------------------------------
@@ -210,7 +224,7 @@ app.get('/health', (req, res) => {
 });
 
 /** Confirms the whole auth path end to end. */
-app.get('/whoami', requireAuth, (req, res) => {
+app.get('/whoami', requireAuth, readLimit, (req, res) => {
   res.json({
     uid: req.user.uid,
     role: req.user.role,
@@ -219,7 +233,7 @@ app.get('/whoami', requireAuth, (req, res) => {
 });
 
 /** Confirms role gating works, separately from authentication. */
-app.get('/admin/ping', requireAuth, requireAdmin, (req, res) => {
+app.get('/admin/ping', requireAuth, requireAdmin, readLimit, (req, res) => {
   res.json({ ok: true, admin: req.user.uid });
 });
 
@@ -419,7 +433,7 @@ app.post('/disposals/:id/verify', requireAuth, verifyLimit, async (req, res) => 
  * Read before composing a claim, so someone at their limit is told before they
  * photograph something rather than after.
  */
-app.get('/claims/quota', requireAuth, async (req, res) => {
+app.get('/claims/quota', requireAuth, readLimit, async (req, res) => {
   try {
     const status = await claimsModule.claimQuotaStatus(req.user.uid);
     return res.json({ ok: true, ...status });
@@ -645,7 +659,7 @@ app.post('/orders/:id/confirm', requireAuth, writeLimit, async (req, res) => {
  * a client write that rules can police and this one is not — so the screen has
  * to report a partial failure honestly rather than pretend the pair was atomic.
  */
-app.post('/sellers/:uid/listings', requireAuth, requireAdmin, async (req, res) => {
+app.post('/sellers/:uid/listings', requireAuth, requireAdmin, writeLimit, async (req, res) => {
   const { visible } = req.body || {};
 
   if (typeof visible !== 'boolean') {
@@ -678,7 +692,7 @@ app.post('/sellers/:uid/listings', requireAuth, requireAdmin, async (req, res) =
  * service trusts when deciding a payout. The QR payload is allocated here too:
  * it has to be unique, and a client cannot guarantee that.
  */
-app.post('/bins', requireAuth, requireAdmin, async (req, res) => {
+app.post('/bins', requireAuth, requireAdmin, writeLimit, async (req, res) => {
   const { label, lat, lng, radiusMeters } = req.body || {};
 
   const problems = binsModule.validateBin({ label, lat, lng, radiusMeters });
@@ -707,7 +721,7 @@ app.post('/bins', requireAuth, requireAdmin, async (req, res) => {
  * Never deletes: past disposals reference their bin, and a dangling reference
  * breaks a user's history and an administrator's ability to review it.
  */
-app.post('/bins/:id/active', requireAuth, requireAdmin, async (req, res) => {
+app.post('/bins/:id/active', requireAuth, requireAdmin, writeLimit, async (req, res) => {
   const { active } = req.body || {};
 
   if (typeof active !== 'boolean') {
@@ -753,7 +767,7 @@ app.post('/bins/:id/active', requireAuth, requireAdmin, async (req, res) => {
  * `updatedByName` is resolved here rather than on the client because the server
  * already holds Admin SDK access; a uid is not something to show a person.
  */
-app.get('/config/points', requireAuth, async (req, res) => {
+app.get('/config/points', requireAuth, readLimit, async (req, res) => {
   const { db } = require('./firebase');
 
   // The whole handler is wrapped, and that is not defensive habit.
@@ -811,7 +825,7 @@ app.get('/config/points', requireAuth, async (req, res) => {
  * Rules cannot express the invariant that matters here — that the claim award
  * stays below the disposal award — so the write goes where that check can run.
  */
-app.post('/config/points', requireAuth, requireAdmin, async (req, res) => {
+app.post('/config/points', requireAuth, requireAdmin, writeLimit, async (req, res) => {
   const { db, serverTimestamp } = require('./firebase');
 
   // `fromRequest`, NOT `fromDoc`. The forgiving reader turned a body of `{}`

@@ -58,7 +58,7 @@ async function seedClaim(claimId, uid, status = 'pending') {
     await setDoc(doc(ctx.firestore(), 'claims', claimId), {
       userId: uid,
       actionType: 'treePlanting',
-      photoUrl: `https://res.cloudinary.com/chokro-test/image/upload/v1/chokro/claims/${uid}/abc123.jpg`,
+      photoUrl: `https://res.cloudinary.com/ata3ir5d/image/upload/v1/chokro/claims/${uid}/abc123.jpg`,
       photoPublicId: `chokro/claims/${uid}/abc123`,
       status,
       createdAt: new Date(),
@@ -69,7 +69,7 @@ async function seedClaim(claimId, uid, status = 'pending') {
 function profilePhoto(uid) {
   return {
     url:
-      `https://res.cloudinary.com/chokro-test/image/upload/v1/` +
+      `https://res.cloudinary.com/ata3ir5d/image/upload/v1/` +
       `chokro/profiles/${uid}/portrait.jpg`,
     publicId: `chokro/profiles/${uid}/portrait`,
   };
@@ -91,7 +91,7 @@ function validClaim(uid) {
   return {
     userId: uid,
     actionType: 'treePlanting',
-    photoUrl: `https://res.cloudinary.com/chokro-test/image/upload/v1/chokro/claims/${uid}/abc123.jpg`,
+    photoUrl: `https://res.cloudinary.com/ata3ir5d/image/upload/v1/chokro/claims/${uid}/abc123.jpg`,
     photoPublicId: `chokro/claims/${uid}/abc123`,
     status: 'pending',
     createdAt: serverTimestamp(),

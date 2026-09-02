@@ -17,6 +17,107 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-09-01 21:30 (+06) — Listing images pinned to this project's Cloudinary account
+
+`validProductImage` in `firestore.rules` matched the account segment of a
+delivery URL as `[^/]+` — any Cloudinary account on the internet — while its own
+comment claimed the URL "must name the authenticated seller's own upload folder
+on the configured host". A seller could open a free Cloudinary account, upload
+under the folder `chokro/products/<their own uid>/`, and publish a listing whose
+bytes they kept control of: swappable after the listing had been seen, and
+logging the address of every buyer who scrolled past it.
+
+Nothing else caught this. A product document is written by the *client*
+(`ProductService.create`), and unlike a disposal or claim photograph — which
+`isTrustedImageReference` re-validates server-side, cloud name included, during
+verification — the server never re-reads a listing's `imageUrls`. These rules
+were the only check there was.
+
+The account is now named once, in `cloudinaryCloud()`, and pinned in all three
+provenance patterns (products, evidence, profile photos). The legitimate path is
+unaffected: every URL the app stores comes from `photoUrl` in this service's own
+upload response.
+
+Release note: this couples the rules to one Cloudinary account, deliberately and
+in a single place. It must equal the server's `CLOUDINARY_CLOUD_NAME`; if the two
+disagree, listing photo writes fail with permission-denied while uploads keep
+succeeding. Any historical listing whose images were served from a different
+account would also become uneditable until its photographs are re-uploaded —
+none exist today, since `.env` and the integration notes both name `ata3ir5d`.
+
+Files: `firestore.rules`, `rules_test/*.js` (fixtures repointed)
+Checks: 233 rules tests pass, up from 232 — the new one asserts a listing whose
+image sits on `attacker-cloud` is refused, which the old pattern accepted.
+
+## 2026-09-01 21:24 (+06) — The reward accent was invisible in the dark theme
+
+`AppTheme.reward` was a single constant, `#E4A11B`, chosen against the balance
+card's light-theme background. That card is painted with a `primary` ->
+`lerp(primary, tertiary, .68)` gradient, and `primary` is a dark emerald
+(`#156348`) in the light theme but a *light* mint (`#8dd5b3`) in the dark one —
+so this is the one accent in the app whose backdrop gets lighter exactly where
+every other surface gets darker. The amber measured 3.23:1 on the light theme's
+emerald and **1.31:1** on the dark theme's mint: an effectively invisible
+sparkle, sitting beside an `onPrimary` label that inverted correctly.
+
+Now a brightness-aware `ColorScheme.reward`, alongside `success` and `warning`
+in the same extension: `#F0B94A` light (4.04:1), `#6E4600` dark (4.84:1). The light
+value is the `gold` the photocard export already uses, so the warm accent is one
+tone across the product rather than two near-misses. The `AppTheme.reward`
+constant stays for the photocard, which is fixed light paper and does not want a
+theme-aware colour.
+
+Files: `lib/core/theme.dart`, `lib/views/home/home_view.dart`,
+`test/ux_hardening_test.dart`
+Checks: 665 Flutter tests pass, up from 663. The two new ones measure the accent
+against both gradient stops in both themes; reverting the constant fails the dark
+case at the measured 1.31.
+
+## 2026-09-01 21:12 (+06) — Rate limits on the eight endpoints that had none
+
+`/whoami`, `/admin/ping`, `GET /claims/quota`, `GET /config/points`,
+`POST /sellers/:uid/listings`, `POST /bins`, `POST /bins/:id/active` and
+`POST /config/points` carried no limiter. Every authenticated request already
+costs a `verifyIdToken(checkRevoked: true)` round trip to Google plus a
+`users/{uid}` read before any handler runs, so an unlimited endpoint hands one
+account an unbounded lever on this single free instance even where its own
+handler is cheap — and `POST /sellers/:uid/listings` sweeps a seller's entire
+catalogue.
+
+The four writes take the existing `writeLimit`. The four reads take a new
+`readLimit`
+of 60/minute, set two orders of magnitude above what the app does: the policy is
+fetched once per session and cached by `policySnapshotProvider`, and the claim
+quota is read once before composing a claim. `/health` and `/photos/limits` stay
+open — both are unauthenticated and constant-cost, and Render pings the former.
+
+Files: `server/src/index.js`
+Checks: 300 server tests pass.
+
+Also added a `chokro-web-static` launch entry serving `build/web`, which is how
+the release bundle was opened for the visual pass — `flutter run -d web-server`
+never reaches first frame without the Dart Debug Extension, so it is not a usable
+preview target here.
+
+## 2026-09-01 21:04 (+06) — `unawaited_futures` was configured but never enabled
+
+`analysis_options.yaml` promoted `unawaited_futures` to `warning` under
+`analyzer: errors:`, with the comment "a dropped future is a silently swallowed
+failure". That section only changes the severity of a diagnostic already being
+produced, and the rule is in neither `flutter_lints` nor the
+`lints/recommended.yaml` it includes — so the guard had never once fired. A probe
+file with a plainly dropped future analysed clean.
+
+Enabling it found four dropped futures, all deliberate: two
+`SemanticsService.sendAnnouncement` calls that must not delay the auth call
+behind them, and two `context.push` results neither caller uses. All four are now
+`unawaited(...)`, which is what keeps the rule useful for the next one.
+
+Files: `analysis_options.yaml`, `lib/views/auth/login_view.dart`,
+`lib/views/auth/register_view.dart`, `lib/views/claims/claim_history_view.dart`,
+`lib/views/seller/seller_products_view.dart`
+Checks: `flutter analyze` clean with the rule live.
+
 ## 2026-08-26 11:47 (+06) — A launch config for the trusted service
 
 Registering a bin failed with "Could not reach the server. It may be offline,

@@ -343,6 +343,36 @@ void main() {
           greaterThanOrEqualTo(4.5),
         );
       });
+
+      test('$mode: the reward accent reads on the balance card gradient', () {
+        // Not measured against `surface`, unlike every other colour in this
+        // group. The reward sparkle is painted on Home's balance card, whose
+        // background is a `primary` -> lerp(`primary`, `tertiary`, .68)
+        // gradient — and `primary` is a dark emerald in the light theme but a
+        // light mint in the dark one. So this is the one accent whose backdrop
+        // gets *lighter* as the theme gets darker, and the only honest test is
+        // against the two gradient stops themselves.
+        //
+        // The regression: a single `AppTheme.reward = #E4A11B` constant, chosen
+        // against the light theme's dark emerald, measured 1.31:1 on the dark
+        // theme's light mint. An invisible icon, beside a label whose own colour
+        // inverted correctly.
+        //
+        // 3.0 is the floor because this is a meaningful graphic, not text
+        // (WCAG 1.4.11). Both themes clear it with margin — 4.04 and 4.84 — so a
+        // regression trips this well before anything becomes unreadable.
+        final stops = <Color>[
+          scheme.primary,
+          Color.lerp(scheme.primary, scheme.tertiary, .68)!,
+        ];
+        for (final stop in stops) {
+          expect(
+            _contrast(scheme.reward, stop),
+            greaterThanOrEqualTo(3.0),
+            reason: 'reward on a $mode balance-card gradient stop',
+          );
+        }
+      });
     }
   });
 

@@ -9,8 +9,25 @@
     {
       "name": "chokro-server",
       "runtimeExecutable": "sh",
-      "runtimeArgs": ["-c", "cd server && npm run dev"],
+      "runtimeArgs": [
+        "-c",
+        "cd server && npm run dev"
+      ],
       "port": 8787
+    },
+    {
+      "name": "chokro-web-static",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": [
+        "-m",
+        "http.server",
+        "5002",
+        "--bind",
+        "127.0.0.1",
+        "--directory",
+        "build/web"
+      ],
+      "port": 5002
     }
   ]
 }

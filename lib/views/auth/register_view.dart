@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter/services.dart';
@@ -43,11 +45,14 @@ class _RegisterViewState extends ConsumerState<RegisterView> {
     if (!_formKey.currentState!.validate()) return;
 
     // See login_view: a live region on a newly inserted node is not reliably
-    // announced on iOS, so the wait is spoken explicitly too.
-    SemanticsService.sendAnnouncement(
-      View.of(context),
-      'Creating your account…',
-      Directionality.of(context),
+    // announced on iOS, so the wait is spoken explicitly too. Dispatched, not
+    // awaited — it must not delay the sign-up call behind it.
+    unawaited(
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        'Creating your account…',
+        Directionality.of(context),
+      ),
     );
 
     await ref

@@ -57,7 +57,7 @@ async function seedUser(uid, role, status = 'active', extra = {}) {
 
 function imageUrl(uid, name = 'photo1') {
   return (
-    'https://res.cloudinary.com/chokro-test/image/upload/v1/chokro/products/' +
+    'https://res.cloudinary.com/ata3ir5d/image/upload/v1/chokro/products/' +
     `${uid}/${name}.jpg`
   );
 }
@@ -296,6 +296,32 @@ describe('creating a product', () => {
       setDoc(
         doc(db, 'products', 'p10'),
         validProduct(SELLER, { imageUrls: ['https://example.com/tracker.jpg'] }),
+      ),
+    );
+  });
+
+  it('an image on somebody else own Cloudinary account is refused', async () => {
+    // The regression this pins.
+    //
+    // The pattern's account segment used to be `[^/]+`, which matched any
+    // Cloudinary account on the internet — so this document was *accepted*. A
+    // seller only had to open a free account and upload under the folder
+    // `chokro/products/<their own uid>/` to publish a listing whose bytes they
+    // kept control of: swappable after any review, and logging the address of
+    // every buyer who scrolled past it.
+    //
+    // Nothing else catches this. A product document is written by the client and
+    // the server never re-reads its `imageUrls`, unlike a disposal photograph.
+    const db = testEnv.authenticatedContext(SELLER).firestore();
+    await assertFails(
+      setDoc(
+        doc(db, 'products', 'p9b'),
+        validProduct(SELLER, {
+          imageUrls: [
+            'https://res.cloudinary.com/attacker-cloud/image/upload/v1/' +
+              `chokro/products/${SELLER}/photo1.jpg`,
+          ],
+        }),
       ),
     );
   });

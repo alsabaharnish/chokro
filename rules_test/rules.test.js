@@ -103,7 +103,7 @@ describe('users', () => {
         status: 'active',
         createdAt: serverTimestamp(),
         profilePhotoUrl:
-          `https://res.cloudinary.com/chokro-test/image/upload/v1/` +
+          `https://res.cloudinary.com/ata3ir5d/image/upload/v1/` +
           `chokro/profiles/${ALICE}/portrait.jpg`,
         profilePhotoPublicId: `chokro/profiles/${ALICE}/portrait`,
       }),
@@ -185,7 +185,7 @@ describe('users', () => {
     await assertFails(
       updateDoc(doc(db, 'users', ALICE), {
         profilePhotoUrl:
-          `https://res.cloudinary.com/chokro-test/image/upload/v1/` +
+          `https://res.cloudinary.com/ata3ir5d/image/upload/v1/` +
           `chokro/profiles/${ALICE}/portrait.jpg`,
         profilePhotoPublicId: `chokro/profiles/${ALICE}/portrait`,
       }),
@@ -198,7 +198,7 @@ describe('users', () => {
     await testEnv.withSecurityRulesDisabled(async (ctx) => {
       await updateDoc(doc(ctx.firestore(), 'users', ALICE), {
         profilePhotoUrl:
-          `https://res.cloudinary.com/chokro-test/image/upload/v1/` +
+          `https://res.cloudinary.com/ata3ir5d/image/upload/v1/` +
           `chokro/profiles/${ALICE}/portrait.jpg`,
         profilePhotoPublicId: `chokro/profiles/${ALICE}/portrait`,
       });

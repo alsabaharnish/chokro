@@ -78,7 +78,7 @@ function validDisposal(uid, binId = OPEN_BIN) {
   return {
     userId: uid,
     binId,
-    photoUrl: `https://res.cloudinary.com/chokro-test/image/upload/v1/chokro/disposals/${uid}/abc123.jpg`,
+    photoUrl: `https://res.cloudinary.com/ata3ir5d/image/upload/v1/chokro/disposals/${uid}/abc123.jpg`,
     photoPublicId: `chokro/disposals/${uid}/abc123`,
     capturedLat: 23.7809,
     capturedLng: 90.4074,

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/semantics.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -125,10 +127,14 @@ class _LoginViewState extends ConsumerState<LoginView> {
     // Spoken as well as marked `liveRegion`: a live region on a node that is
     // newly *inserted*, rather than one whose label changes, is not reliably
     // announced on iOS.
-    SemanticsService.sendAnnouncement(
-      View.of(context),
-      'Signing in…',
-      Directionality.of(context),
+    // `unawaited`: the announcement is dispatched to the platform channel and
+    // must not delay the sign-in call behind it.
+    unawaited(
+      SemanticsService.sendAnnouncement(
+        View.of(context),
+        'Signing in…',
+        Directionality.of(context),
+      ),
     );
 
     await ref

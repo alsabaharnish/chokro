@@ -42,6 +42,14 @@ linter:
   # `// ignore_for_file: name_of_lint` syntax on the line or in the file
   # producing the lint.
   rules:
+    # Enabled here, not just promoted in `analyzer: errors:` above.
+    #
+    # `errors:` only changes the severity of a diagnostic that is already being
+    # produced. `unawaited_futures` is not in `flutter_lints` (nor in the
+    # `lints/recommended.yaml` it includes), so the promotion above silently did
+    # nothing for as long as it has been there: a probe file with a plainly
+    # dropped future analysed clean. The rule has to be turned on to exist.
+    - unawaited_futures
     # avoid_print: false  # Uncomment to disable the `avoid_print` rule
     # prefer_single_quotes: true  # Uncomment to enable the `prefer_single_quotes` rule
 
