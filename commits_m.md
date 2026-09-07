@@ -17,6 +17,126 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-09-08 01:21 (+06) — SDG impact dashboard with honest reporting boundaries
+
+The Admin dashboard now opens with a dedicated SDG impact view and retains the
+operational platform data as a second tab, without adding another cramped mobile
+navigation destination. It maps Chokro's recorded activity to SDG targets 8.3,
+11.6, 12.5 and 13.3 while stating the important limit plainly: these are
+operational signals, not official UN indicators or proof of environmental or
+economic outcomes. Overlapping goal cards are therefore not summed, and the UI
+does not invent kilograms diverted, emissions avoided, jobs or income.
+
+The reporting path now distinguishes server-confirmed data from cached data and
+labels the paginated account total as a bounded minimum when appropriate. A
+missing stats document in a cold cache no longer flashes a false zero; stats and
+account failures are isolated so one cannot hide the other or disable admin
+shortcuts; temporary suspension totals expire on time without waiting for a
+Firestore update; negative or malformed counters are clamped to zero; all
+counters participate in activity detection; and the ambiguous `Sales value`
+label is now `Order value placed`. Responsive card sizing, large-text behavior,
+contrast, hover feedback and methodology disclosure were hardened as part of the
+same pass.
+
+The product brief is now v3.2 with feature F5.5 and NFR-13, the README documents
+the two-tab flow, a field-level SDG integration note records provenance and claim
+boundaries, and the business brief is now v2.1 with the same plain-language
+methodology. No Firestore schema, rule or index migration is required.
+
+Files: `lib/models/sdg_impact_model.dart`, `lib/models/stats_model.dart`,
+`lib/core/label_format.dart`, `lib/services/stats_service.dart`,
+`lib/services/user_service.dart`, `lib/controllers/dashboard_controller.dart`,
+`lib/views/admin/admin_dashboard_view.dart`,
+`lib/views/admin/sdg_dashboard.dart`, dashboard/model/format tests,
+`Chokro_Mobile_Project_Brief v3.md`, `README.md`,
+`INTEGRATION_NOTES_SDG_DASHBOARD.md`, `business/What-Chokro-Is.docx`.
+Checks: `flutter analyze lib test` clean · `flutter test` 687 pass ·
+`npm test --prefix server -- --runInBand` 308 pass · `flutter build web`
+succeeds · final 24-page business brief render visually inspected.
+
+## 2026-09-05 18:41 (+06) — iOS push notifications restored after an Xcode capability toggle
+
+`aps-environment` had been stripped from `ios/Runner/Runner.entitlements` and
+`com.apple.Push` from the target's `SystemCapabilities`, staged and ready to
+commit. Without the entitlement the app cannot register with APNs, so
+`firebase_messaging` never receives an APNS token, `getToken()` returns nothing,
+and every path in F7.1 — award, rejection reason, appeal outcome — goes silently
+undelivered on iOS while `push_service.dart`, `push_controller.dart` and
+`server/src/push.js` all continue to behave as though it worked.
+
+Read as accidental rather than intended, because the removal is exactly two
+lines wide. `4081f7a` had turned iOS push on as one coordinated change —
+entitlements file, `CODE_SIGN_ENTITLEMENTS` across all three configurations,
+`APS_ENVIRONMENT` per configuration, `remote-notification` in `Info.plist`,
+both capabilities, deployment target 15.0 — and added
+`test/native_release_config_test.dart` in the same commit to hold every one of
+them. What was removed is the pair Xcode itself deletes when the Push
+Notifications capability is switched off in Signing & Capabilities, and nothing
+else: the three `APS_ENVIRONMENT` settings now expanded into nothing,
+`CODE_SIGN_ENTITLEMENTS` still pointed at an empty plist, `remote-notification`
+was still declared, and the tripwire written alongside the capability was left
+in place, failing. A decision to drop iOS push would have taken those with it.
+
+Both lines restored; the files now match `4081f7a` exactly. Note for whoever
+hits this again: the Push Notifications capability needs a paid Apple Developer
+Program membership, and a personal team gets an automatic-signing fix-it
+offering to disable it. That toggle is fine to make locally and must not be
+staged — `native_release_config_test.dart` is what catches it.
+Files: `ios/Runner/Runner.entitlements`, `ios/Runner.xcodeproj/project.pbxproj`.
+Checks: `flutter test` 675 pass, 0 failures — clearing the pre-existing failure
+recorded in the two entries below.
+
+## 2026-09-05 18:27 (+06) — Registration could hang forever on a slow connection
+
+`Create account` had no deadline on the half of registration that needs one.
+Offline persistence is enabled app-wide, which makes `WriteBatch.commit()`
+resolve on the server's acknowledgement rather than on the local write, so on a
+connection that never delivers it neither returned nor threw. `signUp` awaits
+it, so three things followed: the button spun indefinitely with no error; the
+rollback in `signUp`'s `catch` never ran, leaving a Firebase account with no
+profile; and `authControllerProvider` stayed `AsyncLoading`, which is the flag
+`AppShell`, `StartupErrorView` and `AccountIncompleteView` all read to disable
+their sign-out buttons — so a stalled registration locked every way out of the
+account it had half-created. `push_service.dart` documents this exact trap for
+an offline delete and bounds it; the registration path had been left unbounded.
+The profile write and the rollback delete now both have deadlines, and a
+timeout is reported as a message naming the step that timed out.
+
+Separately, the router left `/register` the moment the Firebase account
+existed — before the profile write it was waiting on. That disposed
+`RegisterView`, taking the spinner and, in the failure branch, the `AppSnackBar`
+that fires only `if (mounted)`: a slow registration that failed reported nothing
+at all. Whether the user was then bounced to `/account-incomplete` or `/login`
+depended on which of the listener and the write came back first. The gate now
+distinguishes a profile that is missing because something broke from one that is
+missing because it has not been written yet, and holds the form in place until
+registration ends either way.
+Files: `lib/services/user_service.dart`, `lib/controllers/auth_controller.dart`,
+`lib/routing/router.dart`, `test/registration_stall_test.dart` (new).
+Checks: `flutter analyze` clean · `flutter test` 674 pass, 1 pre-existing
+failure in `native_release_config_test.dart` from the emptied
+`Runner.entitlements` in the working tree (unrelated, as in the entry below).
+
+## 2026-09-03 21:38 (+06) — Points no longer awarded for waste that never went in the bin
+
+Screening now asks the two questions the disposal award actually rests on —
+is a bin visible, and is the waste in it — and `decide()` flags `noBinVisible`
+/ `wasteNotInBin` when the answer is not a clear yes, including when the model
+does not answer at all. Previously a sharp photo of the declared waste held in
+hand at the bin passed the geofence, the duplicate check, the type match and
+the confidence threshold, so it auto-approved and paid out. Both flags are
+advisory: an administrator can still approve a bin the model missed. Capture
+guidance now asks for the photo the check requires, and the review queue shows
+the screen's verdict beside the photograph.
+Files: `server/src/screen.js`, `server/src/decide.js`, `server/src/verify.js`,
+`server/src/award.js`, `lib/models/disposal_model.dart`,
+`lib/views/disposal/photo_view.dart`, `lib/views/admin/admin_disposals_view.dart`,
+server + Flutter tests.
+Checks: `npm test --prefix server` 308 pass · `flutter analyze` clean ·
+`flutter test` 666 pass, 1 pre-existing failure in
+`native_release_config_test.dart` from the emptied `Runner.entitlements` in the
+working tree (unrelated).
+
 ## 2026-09-01 21:30 (+06) — Listing images pinned to this project's Cloudinary account
 
 `validProductImage` in `firestore.rules` matched the account segment of a

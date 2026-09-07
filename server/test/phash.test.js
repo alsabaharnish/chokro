@@ -364,7 +364,12 @@ describe('an uncomputable hash must not auto-approve', () => {
       confidence: 0.9,
       itemCount: 3,
       itemTypeMatches: true,
-      notes: 'Bottles beside a bin.',
+      // Required for an auto-approval, so stated here: this fixture is about
+      // the hash check, and it should isolate that rather than trip the
+      // bin-disposal check as a side effect.
+      binVisible: true,
+      wasteInBin: true,
+      notes: 'Bottles going into the bin.',
     },
     approvedToday: 0,
     dailyCap: 3,

@@ -134,18 +134,11 @@ String itemCount(int? count) {
   return count == 1 ? '1 item' : '$count items';
 }
 
-/// `1250` -> `৳1,250`.
-///
-/// Whole taka, with a thousands separator and no decimal part. Prices, discounts
-/// and payable amounts are integers throughout (§7.3) — the points economy is
-/// integer arithmetic end to end, and a displayed `৳1250.00` would imply a
-/// precision the schema does not carry.
-///
 /// Grouping is done by hand rather than through `intl`'s `NumberFormat`, which
 /// would need a locale and would place separators by that locale's convention.
 /// The interface language is English (NFR-8) and the currency is fixed, so one
 /// rule applied consistently is more predictable than one resolved at runtime.
-String formatTaka(int amount) {
+String _groupWholeNumber(int amount) {
   final negative = amount < 0;
   final digits = amount.abs().toString();
 
@@ -155,7 +148,25 @@ String formatTaka(int amount) {
     buffer.write(digits[i]);
   }
 
-  return '${negative ? '-' : ''}৳$buffer';
+  return '${negative ? '-' : ''}$buffer';
+}
+
+/// `1250` -> `1,250`.
+///
+/// Dashboard counters use the same stable English grouping as whole-taka
+/// values. Grouping makes long live counters scannable and gives them more
+/// natural wrap points on narrow screens.
+String formatCount(int count) => _groupWholeNumber(count);
+
+/// `1250` -> `৳1,250`.
+///
+/// Whole taka, with a thousands separator and no decimal part. Prices, discounts
+/// and payable amounts are integers throughout (§7.3) — the points economy is
+/// integer arithmetic end to end, and a displayed `৳1250.00` would imply a
+/// precision the schema does not carry.
+String formatTaka(int amount) {
+  final grouped = _groupWholeNumber(amount);
+  return grouped.startsWith('-') ? '-৳${grouped.substring(1)}' : '৳$grouped';
 }
 
 /// `1` -> `1 order`, `3` -> `3 orders`.

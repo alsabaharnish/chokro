@@ -77,9 +77,19 @@ class DisposalPhotoView extends ConsumerWidget {
 
                 Text('Your photo', style: theme.textTheme.titleMedium),
                 const SizedBox(height: 4),
+                // This wording is load-bearing, not decoration.
+                //
+                // It used to read "show the items and the bin in one frame",
+                // which describes a photo of waste standing *next to* a bin —
+                // and screening now flags exactly that for review, because the
+                // award is for using the bin, not for being at one. Asking for
+                // the wrong photo and then flagging it would punish honest
+                // users for following the instructions.
                 Text(
-                  'Show the items and the bin in one frame. This is what a '
-                  '3ZERO Admin sees if your submission needs review.',
+                  'Photograph the items going into the bin — inside it, or '
+                  'mid-drop. Waste held in your hand or resting beside the bin '
+                  'will be held for a 3ZERO Admin to review instead of being '
+                  'credited straight away.',
                   style: theme.textTheme.bodySmall,
                 ),
                 const SizedBox(height: 12),

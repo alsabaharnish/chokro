@@ -218,6 +218,24 @@ class _DisposalCard extends ConsumerWidget {
                   value:
                       '${formatDistance(disposal.distanceMeters)} (reported)',
                 ),
+                // What the screen made of the bin itself.
+                //
+                // The flags below say a photograph failed this check; this row
+                // says the check ran and passed, which is the difference
+                // between "the machine agrees the waste went in" and "nobody
+                // asked". A reviewer approving a flagged submission is
+                // overriding this line, so it belongs beside the photograph.
+                if (disposal.screenBinVisible != null ||
+                    disposal.screenWasteInBin != null)
+                  _Fact(
+                    icon: Icons.delete_sweep_outlined,
+                    label: 'In bin',
+                    value: disposal.screenWasteInBin == true
+                        ? 'Screen saw the waste in the bin'
+                        : disposal.screenBinVisible == true
+                        ? 'Bin seen, but not the waste going in'
+                        : 'No bin seen in the photo',
+                  ),
                 if (disposal.createdAt != null)
                   _Fact(
                     icon: Icons.schedule,

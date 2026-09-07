@@ -50,6 +50,20 @@ void main() {
       const skewed = PlatformStats(ordersCreated: 1, ordersConfirmed: 4);
       expect(skewed.ordersOpen, 0);
     });
+
+    test('activity detection includes claim-only and donation-only pilots', () {
+      expect(
+        const PlatformStats(claimsRejected: 1).hasAnyCounterActivity,
+        isTrue,
+      );
+      expect(
+        const PlatformStats(
+          prototypeDonationsReceived: 1,
+        ).hasAnyCounterActivity,
+        isTrue,
+      );
+      expect(PlatformStats.empty.hasAnyCounterActivity, isFalse);
+    });
   });
 
   test('tolerates counters stored as doubles', () {
@@ -84,5 +98,24 @@ void main() {
   test('ignores a counter stored with a nonsense type', () {
     final stats = PlatformStats.fromMap({'pointsIssued': 'lots'});
     expect(stats.pointsIssued, 0);
+  });
+
+  test('ignores negative counters instead of presenting negative activity', () {
+    final stats = PlatformStats.fromMap({
+      'disposalsApproved': -4,
+      'salesPayable': -1200.0,
+    });
+
+    expect(stats.disposalsApproved, 0);
+    expect(stats.salesPayable, 0);
+    expect(stats.hasAnyCounterActivity, isFalse);
+  });
+
+  test('retains snapshot provenance outside the Firestore layer', () {
+    final stats = PlatformStats.fromMap({
+      'pointsIssued': 10,
+    }, isFromCache: true);
+
+    expect(stats.isFromCache, isTrue);
   });
 }

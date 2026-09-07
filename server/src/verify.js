@@ -348,11 +348,18 @@ async function verifyDisposal({ disposalId, callerUid }) {
     ? {
         screenConfidence: screening.confidence ?? null,
         screenItemCount: screening.itemCount ?? null,
+        // The two that decide whether the waste reached the bin. Stored so a
+        // reviewer can see the machine's answer beside the photograph, and so
+        // a disputed award can be audited against what was actually screened.
+        screenBinVisible: screening.binVisible ?? null,
+        screenWasteInBin: screening.wasteInBin ?? null,
         screenNotes: screening.notes ?? null,
       }
     : {
         screenConfidence: null,
         screenItemCount: null,
+        screenBinVisible: null,
+        screenWasteInBin: null,
         screenNotes: null,
       };
 

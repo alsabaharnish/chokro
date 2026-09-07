@@ -138,6 +138,11 @@ class _AuthGateListenable extends ChangeNotifier {
       currentUserProvider,
       (_, _) => _refresh(),
     );
+    // The third gate-relevant fact. `resolve()` reads it, so a change to it can
+    // change where a visitor belongs — and anything `redirect` reads without
+    // being listened to here is a redirect pass that never runs. It is what
+    // returns a failed registration from `/register` to wherever it belongs.
+    _ref.listen<bool>(registrationInFlightProvider, (_, _) => _refresh());
   }
 
   final Ref _ref;
@@ -174,6 +179,7 @@ class _AuthGateListenable extends ChangeNotifier {
 
     if (profile.isLoading) return 'profile:unresolved';
     if (profile.hasError) return 'profile:failed';
+    if (_ref.read(registrationInFlightProvider)) return 'profile:provisioning';
     return 'profile:missing';
   }
 }
@@ -287,7 +293,15 @@ final routerProvider = Provider<GoRouter>((ref) {
     // A failed read is not evidence that the document does not exist.
     if (profile.hasError) return (gate: _Gate.failed, user: null);
 
-    // Settled, signed in, and `users/{uid}` does not exist.
+    // Settled, signed in, and `users/{uid}` does not exist. Which is the normal
+    // middle of a registration, not evidence of a broken account: `signUp`
+    // creates the Firebase account first and writes the profile second, and the
+    // auth stream reports in between. Only once nobody is still writing it does
+    // an absent profile mean what this gate takes it to mean.
+    if (ref.read(registrationInFlightProvider)) {
+      return (gate: _Gate.unresolved, user: null);
+    }
+
     return (gate: _Gate.profileMissing, user: null);
   }
 
@@ -390,6 +404,21 @@ final routerProvider = Provider<GoRouter>((ref) {
 
       switch (gate) {
         case _Gate.unresolved:
+          // A registration in progress stays on its own form.
+          //
+          // The splash is the right place to wait for a session we are only
+          // *reading*. It is the wrong place to wait for one we are writing:
+          // replacing `/register` mid-submit disposes `RegisterView`, and with
+          // it both the button's "Creating your account…" spinner and the
+          // `AppSnackBar` that reports failure — `_submit` guards that on
+          // `mounted`, so a slow registration that failed said nothing at all.
+          //
+          // Staying put also means the two endings need no special handling.
+          // Success resolves to `_Gate.signedIn`, whose branch already treats an
+          // auth route as somewhere to leave. Failure resolves to
+          // `_Gate.anonymous`, whose branch already returns null for one.
+          final provisioning = ref.read(registrationInFlightProvider);
+          if (isAuthRoute && provisioning) return null;
           // Hold on the splash. Anywhere else would either flash the login
           // screen at a signed-in user or show a shell with no data in it.
           if (isSplash) return null;

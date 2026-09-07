@@ -4,8 +4,8 @@
 **Student:** Arnish (solo project)
 **Platform:** Flutter (Android + Web, single codebase) + Node service
 **Repository:** `https://github.com/alsabaharnish/chokro`
-**Document version:** 3.1 — role identity, multi-profile navigation, point
-donations, and prototype online payments complete
+**Document version:** 3.2 — SDG-aligned Admin reporting, explicit data
+provenance, and dashboard resilience complete
 
 > Formerly titled *EcoPoint360*. The product is now **Chokro**. Older drafts of
 > this document circulate under the previous name; this file supersedes them.
@@ -38,6 +38,13 @@ authorization schema:
 | Greenpreneur pathway | A Champion can learn what a Greenpreneur does and submit the existing application (stored in `sellerApplications`); duplicate pending applications are blocked |
 | Initiative support | A Champion can donate earned points to a selected 3ZERO green initiative through the trusted service |
 | Prototype online payments | Orders and initiative support can simulate bKash, Nagad, or card payment without collecting credentials or moving real money |
+
+Version 3.2 adds a two-tab Admin dashboard: an SDG-aligned contribution view and
+the existing platform-operations view. The SDG layer derives only from counters
+the product already records, labels cached or bounded reads, and deliberately
+does not invent weight, carbon, employment, income, or progress-to-target
+figures. It also fixes stale temporary-suspension counts and keeps independently
+healthy account totals and Admin shortcuts visible if platform counters fail.
 
 The persisted `users.role` values remain `admin`, `seller`, and `buyer`, and
 existing field names such as `sellerId` and `buyerId` remain unchanged. They are
@@ -200,13 +207,22 @@ management. It makes one link in the chain — the individual's decision at the
 point of disposal — measurable and rewarded, and it routes the resulting value
 toward local sustainable production instead of out of the community.
 
+The Admin dashboard now relates these recorded activities to selected UN
+Sustainable Development Goal targets: entrepreneurship and small-enterprise
+participation to [Target 8.3](https://sdgs.un.org/goals/goal8), the verified
+disposal flow to [Target 11.6](https://sdgs.un.org/goals/goal11), disposal and
+sustainable-product ordering to [Target 12.5](https://sdgs.un.org/goals/goal12),
+and reviewed eco-actions and initiative participation to
+[Target 13.3](https://sdgs.un.org/goals/goal13). These are Chokro contribution
+signals, not official UN indicators, audited outcomes, or an SDG progress score.
+
 ### 3.6 Account roles and profiles
 
 | Stored role | User-facing profile | Profiles held | Primary goals |
 |---|---|---|---|
 | `buyer` | 3ZERO Champion | Champion | Dispose of waste, earn and spend points, purchase from Greenpreneurs, support green initiatives, and learn about becoming a Greenpreneur |
 | `seller` | 3ZERO Greenpreneur | Greenpreneur + Champion | All Champion capabilities, plus list products, manage inventory, fulfil orders, and advance order status |
-| `admin` | 3ZERO Admin | Admin + Greenpreneur + Champion | All Greenpreneur and Champion capabilities, plus register bins, review submissions and applications, manage accounts and policy, and view platform statistics |
+| `admin` | 3ZERO Admin | Admin + Greenpreneur + Champion | All Greenpreneur and Champion capabilities, plus register bins, review submissions and applications, manage accounts and policy, and review platform operations and SDG-aligned contribution signals |
 
 A single `User` entity still carries one authoritative `role` field. Profiles are
 an inclusive, user-facing workspace model derived from that role; they are not
@@ -468,7 +484,7 @@ shared, a second view tree is roughly a day of work per screen.
 | Champion initiative support | ✅ | ✅ | Point debit or clearly labelled prototype online donation |
 | Bin registration + QR generation | ✅ primary | ✅ | Mobile-first: GPS captured on site |
 | 3ZERO Admin review queues | ✅ | ✅ primary | Table on web, card list on mobile |
-| 3ZERO Admin dashboard | ✅ | ✅ primary | Stat cards stack on mobile |
+| 3ZERO Admin dashboard | ✅ | ✅ primary | SDG impact and Platform data tabs; cards reflow to one column on narrow screens |
 | Points policy editor | ✅ | ✅ primary | Form; web is more comfortable |
 
 **Where web stays preferred, and why:** printing a QR to paper is a print dialog
@@ -495,7 +511,7 @@ wide table; dashboard density suits side-by-side comparison.
 | `claimQuotas` | Document ID `{userId}_{isoWeek}`, field `count` |
 | `lockouts` | Document ID `{userId}_{binId}`, field `expiresAt` |
 | `config/points` | The runtime points policy — see §7.3 |
-| `stats` | Single document (`stats/platform`) holding running counters for the Admin dashboard, including point-economy, disposal/claim, and order totals. Prototype donation amount/count use separately named counters and are never shown as real funds |
+| `stats` | Single document (`stats/platform`) holding running counters for the Admin dashboard, including point-economy, disposal/claim, order, and initiative-contribution totals. The SDG view derives conservative contribution signals from these existing fields; it adds no stored SDG score. Prototype donation amount/count use separately named counters and are never shown as real funds |
 | `appeals` | `userId`, `subjectType` (disposal/claim), `subjectId`, `message`, `status` (pending/upheld/declined), `response`, `reviewedBy`, `reviewedAt`, `createdAt` |
 
 ### 6.1 The `disposals` document
@@ -639,7 +655,19 @@ submissions, awards, orders, and donations, rather than reading whole
 collections. Outstanding points are `max(0, issued - redeemed - donated)`.
 Account profile totals are inclusive live counts: every account is a Champion,
 stored roles `seller` and `admin` count as Greenpreneurs, and only `admin` counts
-as 3ZERO Admin.
+as 3ZERO Admin. `ordersCreated` means orders placed, and `salesPayable` means the
+payable value recorded at checkout after points; neither field proves completed
+sales, paid income, or enterprise growth.
+
+The SDG dashboard is a read-only interpretation layer over those counters. It
+shows all-time operational signals for Targets 8.3, 11.6, 12.5, and 13.3, with a
+methodology sheet beside the numbers. An approved disposal may legitimately
+align with both Goals 11 and 12, so goal-card values are never summed into a
+single impact total. Firestore cache metadata and the bounded account-directory
+read are surfaced in the interface: a cache-only missing snapshot is an
+unavailable state rather than an authoritative zero, cached figures are labelled,
+and a capped account count is shown as a floor. Snapshot provenance is client
+metadata and is not stored in `stats/platform`.
 
 **Order status ownership.** `pending` on creation, `shipped` and `delivered` set
 by the Greenpreneur, `confirmed` set by the **Champion** — and only `confirmed`
@@ -647,7 +675,7 @@ releases purchase points. A Greenpreneur cannot confirm their own delivery.
 
 ---
 
-## 7. Scope — 40 features
+## 7. Scope — 41 features
 
 ### FR-1 Identity and roles
 
@@ -721,6 +749,7 @@ payment data.
 | F5.2 | User suspension and reinstatement | Both (web primary) | ✅ M3 |
 | F5.3 | **Temporary suspension with an expiry** | Both (web primary) | M2 |
 | F5.4 | **User appeal against a rejection** | Both | ✅ M3 |
+| F5.5 | SDG-aligned contribution dashboard with methodology and source provenance | Both (web primary) | ✅ v3.2 |
 
 ### FR-6 Self-reported eco-actions
 
@@ -798,9 +827,10 @@ chosen contribution`
 
 **Governance loop (Admin).**
 `Champion applies for Greenpreneur role → Admin reviews → role changes on
-approval → Admin monitors dashboard statistics → tunes the points policy → suspends an account on
-misuse, permanently or with an expiry → suspended account is blocked at the rules
-layer and at the server, not only in the UI → user may appeal a rejection`
+approval → Admin reviews SDG-aligned contribution signals and platform data with
+their provenance → tunes the points policy → suspends an account on misuse,
+permanently or with an expiry → suspended account is blocked at the rules layer
+and at the server, not only in the UI → user may appeal a rejection`
 
 The spend loop terminates by *crediting* the wallet, which is what makes the two
 loops a cycle rather than a pipeline. This must be demonstrable in one continuous
@@ -949,6 +979,7 @@ endpoint's immediate response; Admin reporting uses aggregate counters.
 | NFR-10 | **The server never logs credential content.** Parse failures report length and first character only |
 | NFR-11 | Profile and donation selectors and the bin QR dialog remain keyboard-, screen-reader-, and touch-usable without layout failures or semantics mutation during a render pass |
 | NFR-12 | User-facing copy uses 3ZERO Admin, 3ZERO Greenpreneur, and 3ZERO Champion; legacy role words remain only in technical wire names or historical context |
+| NFR-13 | SDG reporting distinguishes operational contribution signals from official indicators and audited outcomes; never estimates kilograms, tonnes, avoided emissions, jobs, or income without source data, and always labels cached or bounded values |
 
 ---
 
@@ -1216,6 +1247,43 @@ server-verified callback before setting `paymentStatus=paid`.
 **Verification snapshot:** `flutter analyze lib test` is clean; 470 Flutter
 tests, 279 trusted-service tests, and 222 Firestore rules tests pass; and the
 production web build succeeds.
+
+---
+
+### Product revision 3.2 — SDG impact dashboard and provenance ✅ COMPLETE
+
+**Objective:** Give 3ZERO Admins a useful sustainability overview without
+turning platform activity into unsupported environmental or economic claims.
+
+**Features:** F5.1 revision, F5.5, NFR-13
+
+**Delivered:**
+
+- One Admin dashboard destination with two clear workspaces: **SDG impact** and
+  **Platform data**, avoiding a sixth mobile navigation item
+- Goal cards for UN Targets 8.3, 11.6, 12.5, and 13.3, using existing all-time
+  counters and plain-language claim boundaries
+- An in-product methodology sheet explaining overlap, source fields, time
+  coverage, and unsupported measures
+- Server/cache provenance on both dashboard tabs and lower-bound notation for a
+  capped account-directory read
+- Independent loading and error states, so account totals and Admin shortcuts
+  remain usable if the platform counter stream fails
+- Minute-based re-evaluation of temporary suspensions, prevention of negative
+  parsed counters, and exhaustive detection of claim-, donation-, and
+  prototype-payment-only activity
+- Responsive cards, grouped number formatting, readable goal badges, selectable
+  web text, hover polish, and coverage at 320 logical pixels with 2× text scaling
+
+**Reporting boundary:** the view reports contributions recorded by Chokro. It
+does not report official SDG indicators, verified material weight, avoided
+emissions, jobs, paid income, or progress against a baseline. Goal cards overlap
+by design and are not additive.
+
+**Verification snapshot:** `flutter analyze lib test` is clean; all 687 Flutter
+tests pass; focused model and widget regressions cover derivation, provenance,
+independent failure states, contrast, and narrow-screen large-text layout; and
+the production web build succeeds. See `INTEGRATION_NOTES_SDG_DASHBOARD.md`.
 
 ---
 

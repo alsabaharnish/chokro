@@ -154,7 +154,13 @@ describe('decide', () => {
       confidence: 0.9,
       itemCount: 3,
       itemTypeMatches: true,
-      notes: 'Bottles visible beside a bin.',
+      // Both stated explicitly. They are the only signal that the waste
+      // reached the bin, and `decide` reads an absent field as "not checked"
+      // — so a fixture that omitted them would auto-approve nothing, and one
+      // that defaulted them to true would hide the check being removed.
+      binVisible: true,
+      wasteInBin: true,
+      notes: 'Bottles being dropped into the bin.',
     },
     approvedToday: 0,
     dailyCap: 3,
@@ -237,6 +243,66 @@ describe('decide', () => {
       screening: { ...clean.screening, itemTypeMatches: false },
     });
     expect(result.flags).toContain(FLAGS.ITEM_TYPE_MISMATCH);
+  });
+
+  // ── The waste actually reaching the bin ────────────────────────────────
+  //
+  // The case these cover is the one the pipeline used to pay out on: a sharp
+  // photograph of the declared waste, the right count, taken inside the bin's
+  // radius with a photo never submitted before — every check green, and the
+  // bottle still in the submitter's hand. Nothing asked whether it went in.
+
+  test('waste held beside a visible bin routes to review, not payout', () => {
+    const result = decide({
+      ...clean,
+      screening: { ...clean.screening, binVisible: true, wasteInBin: false },
+    });
+    expect(result.flags).toContain(FLAGS.WASTE_NOT_IN_BIN);
+    expect(result.decision).toBe('review');
+  });
+
+  test('no bin in the photograph routes to review', () => {
+    const result = decide({
+      ...clean,
+      screening: { ...clean.screening, binVisible: false, wasteInBin: false },
+    });
+    expect(result.flags).toContain(FLAGS.NO_BIN_VISIBLE);
+    expect(result.decision).toBe('review');
+  });
+
+  test('no bin seen raises one flag, not two', () => {
+    const result = decide({
+      ...clean,
+      screening: { ...clean.screening, binVisible: false, wasteInBin: false },
+    });
+    // A reviewer should read one problem, because there is one: nothing in the
+    // frame to have disposed into.
+    expect(result.flags).not.toContain(FLAGS.WASTE_NOT_IN_BIN);
+  });
+
+  test('an unreported bin verdict is not checked, so it is not a pass', () => {
+    // The fail-closed reading already applied to `screening === null` and to
+    // `duplicateChecked`. A model that answered every other field but omitted
+    // these two must not inherit an auto-approval by silence.
+    const { binVisible, wasteInBin, ...partial } = clean.screening;
+    const result = decide({ ...clean, screening: partial });
+    expect(result.flags).toContain(FLAGS.NO_BIN_VISIBLE);
+    expect(result.decision).toBe('review');
+  });
+
+  test('a non-boolean bin verdict is treated as unchecked', () => {
+    const result = decide({
+      ...clean,
+      screening: { ...clean.screening, wasteInBin: 'yes' },
+    });
+    expect(result.flags).toContain(FLAGS.WASTE_NOT_IN_BIN);
+  });
+
+  test('neither bin flag blocks an administrator from approving', () => {
+    // Advisory by design: a model can miss a bin that is plainly there, and a
+    // person looking at the photograph is the better judge.
+    expect(isApprovable([FLAGS.NO_BIN_VISIBLE])).toBe(true);
+    expect(isApprovable([FLAGS.WASTE_NOT_IN_BIN])).toBe(true);
   });
 
   test('the daily cap flags', () => {
@@ -365,6 +431,27 @@ describe('parseVerdict', () => {
     expect(parseVerdict('{"confidence":1.5}')).toBeNull();
     expect(parseVerdict('{"confidence":-0.2}')).toBeNull();
     expect(parseVerdict('{"itemCount":3}')).toBeNull();
+  });
+
+  test('carries the bin verdict through', () => {
+    const verdict = parseVerdict(
+      '{"confidence":0.9,"binVisible":true,"wasteInBin":false,"itemCount":1}',
+    );
+    expect(verdict.binVisible).toBe(true);
+    expect(verdict.wasteInBin).toBe(false);
+  });
+
+  test('an absent or non-boolean bin verdict parses as null, not false', () => {
+    // Tri-state on purpose, unlike `itemTypeMatches` below. `decide` reads
+    // null as "not checked" and flags it; collapsing it to false here would
+    // flag honest submissions with the wrong reason, and collapsing it to true
+    // would reopen the hole. Null keeps "did not answer" distinguishable.
+    const absent = parseVerdict('{"confidence":0.9}');
+    expect(absent.binVisible).toBeNull();
+    expect(absent.wasteInBin).toBeNull();
+
+    const junk = parseVerdict('{"confidence":0.9,"wasteInBin":"probably"}');
+    expect(junk.wasteInBin).toBeNull();
   });
 
   test('itemTypeMatches defaults to false when absent', () => {

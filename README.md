@@ -33,8 +33,10 @@ requirements and role hierarchy.
   entrepreneurship, committed by the trusted service with idempotent retries
 - Prototype online donations to those initiatives, with idempotent `SIM-...`
   receipts and counters kept separate from real point activity
-- Appeals against a rejection, and a 3ZERO Admin dashboard over server-held
-  counters, including donated points and donation count
+- Appeals against a rejection, and a two-tab 3ZERO Admin dashboard: **SDG
+  impact** relates existing activity to selected UN targets with transparent
+  methodology, while **Platform data** retains the operational counters and
+  Admin shortcuts
 
 ## Architecture
 

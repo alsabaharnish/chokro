@@ -1,9 +1,21 @@
 /**
  * Chokro — automated photo screening (F2.10).
  *
- * Asks a vision model whether a photograph shows what the user said it shows.
- * The verdict never rejects anything: it either clears a submission for the
- * auto-approve lane, or it does not, in which case a person looks.
+ * Asks a vision model whether a photograph shows what the user said it shows,
+ * and — the part the payout actually rests on — whether the waste ended up in
+ * the bin. The verdict never rejects anything: it either clears a submission
+ * for the auto-approve lane, or it does not, in which case a person looks.
+ *
+ * WHY `binVisible`/`wasteInBin` EXIST.
+ * The verdict used to report only a confidence number, an item count and a
+ * type match. None of those asks the question the award is for. A photograph
+ * of the declared waste held in a hand, or set on the ground next to the bin,
+ * satisfies all three: the type matches, the count matches, and the image is
+ * perfectly clear — so confidence is high. Standing at the bin satisfies the
+ * geofence, and a fresh photo satisfies the duplicate check. The result was a
+ * flagless submission down the auto-approve lane, and points for waste that
+ * was never disposed of. The two booleans below are the only signal in the
+ * pipeline that distinguishes being at a bin from using one.
  *
  * WITHOUT AN API KEY THIS RETURNS NULL, AND THAT IS A SUPPORTED STATE.
  * `decide()` reads null as `screeningUnavailable` and routes to review. The
@@ -64,17 +76,26 @@ function buildPrompt(declaredItemType, declaredItemCount) {
   const label = ITEM_TYPE_LABELS[declaredItemType] || declaredItemType;
 
   return [
-    'You are screening a photograph submitted as evidence of waste disposal.',
+    'You are screening a photograph submitted as evidence that waste was put',
+    'into a public waste bin. The claim is only valid if the waste is actually',
+    'inside the bin, or visibly in the act of being dropped into it. Waste held',
+    'in a hand, resting on the ground, standing beside the bin or merely in the',
+    'same frame as the bin does NOT count as disposed.',
     '',
     `The person says it shows ${declaredItemCount} item(s) of ${label}.`,
     '',
     'Reply with ONLY a JSON object, no markdown fence and no commentary:',
     '{',
-    '  "confidence": <0.0-1.0, how clearly this photo shows waste being disposed of>,',
+    '  "binVisible": <true only if a waste bin or container is clearly visible>,',
+    '  "wasteInBin": <true only if the waste is inside the bin, or being dropped into it>,',
+    '  "confidence": <0.0-1.0, how clearly this photo shows the stated waste going into the bin>,',
     '  "itemCount": <how many items you can count, or null if you cannot tell>,',
     '  "itemTypeMatches": <true if the waste matches the stated type>,',
     '  "notes": "<one short sentence for a human reviewer>"',
     '}',
+    '',
+    'If you cannot tell whether the waste reached the bin, answer false rather',
+    'than guessing, and say why in notes.',
   ].join('\n');
 }
 
@@ -99,6 +120,15 @@ function parseVerdict(text) {
       itemCount:
         typeof parsed.itemCount === 'number' ? Math.round(parsed.itemCount) : null,
       itemTypeMatches: parsed.itemTypeMatches === true,
+      // Tri-state on purpose, unlike `itemTypeMatches` above.
+      //
+      // These two decide whether the waste reached the bin at all, so "the
+      // model did not answer" must not read as either answer. Coercing a
+      // missing field to false would flag honest submissions; coercing it to
+      // true would restore the hole this field exists to close. Null means not
+      // reported, and `decide()` treats it as not checked.
+      binVisible: typeof parsed.binVisible === 'boolean' ? parsed.binVisible : null,
+      wasteInBin: typeof parsed.wasteInBin === 'boolean' ? parsed.wasteInBin : null,
       notes: typeof parsed.notes === 'string' ? parsed.notes.slice(0, 300) : null,
     };
   } catch {

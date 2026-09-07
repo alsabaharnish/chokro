@@ -1,5 +1,6 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
+import '../core/network_errors.dart';
 import '../models/stats_model.dart';
 
 /// The admin dashboard's counters (F5.1).
@@ -30,6 +31,33 @@ class StatsService {
   Stream<PlatformStats> watchPlatformStats() => _db
       .collection('stats')
       .doc(platformDocId)
-      .snapshots()
-      .map((doc) => PlatformStats.fromMap(doc.data()));
+      // The metadata event matters when a fresh database genuinely has no
+      // stats document: the first cache-only miss is inconclusive, while the
+      // following server-confirmed miss is an authoritative zero snapshot.
+      .snapshots(includeMetadataChanges: true)
+      .map((doc) {
+        if (!doc.exists && doc.metadata.isFromCache) {
+          throw const PlatformStatsUnavailableException();
+        }
+        return PlatformStats.fromMap(
+          doc.data(),
+          isFromCache: doc.metadata.isFromCache,
+        );
+      });
+}
+
+/// A missing cache entry cannot prove that the platform has no activity.
+///
+/// This is deliberately distinct from a server-confirmed missing document,
+/// which is a valid fresh-install state and maps to [PlatformStats.empty].
+class PlatformStatsUnavailableException implements UserFacingException {
+  const PlatformStatsUnavailableException();
+
+  @override
+  String get message =>
+      'Chokro could not confirm the platform counters. Check your connection '
+      'and try again.';
+
+  @override
+  String toString() => message;
 }

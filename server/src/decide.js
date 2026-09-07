@@ -28,6 +28,8 @@ const FLAGS = Object.freeze({
   COUNT_MISMATCH: 'countMismatch',
   LOW_CONFIDENCE: 'lowConfidence',
   ITEM_TYPE_MISMATCH: 'itemTypeMismatch',
+  NO_BIN_VISIBLE: 'noBinVisible',
+  WASTE_NOT_IN_BIN: 'wasteNotInBin',
   DAILY_CAP_REACHED: 'dailyCapReached',
   SCREENING_UNAVAILABLE: 'screeningUnavailable',
   HASH_UNAVAILABLE: 'hashUnavailable',
@@ -47,6 +49,12 @@ const FLAG_EXPLANATIONS = Object.freeze({
     'Automated screening was not confident about this photograph.',
   [FLAGS.ITEM_TYPE_MISMATCH]:
     'The declared waste type does not match what the screen identified.',
+  [FLAGS.NO_BIN_VISIBLE]:
+    'No waste bin could be seen in the photograph, so there is nothing to show '
+    + 'the waste was disposed of.',
+  [FLAGS.WASTE_NOT_IN_BIN]:
+    'The waste does not appear to be in the bin \u2014 the screen saw it held, '
+    + 'set down or beside the bin rather than inside it.',
   [FLAGS.DAILY_CAP_REACHED]:
     'This user has already reached the daily limit of approved disposals.',
   [FLAGS.SCREENING_UNAVAILABLE]:
@@ -88,6 +96,8 @@ const CONFIDENCE_THRESHOLD = 0.75;
  * @param {number} input.screening.confidence      0-1
  * @param {number|null} input.screening.itemCount  null if the screen could not count
  * @param {boolean} input.screening.itemTypeMatches
+ * @param {boolean|null} input.screening.binVisible  null when the screen did not report it
+ * @param {boolean|null} input.screening.wasteInBin  null when the screen did not report it
  * @param {number} input.approvedToday
  * @param {number} input.dailyCap
  * @returns {{decision: 'autoApprove'|'review', flags: string[], reasons: string[]}}
@@ -167,6 +177,29 @@ function decide({
 
     if (screening.itemTypeMatches === false) {
       flags.push(FLAGS.ITEM_TYPE_MISMATCH);
+    }
+
+    // Did the waste actually go in the bin?
+    //
+    // This is the question the disposal award is paying for, and until these
+    // two fields existed nothing in the pipeline asked it. Every other check
+    // is satisfied by a person standing at a bin holding a bottle: the
+    // geofence passes, the photograph is new so the hash passes, the material
+    // is the declared material so `itemTypeMatches` passes, and the image is
+    // sharp so `confidence` is high. Flagless, auto-approved, 50 points, and
+    // the bottle went home in their hand.
+    //
+    // `!== true` rather than `=== false`, because a screen that omitted the
+    // field did not check it, and an unchecked disposal claim is exactly what
+    // `screeningUnavailable` and `hashUnavailable` already refuse to pay out
+    // on. Advisory, not blocking — a reviewer looking at the photograph can
+    // still see a bin the model missed and approve it.
+    if (screening.binVisible !== true) {
+      flags.push(FLAGS.NO_BIN_VISIBLE);
+    } else if (screening.wasteInBin !== true) {
+      // Only when a bin was seen. Raising both would tell the reviewer the
+      // photograph has two separate problems when it has one.
+      flags.push(FLAGS.WASTE_NOT_IN_BIN);
     }
 
     // Counting objects in a photograph is unreliable, so a mismatch flags for

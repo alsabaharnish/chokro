@@ -1,3 +1,7 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+
 import '../core/network_errors.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../models/user_model.dart';
@@ -29,6 +33,10 @@ class UserService {
   /// creating a wallet only at a zero balance, and a user document only for
   /// yourself at role `buyer` and status `active`, so neither half can be abused
   /// and both land together or not at all.
+  ///
+  /// Bounded by [registrationTimeout]. Throws [TimeoutException] if the batch
+  /// has not been acknowledged by then; `AuthController.signUp` turns that into
+  /// a message and rolls the half-made account back.
   Future<void> createUserWithWallet(UserModel user) async {
     final batch = _db.batch();
 
@@ -42,8 +50,46 @@ class UserService {
       'updatedAt': FieldValue.serverTimestamp(),
     });
 
-    await batch.commit();
+    await commitRegistration(batch.commit);
   }
+
+  /// How long registration waits for the profile write to reach the server.
+  ///
+  /// Offline persistence is on (see `main.dart`), and that changes what
+  /// `commit()` means: the Future completes on the **server's** acknowledgement,
+  /// not on the local write. With no usable connection it therefore neither
+  /// completes nor throws — the same trap `PushService.unregisterDevice`
+  /// documents for an offline delete, except this one sits on the registration
+  /// critical path, where three things went wrong at once:
+  ///
+  ///  * `Create account` spun indefinitely, with no error and no way back. This
+  ///    is the reported symptom: registration that never finishes.
+  ///  * The rollback in `AuthController.signUp`'s `catch` never ran, so the
+  ///    Firebase account survived without a profile — the exact state
+  ///    `AccountIncompleteView` exists to recover from.
+  ///  * `authControllerProvider` stayed `AsyncLoading` forever, and `AppShell`,
+  ///    `StartupErrorView` and `AccountIncompleteView` all read that flag to
+  ///    disable their sign-out buttons. A stalled registration locked every
+  ///    escape route out of the account it had half-created.
+  ///
+  /// Generous rather than snappy. This is a two-document batch over whatever
+  /// connection the user has, often a phone at the roadside; failing a
+  /// registration that would have landed in twelve seconds is the worse error.
+  static const Duration registrationTimeout = Duration(seconds: 20);
+
+  /// Runs registration's profile write under [timeout].
+  ///
+  /// Split out and injectable for the same reason `retirePushRegistration` is in
+  /// `push_service.dart`: the behaviour worth pinning down is what happens when
+  /// the write never comes back, and a live Firestore cannot be asked to
+  /// demonstrate that on request. `commit` is passed as a callback so a test can
+  /// hand it a Future that never completes — which is precisely what an
+  /// unacknowledged batch is.
+  @visibleForTesting
+  static Future<void> commitRegistration(
+    Future<void> Function() commit, {
+    Duration timeout = registrationTimeout,
+  }) => commit().timeout(timeout);
 
   // ── profile management (F1.1) ─────────────────────────────────────────────
 
@@ -107,7 +153,7 @@ class UserService {
       .collection('users')
       .orderBy('name')
       .limit(QueryLimits.accounts + 1)
-      .snapshots()
+      .snapshots(includeMetadataChanges: true)
       .map((snap) {
         final truncated = snap.docs.length > QueryLimits.accounts;
         return UserDirectoryPage(
@@ -116,6 +162,7 @@ class UserService {
               .map(UserModel.fromFirestore)
               .toList(growable: false),
           truncated: truncated,
+          isFromCache: snap.metadata.isFromCache,
         );
       });
 
@@ -254,10 +301,15 @@ class UserService {
 
 /// The bounded account-directory read and whether more accounts exist.
 class UserDirectoryPage {
-  const UserDirectoryPage({required this.users, required this.truncated});
+  const UserDirectoryPage({
+    required this.users,
+    required this.truncated,
+    this.isFromCache = false,
+  });
 
   final List<UserModel> users;
   final bool truncated;
+  final bool isFromCache;
 }
 
 /// The profile could not be read, as distinct from not existing.

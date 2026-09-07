@@ -31,6 +31,7 @@ class AccountTotals {
     this.admins = 0,
     this.suspended = 0,
     this.truncated = false,
+    this.isFromCache = false,
   });
 
   final int total;
@@ -46,14 +47,21 @@ class AccountTotals {
   /// True when every total is a floor because the account directory is capped.
   final bool truncated;
 
+  /// Whether the account directory has not yet been confirmed by Firestore's
+  /// server. The count is still displayed, but labelled as cached.
+  final bool isFromCache;
+
   static const AccountTotals empty = AccountTotals();
 }
 
 final accountTotalsProvider = Provider.autoDispose<AsyncValue<AccountTotals>>((
   ref,
 ) {
+  // Re-evaluate time-limited suspensions even when no user document changes.
+  // Without this clock, a suspension that expired while the dashboard stayed
+  // open remained in "Cannot act" until Firestore happened to emit again.
+  final now = ref.watch(dashboardClockProvider).value ?? DateTime.now();
   return ref.watch(allUsersProvider).whenData((page) {
-    final now = DateTime.now();
     var buyers = 0;
     var sellers = 0;
     var admins = 0;
@@ -76,6 +84,23 @@ final accountTotalsProvider = Provider.autoDispose<AsyncValue<AccountTotals>>((
       admins: admins,
       suspended: suspended,
       truncated: page.truncated,
+      isFromCache: page.isFromCache,
     );
   });
+});
+
+/// A low-frequency UI clock for values whose meaning changes as time passes.
+///
+/// One immediate event avoids delaying the account total, then a minute is a
+/// sufficiently tight bound for an administrative summary without rebuilding
+/// the screen every second. Auto-dispose cancels the periodic stream when no
+/// dashboard consumer remains.
+final dashboardClockProvider = StreamProvider.autoDispose<DateTime>((
+  ref,
+) async* {
+  yield DateTime.now();
+  yield* Stream<DateTime>.periodic(
+    const Duration(minutes: 1),
+    (_) => DateTime.now(),
+  );
 });

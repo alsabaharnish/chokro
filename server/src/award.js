@@ -273,6 +273,8 @@ async function approveDisposal({
           verificationCompleted: true,
           screenConfidence: verificationEvidence.screenConfidence ?? null,
           screenItemCount: verificationEvidence.screenItemCount ?? null,
+          screenBinVisible: verificationEvidence.screenBinVisible ?? null,
+          screenWasteInBin: verificationEvidence.screenWasteInBin ?? null,
           screenNotes: verificationEvidence.screenNotes ?? null,
         }
       : {};

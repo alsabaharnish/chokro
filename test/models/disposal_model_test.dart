@@ -155,6 +155,41 @@ void main() {
     });
   });
 
+  group('the bin-disposal flags', () {
+    // The server raises these when screening cannot see the waste in the bin.
+    // The queue renders `flag.explanation`, so a name the client cannot parse
+    // silently drops the reason a submission is sitting in front of a
+    // reviewer.
+    test('parse from the names the server writes', () {
+      expect(DisposalFlag.fromName('noBinVisible'), DisposalFlag.noBinVisible);
+      expect(DisposalFlag.fromName('wasteNotInBin'), DisposalFlag.wasteNotInBin);
+    });
+
+    test('each explains itself to the reviewer', () {
+      expect(DisposalFlag.noBinVisible.explanation, contains('No waste bin'));
+      expect(DisposalFlag.wasteNotInBin.explanation, contains('in the bin'));
+    });
+
+    test('the screen verdict round-trips, including a false', () {
+      // `false` and "not reported" are different answers, and the second is
+      // what the server writes when screening did not run.
+      final held = pendingSubmission().copyWith(
+        screenBinVisible: true,
+        screenWasteInBin: false,
+      );
+      final parsed = DisposalModel.fromJson(held.toJson());
+      expect(parsed.screenBinVisible, isTrue);
+      expect(parsed.screenWasteInBin, isFalse);
+
+      expect(pendingSubmission().screenWasteInBin, isNull);
+      expect(
+        DisposalModel.fromJson(<String, dynamic>{'screenWasteInBin': 'yes'})
+            .screenWasteInBin,
+        isNull,
+      );
+    });
+  });
+
   group('serialization', () {
     test('round-trips through JSON', () {
       final submission = pendingSubmission().copyWith(

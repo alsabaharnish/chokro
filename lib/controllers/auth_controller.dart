@@ -15,6 +15,35 @@ import 'push_controller.dart' show pushServiceProvider;
 final authServiceProvider = Provider<AuthService>((ref) => AuthService());
 final userServiceProvider = Provider<UserService>((ref) => UserService());
 
+/// True from the moment [AuthController.signUp] starts until it has finished
+/// provisioning — or unwound — the account.
+///
+/// Registration is two writes against two systems, and the auth stream reports
+/// after the first. So for the width of the second write there is a live
+/// Firebase session whose `users/{uid}` genuinely does not exist yet, and the
+/// router's gate read that the only way it could: as an account that can
+/// authenticate and do nothing else, which is `accountIncompletePath`.
+///
+/// That was a race the app had to win to behave correctly, and losing it was
+/// expensive. `/register` was replaced mid-submit, which disposes the form —
+/// taking with it the "Creating your account…" spinner and, worse, the
+/// `AppSnackBar` in `_submit`'s failure branch, which fires only `if (mounted)`.
+/// A registration that failed slowly therefore reported nothing at all.
+///
+/// This flag lets the gate tell the two cases apart: a profile that is missing
+/// because something broke, and a profile that is missing because we have not
+/// written it yet. Only the first is a broken account.
+class RegistrationInFlight extends Notifier<bool> {
+  @override
+  bool build() => false;
+
+  void begin() => state = true;
+  void end() => state = false;
+}
+
+final registrationInFlightProvider =
+    NotifierProvider<RegistrationInFlight, bool>(RegistrationInFlight.new);
+
 // raw Firebase auth state
 final firebaseAuthStateProvider = StreamProvider<User?>((ref) {
   return ref.watch(authServiceProvider).authStateChanges;
@@ -55,6 +84,17 @@ class AuthController extends AsyncNotifier<void> {
         await action();
       } on FirebaseAuthException catch (err) {
         throw AuthFailure(authErrorMessage(err.code), code: err.code);
+      } on TimeoutException {
+        // Only Firestore's writes are bounded by a deadline (see
+        // `UserService.registrationTimeout`); Firebase Auth raises
+        // `network-request-failed` instead and is handled above. Naming the
+        // step is the point: "something went wrong" would send a user whose
+        // account *was* created back to the form to make it again.
+        throw const AuthFailure(
+          'Your account was created, but setting up your profile took too '
+          'long. Check your connection and try again.',
+          code: 'profile-write-timeout',
+        );
       }
     });
   }
@@ -64,64 +104,104 @@ class AuthController extends AsyncNotifier<void> {
     required String email,
     required String password,
   }) async {
-    await _guard(() async {
-      final authService = ref.read(authServiceProvider);
-      final userService = ref.read(userServiceProvider);
+    // Raised *before* the account exists, not after. `authStateChanges` fires
+    // from inside `createUserWithEmailAndPassword`, so a flag set on the line
+    // after it is already too late to cover the window it exists for.
+    //
+    // Cleared in a `finally` below whichever way this ends. It can no longer
+    // stick, because every await inside is now bounded — Firebase Auth by its
+    // own network handling, the profile write by
+    // `UserService.registrationTimeout`.
+    ref.read(registrationInFlightProvider.notifier).begin();
+    try {
+      await _guard(() async {
+        final authService = ref.read(authServiceProvider);
+        final userService = ref.read(userServiceProvider);
 
-      final credential = await authService.signUp(
-        email: email,
-        password: password,
-      );
-
-      final created = credential.user;
-      if (created == null) {
-        // Should not happen after a successful signUp, but the alternative was
-        // `credential.user!`, and a null there would have surfaced as a bare
-        // type error instead of anything a user could act on.
-        throw const AuthFailure(
-          'The account was created but could not be opened. Try signing in.',
-          code: 'missing-credential-user',
+        final credential = await authService.signUp(
+          email: email,
+          password: password,
         );
-      }
 
-      final user = UserModel(
-        uid: created.uid,
-        name: name,
-        // Persist the address Firebase Auth accepted, including any provider
-        // normalization. Firestore rules bind this field to the token claim.
-        email: created.email ?? email,
-        role: AppConstants.roleBuyer,
-        status: AppConstants.statusActive,
-        // createdAt comes from the server — see UserModel.toFirestore.
-      );
-
-      try {
-        // atomic: user doc + wallet doc in one batch
-        await userService.createUserWithWallet(user);
-      } catch (error) {
-        // Registration is two steps against two different systems: an Auth
-        // account, then a Firestore profile. Failing the second used to leave
-        // an account that could authenticate and do nothing else — no role, no
-        // wallet, no name — and the only way out was the recovery screen.
-        //
-        // Rolling the Auth account back turns that dead end into a plain retry,
-        // and frees the email address so the second attempt is not refused as
-        // already-in-use.
-        //
-        // Best effort: if the delete also fails the account survives and the
-        // recovery screen is still there to catch it. Either way the original
-        // failure is what gets reported, because that is the one that explains
-        // what went wrong.
-        try {
-          await created.delete();
-        } catch (_) {
-          // Swallowed on purpose. Reporting a cleanup failure instead of the
-          // real cause would send the user chasing the wrong problem.
+        final created = credential.user;
+        if (created == null) {
+          // Should not happen after a successful signUp, but the alternative was
+          // `credential.user!`, and a null there would have surfaced as a bare
+          // type error instead of anything a user could act on.
+          throw const AuthFailure(
+            'The account was created but could not be opened. Try signing in.',
+            code: 'missing-credential-user',
+          );
         }
-        rethrow;
-      }
-    });
+
+        final user = UserModel(
+          uid: created.uid,
+          name: name,
+          // Persist the address Firebase Auth accepted, including any provider
+          // normalization. Firestore rules bind this field to the token claim.
+          email: created.email ?? email,
+          role: AppConstants.roleBuyer,
+          status: AppConstants.statusActive,
+          // createdAt comes from the server — see UserModel.toFirestore.
+        );
+
+        try {
+          // atomic: user doc + wallet doc in one batch
+          await userService.createUserWithWallet(user);
+        } catch (error) {
+          // Registration is two steps against two different systems: an Auth
+          // account, then a Firestore profile. Failing the second used to leave
+          // an account that could authenticate and do nothing else — no role, no
+          // wallet, no name — and the only way out was the recovery screen.
+          //
+          // Rolling the Auth account back turns that dead end into a plain retry,
+          // and frees the email address so the second attempt is not refused as
+          // already-in-use.
+          //
+          // That rollback matters most in the case it used to be unreachable in.
+          // A profile write that times out is still sitting in Firestore's local
+          // mutation queue, so without the delete the address stays taken and the
+          // user's obvious next move — tap Create account again — is refused with
+          // "An account already exists with that email. Sign in instead.", which
+          // is both true and useless. Deleting the account revokes the credential
+          // that queued write needs, so it is rejected rather than landing later
+          // against a uid nobody can sign in as.
+          //
+          // Best effort: if the delete also fails the account survives and the
+          // recovery screen is still there to catch it. Either way the original
+          // failure is what gets reported, because that is the one that explains
+          // what went wrong.
+          try {
+            // Bounded for the same reason the batch above is, but on a much
+            // shorter fuse. This runs on a connection that has just proved
+            // itself unreliable, after the user has already waited out
+            // `registrationTimeout`; spending that budget a second time on
+            // cleanup would restore most of the hang the deadline was added to
+            // end. The account surviving is the lesser failure, and
+            // `AccountIncompleteView` is there for it.
+            await created.delete().timeout(_rollbackTimeout);
+          } catch (_) {
+            // Swallowed on purpose. Reporting a cleanup failure instead of the
+            // real cause would send the user chasing the wrong problem.
+          }
+          rethrow;
+        }
+      });
+    } finally {
+      // The gate holds `/register` in place while this is true, so it has to be
+      // lowered on the failure path too — otherwise a registration that fails
+      // strands the user on a form the router will not let them leave.
+      ref.read(registrationInFlightProvider.notifier).end();
+    }
   }
+
+  /// How long the rollback of a failed registration may take.
+  ///
+  /// Long enough for a healthy round trip, short enough that nobody waits —
+  /// the same judgement, and the same figure, as `PushService._cleanupTimeout`,
+  /// which bounds the other cleanup in this app that runs on a connection
+  /// already known to be failing.
+  static const Duration _rollbackTimeout = Duration(seconds: 5);
 
   Future<void> signIn({required String email, required String password}) async {
     await _guard(() async {

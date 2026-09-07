@@ -2,6 +2,16 @@ import 'package:chokro/core/label_format.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
+  group('formatCount', () {
+    test('groups positive, zero, and negative whole numbers', () {
+      expect(formatCount(0), '0');
+      expect(formatCount(999), '999');
+      expect(formatCount(1000), '1,000');
+      expect(formatCount(1234567), '1,234,567');
+      expect(formatCount(-1250), '-1,250');
+    });
+  });
+
   group('formatTaka', () {
     test('prefixes the taka sign and never shows a decimal part', () {
       expect(formatTaka(250), '৳250');

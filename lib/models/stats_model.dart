@@ -43,6 +43,7 @@ class PlatformStats {
     this.ordersCreated = 0,
     this.ordersConfirmed = 0,
     this.salesPayable = 0,
+    this.isFromCache = false,
   });
 
   /// Disposals credited, by either lane (F2.12).
@@ -71,6 +72,12 @@ class PlatformStats {
 
   /// Cash value of orders placed, in whole taka, after points were applied.
   final int salesPayable;
+
+  /// Whether Firestore served this snapshot from its local cache.
+  ///
+  /// Cached counters remain useful, but the dashboard must not describe them as
+  /// current until Firestore has confirmed them with the server.
+  final bool isFromCache;
 
   static const PlatformStats empty = PlatformStats();
 
@@ -102,13 +109,38 @@ class PlatformStats {
     return open < 0 ? 0 : open;
   }
 
-  factory PlatformStats.fromMap(Map<String, dynamic>? raw) {
+  /// Whether any server-maintained counter has recorded activity.
+  ///
+  /// Kept exhaustive so a claim-only or donation-only pilot is not described as
+  /// untouched merely because points, disposals, and orders are still zero.
+  bool get hasAnyCounterActivity =>
+      disposalsApproved > 0 ||
+      disposalsRejected > 0 ||
+      claimsApproved > 0 ||
+      claimsRejected > 0 ||
+      pointsIssued > 0 ||
+      pointsRedeemed > 0 ||
+      pointsDonated > 0 ||
+      donationsReceived > 0 ||
+      prototypeDonationTaka > 0 ||
+      prototypeDonationsReceived > 0 ||
+      ordersCreated > 0 ||
+      ordersConfirmed > 0 ||
+      salesPayable > 0;
+
+  factory PlatformStats.fromMap(
+    Map<String, dynamic>? raw, {
+    bool isFromCache = false,
+  }) {
     final data = raw ?? const <String, dynamic>{};
 
     int read(String key) {
       final value = data[key];
-      if (value is int) return value;
-      if (value is num && value.isFinite && value == value.truncateToDouble()) {
+      if (value is int && value >= 0) return value;
+      if (value is num &&
+          value.isFinite &&
+          value >= 0 &&
+          value == value.truncateToDouble()) {
         return value.toInt();
       }
       return 0;
@@ -128,6 +160,7 @@ class PlatformStats {
       ordersCreated: read('ordersCreated'),
       ordersConfirmed: read('ordersConfirmed'),
       salesPayable: read('salesPayable'),
+      isFromCache: isFromCache,
     );
   }
 }

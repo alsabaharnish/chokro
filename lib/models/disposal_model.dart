@@ -126,6 +126,21 @@ enum DisposalFlag {
   /// The AI did not see the declared material in the photo.
   itemTypeMismatch,
 
+  /// No waste bin could be seen in the photograph at all (F2.10).
+  ///
+  /// The award is for putting waste *into a bin*, and until this flag existed
+  /// nothing in the pipeline asked whether that happened. A clear photo of the
+  /// declared waste, taken while standing at the bin, passed the geofence, the
+  /// duplicate check, the type match and the confidence threshold — so it was
+  /// flagless and auto-approved even though the waste never left the
+  /// submitter's hand. Advisory, not blocking: a reviewer can see a bin the
+  /// model missed and approve anyway.
+  noBinVisible,
+
+  /// A bin was visible, but the waste was not in it — held, set on the ground,
+  /// or merely beside it. See [noBinVisible] for why this is checked.
+  wasteNotInBin,
+
   /// The user has already had the maximum approved disposals today (§7.3).
   dailyCapReached,
 
@@ -174,6 +189,12 @@ enum DisposalFlag {
         return 'Automated screening was not confident enough to decide.';
       case DisposalFlag.itemTypeMismatch:
         return 'Declared material was not detected in the photo.';
+      case DisposalFlag.noBinVisible:
+        return 'No waste bin is visible in the photo, so nothing shows the '
+            'waste was disposed of.';
+      case DisposalFlag.wasteNotInBin:
+        return 'The waste does not appear to be in the bin — the screen saw it '
+            'held, set down or beside the bin.';
       case DisposalFlag.dailyCapReached:
         return 'User has reached the daily approved-disposal cap.';
       case DisposalFlag.hashUnavailable:
@@ -255,6 +276,18 @@ class DisposalModel {
   /// Item count the screen believes it saw. Null if it could not tell.
   final int? screenItemCount;
 
+  /// Whether the screen could see a waste bin in the photograph.
+  ///
+  /// Null means the screen did not run, or did not report the field. Tri-state
+  /// deliberately: "not reported" is not "no bin", and the server flags both
+  /// rather than treating an unanswered check as a pass.
+  final bool? screenBinVisible;
+
+  /// Whether the screen judged the waste to be inside the bin (or going into
+  /// it). Null when not run or not reported. This is the signal the disposal
+  /// award actually rests on — see [DisposalFlag.noBinVisible].
+  final bool? screenWasteInBin;
+
   /// Short free-text note from the screening service, for the admin queue only.
   /// Never shown to the user — it would teach people how to game the screen.
   final String? screenNotes;
@@ -293,6 +326,8 @@ class DisposalModel {
     this.verificationCompleted = false,
     this.screenConfidence,
     this.screenItemCount,
+    this.screenBinVisible,
+    this.screenWasteInBin,
     this.screenNotes,
     this.pointsAwarded,
     this.rejectionReason,
@@ -336,6 +371,12 @@ class DisposalModel {
               json.containsKey('screenItemCount')),
       screenConfidence: _toNullableDouble(json['screenConfidence']),
       screenItemCount: _toNullableInt(json['screenItemCount']),
+      screenBinVisible: json['screenBinVisible'] is bool
+          ? json['screenBinVisible'] as bool
+          : null,
+      screenWasteInBin: json['screenWasteInBin'] is bool
+          ? json['screenWasteInBin'] as bool
+          : null,
       screenNotes: _nullableString(json['screenNotes']),
       pointsAwarded: _toNullableInt(json['pointsAwarded']),
       rejectionReason: _nullableString(json['rejectionReason']),
@@ -375,6 +416,8 @@ class DisposalModel {
     'verificationCompleted': verificationCompleted,
     if (screenConfidence != null) 'screenConfidence': screenConfidence,
     if (screenItemCount != null) 'screenItemCount': screenItemCount,
+    if (screenBinVisible != null) 'screenBinVisible': screenBinVisible,
+    if (screenWasteInBin != null) 'screenWasteInBin': screenWasteInBin,
     if (screenNotes != null) 'screenNotes': screenNotes,
     if (pointsAwarded != null) 'pointsAwarded': pointsAwarded,
     if (rejectionReason != null) 'rejectionReason': rejectionReason,
@@ -418,6 +461,8 @@ class DisposalModel {
     bool? verificationCompleted,
     double? screenConfidence,
     int? screenItemCount,
+    bool? screenBinVisible,
+    bool? screenWasteInBin,
     String? screenNotes,
     int? pointsAwarded,
     String? rejectionReason,
@@ -443,6 +488,8 @@ class DisposalModel {
           verificationCompleted ?? this.verificationCompleted,
       screenConfidence: screenConfidence ?? this.screenConfidence,
       screenItemCount: screenItemCount ?? this.screenItemCount,
+      screenBinVisible: screenBinVisible ?? this.screenBinVisible,
+      screenWasteInBin: screenWasteInBin ?? this.screenWasteInBin,
       screenNotes: screenNotes ?? this.screenNotes,
       pointsAwarded: pointsAwarded ?? this.pointsAwarded,
       rejectionReason: rejectionReason ?? this.rejectionReason,
