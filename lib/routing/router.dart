@@ -23,6 +23,7 @@ import '../views/history/submission_history_view.dart';
 import '../views/profile/profile_view.dart';
 import '../views/wallet/wallet_ledger_view.dart';
 import '../views/disposal/scan_view.dart';
+import '../views/disposal/bin_entry_view.dart';
 import '../views/disposal/photo_view.dart';
 import '../views/disposal/location_view.dart';
 import '../views/disposal/declare_view.dart';
@@ -74,6 +75,14 @@ const String splashPath = '/splash';
 /// only restores an intention.
 class PendingDestination {
   String? _path;
+
+  /// The current deferred intention without clearing it.
+  ///
+  /// Redirects need this during a cold anonymous launch: the first pass has
+  /// already replaced the bin URL with `/splash`, but the second pass still
+  /// needs to know that the visitor arrived through a bin QR so it can offer
+  /// registration first. Only [consume] clears the value.
+  String? get current => _path;
 
   /// Records where the visitor was trying to go.
   ///
@@ -211,6 +220,41 @@ String? activeRouteRedirect(UserModel user) => user.isActive ? null : '/home';
 String? sellerRouteRedirect(UserModel user) {
   if (!user.isActive) return '/home';
   return user.isSeller ? null : '/apply-seller';
+}
+
+/// Converts browser and native deep-link URIs into a GoRouter-internal location.
+///
+/// Browser route information normally arrives as `/path?query`, while a cold
+/// Android or iOS app link can retain its `https://host` origin. Redirects must
+/// remember only the local path: returning an absolute URI after authentication
+/// is not a valid in-app navigation target.
+String restorableRouteLocation(Uri uri) {
+  final buffer = StringBuffer(uri.path.isEmpty ? '/' : uri.path);
+  if (uri.hasQuery) buffer.write('?${uri.query}');
+  if (uri.hasFragment) buffer.write('#${uri.fragment}');
+  return buffer.toString();
+}
+
+bool _isBinEntryLocation(String? value) {
+  if (value == null) return false;
+  final uri = Uri.tryParse(value);
+  final path = uri?.path ?? value;
+  return path.startsWith('/b/');
+}
+
+/// Auth screen chosen for an anonymous deep link.
+///
+/// Bin labels are a first-use acquisition path, so they lead to the short
+/// registration form. A session that has just ended always leads to sign-in;
+/// this distinction matters on borrowed phones.
+String anonymousGateDestination(
+  String location, {
+  required bool sessionJustEnded,
+  String? deferredLocation,
+}) {
+  final arrivedFromBin =
+      _isBinEntryLocation(location) || _isBinEntryLocation(deferredLocation);
+  return !sessionJustEnded && arrivedFromBin ? '/register' : '/login';
 }
 
 /// What the gate knows about the signed-in account at redirect time.
@@ -426,7 +470,9 @@ final routerProvider = Provider<GoRouter>((ref) {
           // string, and `/appeals/new?type=claim&id=abc` restored without it
           // becomes a form with no subject attached — which the rules then
           // refuse with a message naming two reasons that are both false.
-          if (isRealDestination()) pending.remember(state.uri.toString());
+          if (isRealDestination()) {
+            pending.remember(restorableRouteLocation(state.uri));
+          }
           return splashPath;
 
         case _Gate.anonymous:
@@ -441,9 +487,19 @@ final routerProvider = Provider<GoRouter>((ref) {
             // Kept across sign-in: someone who follows a link, is asked to sign
             // in, and does so should arrive where the link pointed — query
             // string included, which is where /appeals/new carries its subject.
-            pending.remember(state.uri.toString());
+            pending.remember(restorableRouteLocation(state.uri));
           }
-          return '/login';
+          // A bin QR is an acquisition path: the user has arrived to make
+          // their first submission, and the smallest next step is the existing
+          // three-field registration form. Its "Already a member?" action is
+          // still one tap away. A deliberate sign-out continues to go to login
+          // so a shared phone never implies the next person should create a new
+          // account.
+          return anonymousGateDestination(
+            location,
+            sessionJustEnded: wasSignedIn,
+            deferredLocation: pending.current,
+          );
 
         case _Gate.profileMissing:
           return isIncomplete ? null : accountIncompletePath;
@@ -522,6 +578,14 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/donate',
         builder: (context, state) => const DonationView(),
+        redirect: requireActive,
+      ),
+      GoRoute(
+        path: '/b/:payload',
+        builder: (context, state) {
+          final payload = state.pathParameters['payload'] ?? '';
+          return BinEntryView(key: ValueKey(payload), payload: payload);
+        },
         redirect: requireActive,
       ),
       GoRoute(

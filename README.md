@@ -18,7 +18,9 @@ requirements and role hierarchy.
 - Fast switching between held profiles, with correct defaults and
   profile-specific home/navigation content
 - Champion education and application to become a 3ZERO Greenpreneur
-- Four-step disposal flow: scan → photo → location → confirmation
+- One bin QR opens the installed app or the hosted website; a new visitor can
+  register with name, email, and password and resume at the same bin
+- Four-step disposal flow: bin link/scan → photo → location → confirmation
 - Server-side distance, photo-provenance, duplicate-hash, AI-screen, and cap checks
 - Human review queues for flagged disposals and self-reported eco-actions
 - Immutable points ledger, configurable policy, suspension, and push decisions
@@ -74,6 +76,52 @@ On web the app now detects that exact mistake and says so at startup.
 `CHOKRO_API` is read with `String.fromEnvironment`, which is resolved at
 **compile time**. Changing it needs a full stop and relaunch; a hot restart
 keeps the value the binary was built with.
+
+`CHOKRO_WEB_URL` controls the HTTPS origin printed into bin QR codes and defaults
+to `https://chokro-30887.web.app`. It must be a clean root HTTPS origin: no
+credentials, custom port, path, query, or fragment. Changing it requires a full
+rebuild and a coordinated release: bind the domain to Firebase Hosting, update
+the Android intent filter and iOS associated domain, publish both matching
+`/.well-known` files, allowlist the exact origin in server CORS, and rebuild
+every app and label-producing client.
+
+### QR website fallback and app links
+
+Printed labels encode `/b/{opaque-bin-token}` on Firebase Hosting. The same link
+is routed into Android and iOS when the installed build is associated with that
+domain. Without the app, the Flutter website asks the visitor to sign in or
+create the existing three-field account, restores the bin link after auth, and
+uses the same authenticated upload, live geolocation, duplicate, lockout,
+screening, review, and server-only payout controls. Native forces a new camera
+capture; web uses the browser's file chooser and therefore cannot prove that the
+selected image was captured at that moment. Browser users see the immediate
+decision or can check submission history; system push notifications remain a
+mobile capability.
+
+The web client uses Flutter's path URL strategy, while Hosting's SPA rewrite
+serves `index.html` without discarding the original `/b/...` address. A small
+startup migration keeps older `/#/...` bookmarks usable after this change.
+
+The current Gradle `release` build is deliberately debug-signed for local demos;
+it is not a production signing setup. For Play distribution, the Play App
+Signing certificate SHA-256 shown under **App integrity → App signing** is the
+authoritative fingerprint for `web/assetlinks.json` (not the upload-key
+fingerprint). For direct APK distribution, configure a production signing key
+and list that certificate's SHA-256. The repository currently includes only the
+local debug fingerprint for device testing.
+
+Set the trusted service's production `ALLOWED_ORIGINS` to include the exact
+origin `https://chokro-30887.web.app`, and confirm the production Cloudinary
+credentials with an authenticated disposal-photo upload smoke test. Then deploy
+the built web client and association files together:
+
+```bash
+flutter build web
+npx -y firebase-tools@latest deploy --only hosting
+```
+
+Existing token-only labels stay compatible with Chokro's in-app scanner, but
+they must be reprinted after deployment to gain the browser fallback.
 
 The trusted service uses Node 22 LTS (the version pinned by `server/package.json`):
 

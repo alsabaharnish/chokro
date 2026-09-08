@@ -17,6 +17,68 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-09-08 17:25 (+06) — One bin QR now reaches the app or a browser submission
+
+New bin labels encode an HTTPS `/b/{opaque-token}` entry instead of a token-only
+barcode. Android and iOS are configured to claim that path after the hosted
+association is verified; without the app, Firebase Hosting serves the same
+Flutter flow. A first-time visitor is sent straight to the existing
+name/email/password registration form, the auth gate retains the exact bin URL,
+and successful registration returns to a resolved-bin screen rather than asking
+for a second scan. Existing token-only labels remain readable inside the app.
+
+Firestore continues to store the opaque token only, the QR URL exposes no
+coordinates or user data, and web submissions use the same authenticated upload,
+live-location radius, lockout, daily cap, duplicate detection, automated screen,
+human-review fallback and server-only wallet mutation. Native forces a new camera
+capture; web uses a file chooser and cannot prove that the chosen file was freshly
+captured, so the interface and documentation state that assurance difference
+plainly. Malformed tokens and lookalike hosts are rejected; closed and locked-out
+bins cannot start a draft. PDF labels, the Admin QR dialog, copy text and
+explanatory copy now agree on the public link.
+
+Native association files are included for `chokro-30887.web.app`. The iOS file
+uses the project's existing Team ID and bundle ID. Android authorises the local
+debug certificate for device testing, and the current Gradle release is
+debug-signed for local demos only. Play builds must list the Play App Signing
+certificate—not the upload key—while directly distributed APKs need a production
+signing key and its SHA-256. The Apple App ID and distribution profile must carry
+Associated Domains. An unlisted Android build still receives the browser
+fallback, so this limitation fails to a working website rather than a dead QR.
+
+The project brief is now v3.3 with F2.13 and NFR-14, the README carries build and
+release instructions, a dedicated integration note records the data and signing
+boundaries, and the business brief is now v2.2 with the app/browser path in its
+plain-language product explanation.
+
+The web client opts into Flutter path routing so Firebase Hosting can preserve a
+clean `/b/...` QR address, while startup migrates older `/#/...` bookmarks.
+Cold native app-link URIs are normalized to an internal route before the auth
+handoff, so first-time Android and iOS launches also retain the exact bin through
+registration instead of falling back to the generic sign-in destination.
+Production rollout still requires the Hosting deploy, the Hosting origin in the
+trusted service's `ALLOWED_ORIGINS`, confirmed production Cloudinary credentials
+and an authenticated upload smoke test, production native signing/provisioning,
+and replacement of any token-only physical labels. Browser users see the
+immediate decision or history; system push remains mobile-only.
+
+Files: `lib/core/bin_link.dart`, `lib/services/bin_service.dart`,
+`lib/controllers/scan_controller.dart`, `lib/core/bin_label_pdf.dart`,
+`lib/views/admin/admin_bins_view.dart`,
+`lib/views/disposal/bin_entry_view.dart`, `lib/routing/router.dart`,
+`lib/main.dart`, `pubspec.yaml`, `lib/services/push_service.dart`,
+`android/app/src/main/AndroidManifest.xml`, `ios/Runner/Runner.entitlements`,
+`ios/Runner/Info.plist`, `ios/Runner.xcodeproj/project.pbxproj`,
+`web/assetlinks.json`,
+`web/apple-app-site-association`, `firebase.json`, QR/routing/native
+configuration tests, `web/index.html`, `Chokro_Mobile_Project_Brief v3.md`, `README.md`,
+`INTEGRATION_NOTES_QR_WEB_FALLBACK.md`, `INTEGRATION_NOTES_F7.1.md`,
+`business/What-Chokro-Is.docx`.
+Checks: `flutter analyze lib test` clean · `flutter test` 705 pass ·
+`flutter build web` succeeds with both association files copied · final 24-page
+business brief render visually inspected · Hosting emulator returns HTTP 200 for
+the clean bin route and both `/.well-known` proofs with JSON content types.
+
 ## 2026-09-08 01:21 (+06) — SDG impact dashboard with honest reporting boundaries
 
 The Admin dashboard now opens with a dedicated SDG impact view and retains the

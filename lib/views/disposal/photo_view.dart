@@ -6,12 +6,12 @@ import 'package:go_router/go_router.dart';
 import '../../controllers/disposal_controller.dart';
 import '../shared/flow_progress.dart';
 
-/// Step 2 of the disposal flow (F2.3): photograph the disposal.
+/// Step 2 of the disposal flow (F2.3): provide a disposal photograph.
 ///
-/// The photo is captured and compressed here but **not uploaded** — upload
-/// happens at submission, once the user has committed to the whole thing.
-/// Uploading eagerly would leave orphaned files in Storage every time someone
-/// backs out, and Storage has no automatic cleanup.
+/// The photo is captured or selected and compressed here but **not uploaded** —
+/// upload happens at submission, once the user has committed to the whole thing.
+/// Uploading eagerly would leave orphaned Cloudinary files whenever someone
+/// abandons a draft, with no reliable signal that the upload is safe to remove.
 class DisposalPhotoView extends ConsumerWidget {
   const DisposalPhotoView({super.key});
 
@@ -26,7 +26,7 @@ class DisposalPhotoView extends ConsumerWidget {
     if (bin == null) {
       return Scaffold(
         appBar: AppBar(
-          title: const Text('Photograph disposal'),
+          title: Text(kIsWeb ? 'Add disposal photo' : 'Photograph disposal'),
           bottom: const FlowProgress(current: 2, total: 4, label: 'Photo'),
         ),
         body: Center(
@@ -55,7 +55,7 @@ class DisposalPhotoView extends ConsumerWidget {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Photograph disposal'),
+        title: Text(kIsWeb ? 'Add disposal photo' : 'Photograph disposal'),
         bottom: const FlowProgress(current: 2, total: 4, label: 'Photo'),
       ),
       body: SingleChildScrollView(
@@ -86,10 +86,17 @@ class DisposalPhotoView extends ConsumerWidget {
                 // the wrong photo and then flagging it would punish honest
                 // users for following the instructions.
                 Text(
-                  'Photograph the items going into the bin — inside it, or '
-                  'mid-drop. Waste held in your hand or resting beside the bin '
-                  'will be held for a 3ZERO Admin to review instead of being '
-                  'credited straight away.',
+                  kIsWeb
+                      ? 'Choose a clear, current photo showing the items inside '
+                            'the bin or mid-drop. The website cannot prove that '
+                            'a chosen file was just captured. Waste held in '
+                            'your hand or resting beside the bin will be held '
+                            'for a 3ZERO Admin to review instead of being '
+                            'credited straight away.'
+                      : 'Photograph the items going into the bin — inside it, '
+                            'or mid-drop. Waste held in your hand or resting '
+                            'beside the bin will be held for a 3ZERO Admin to '
+                            'review instead of being credited straight away.',
                   style: theme.textTheme.bodySmall,
                 ),
                 const SizedBox(height: 12),

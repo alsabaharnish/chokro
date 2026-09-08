@@ -238,7 +238,7 @@ class DisposalDraftController extends Notifier<DisposalDraft> {
   // Photo (F2.3)
   // ---------------------------------------------------------------------------
 
-  /// Takes a photograph and compresses it.
+  /// Obtains a disposal photograph and compresses it.
   ///
   /// Compression is not only about upload size. `FlutterImageCompress` re-encodes
   /// the image, which **strips EXIF metadata** — including the GPS coordinates
@@ -246,8 +246,13 @@ class DisposalDraftController extends Notifier<DisposalDraft> {
   /// fields, from a fix the app requested; it should not also leak whatever the
   /// camera happened to stamp into the file (§7.4).
   ///
-  /// Returns true if a photo was captured. False means the user cancelled, which
-  /// is not an error.
+  /// Native builds force a new camera capture. Browsers use the platform file
+  /// chooser because `image_picker` cannot guarantee a live camera capture on
+  /// web; the chosen image still goes through the same upload, content screen,
+  /// duplicate, geofence, lockout, and review path.
+  ///
+  /// Returns true if a photo was captured or selected. False means the user
+  /// cancelled, which is not an error.
   Future<bool> capturePhoto() async {
     state = state.copyWith(isCapturing: true, clearError: true);
 

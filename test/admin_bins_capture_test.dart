@@ -1,6 +1,7 @@
 import 'package:chokro/controllers/admin_bins_controller.dart';
 import 'package:chokro/controllers/auth_controller.dart';
 import 'package:chokro/core/constants.dart';
+import 'package:chokro/core/bin_link.dart';
 import 'package:chokro/core/theme.dart';
 import 'package:chokro/models/bin_model.dart';
 import 'package:chokro/models/user_model.dart';
@@ -292,9 +293,12 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.text(bin.label), findsWidgets);
-    expect(find.text(bin.qrPayload), findsOneWidget);
+    expect(
+      find.text(BinLink.forPayload(bin.qrPayload).toString()),
+      findsOneWidget,
+    );
     expect(find.bySemanticsLabel('QR code for ${bin.label}'), findsOneWidget);
-    expect(find.text('Copy payload'), findsOneWidget);
+    expect(find.text('Copy link'), findsOneWidget);
     expect(tester.takeException(), isNull);
     semantics.dispose();
   });

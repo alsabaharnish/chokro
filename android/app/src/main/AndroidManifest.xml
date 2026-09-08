@@ -38,9 +38,25 @@
               android:name="io.flutter.embedding.android.NormalTheme"
               android:resource="@style/NormalTheme"
               />
+            <meta-data
+              android:name="flutter_deeplinking_enabled"
+              android:value="true" />
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <!-- The HTTPS address printed in a bin QR. Android opens Chokro
+                 directly when this installation's signing certificate is
+                 authorised by the hosted assetlinks.json; otherwise the
+                 same URL remains a normal Firebase Hosting page. -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data
+                    android:scheme="https"
+                    android:host="chokro-30887.web.app"
+                    android:pathPrefix="/b/"/>
             </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.

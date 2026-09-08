@@ -91,21 +91,25 @@ class ScanState {
 
 /// Resolves scanned payloads to bins.
 class ScanController extends Notifier<ScanState> {
+  int _requestRevision = 0;
+
   @override
   ScanState build() => const ScanState();
 
   /// Looks up [payload] and updates state with the outcome.
   ///
-  /// Ignores repeat scans while a lookup is in flight — the camera fires
-  /// continuously, and without this a single code produces a burst of identical
-  /// Firestore queries.
+  /// The latest request wins. The scanner view already suppresses repeated
+  /// camera detections; this controller must still accept a newer app/universal
+  /// link while an older lookup is in flight. Otherwise the older bin could
+  /// overwrite the screen after the user scanned a second label.
   Future<void> resolve(String payload) async {
-    if (state.isBusy) return;
+    final requestRevision = ++_requestRevision;
 
     state = const ScanState(outcome: ScanOutcome.resolving);
 
     try {
       final bin = await ref.read(binServiceProvider).resolveByPayload(payload);
+      if (requestRevision != _requestRevision) return;
 
       if (bin == null) {
         state = const ScanState(outcome: ScanOutcome.unknownCode);
@@ -127,6 +131,7 @@ class ScanController extends Notifier<ScanState> {
         final until = await ref
             .read(lockoutServiceProvider)
             .activeUntil(uid: uid, binId: binId);
+        if (requestRevision != _requestRevision) return;
 
         if (until != null) {
           state = ScanState(
@@ -140,6 +145,7 @@ class ScanController extends Notifier<ScanState> {
 
       state = ScanState(outcome: ScanOutcome.resolved, bin: bin);
     } catch (err) {
+      if (requestRevision != _requestRevision) return;
       // `friendlyErrorMessage`, not `err.toString()`.
       //
       // This is the first screen of the disposal flow, so a rules or
@@ -154,7 +160,10 @@ class ScanController extends Notifier<ScanState> {
     }
   }
 
-  void reset() => state = const ScanState();
+  void reset() {
+    _requestRevision++;
+    state = const ScanState();
+  }
 }
 
 final scanControllerProvider = NotifierProvider<ScanController, ScanState>(

@@ -222,13 +222,12 @@ named for this.
 
 ## Known limitations — state these in the term paper
 
-1. **iOS is not configured.** FCM on iOS needs an APNs authentication key
-   uploaded to the Firebase console. The `ios/` target exists but is not a
-   delivery target for this project, and `PushService.isSupported` covers iOS
-   only so the code is ready if that changes.
+1. **iOS delivery still depends on Firebase/APNs credentials.** The native
+   target and push entitlement are configured, but FCM on iOS also needs an APNs
+   authentication key uploaded to the Firebase console.
 2. **Web push is not implemented.** It needs a VAPID key pair and a service
-   worker. F7.1 is a Mobile-only row in §7, and the flow that generates most
-   notifications is mobile-only anyway.
+   worker. F7.1 remains a Mobile-only row in §7. Browser disposal users can
+   submit and use the in-app history, but do not receive a system push.
 3. **No named notification channel.** Android groups these under FCM's fallback
    channel, labelled "Miscellaneous" in system settings. A named channel needs
    `flutter_local_notifications` — see decision 3 above for why that was not

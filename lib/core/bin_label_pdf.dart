@@ -27,6 +27,7 @@ import 'dart:typed_data';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
+import 'bin_link.dart';
 import '../models/bin_model.dart';
 
 /// Error correction for the printed code.
@@ -160,6 +161,7 @@ class _BinLabel extends pw.StatelessWidget {
 
   @override
   pw.Widget build(pw.Context context) {
+    final publicLink = BinLink.forPayload(bin.qrPayload).toString();
     return pw.Column(
       mainAxisSize: pw.MainAxisSize.min,
       children: [
@@ -193,7 +195,7 @@ class _BinLabel extends pw.StatelessWidget {
           color: PdfColors.white,
           child: pw.BarcodeWidget(
             barcode: pw.Barcode.qrCode(errorCorrectLevel: _correction),
-            data: bin.qrPayload,
+            data: publicLink,
             width: qrSize,
             height: qrSize,
             drawText: false,
@@ -202,7 +204,7 @@ class _BinLabel extends pw.StatelessWidget {
         pw.SizedBox(height: 4 * PdfPageFormat.mm * _scale),
 
         pw.Text(
-          'Scan with the Chokro app to log a disposal',
+          'Scan to log a disposal - no app required',
           textAlign: pw.TextAlign.center,
           style: pw.TextStyle(fontSize: 11 * _scale.clamp(0.65, 1.0)),
         ),
@@ -225,8 +227,8 @@ class _BinLabel extends pw.StatelessWidget {
         // payload when someone reports that a code will not scan.
         //
         // Printing the coordinates here discloses nothing: the label is
-        // physically attached to the bin it describes. What must never be
-        // encoded is the *barcode* — see [BinModel.qrPayload].
+        // physically attached to the bin it describes. The barcode URL itself
+        // contains only the opaque token — see [BinModel.qrPayload].
         pw.Text(
           '${bin.lat.toStringAsFixed(5)}, ${bin.lng.toStringAsFixed(5)}'
           '  ·  ${bin.radiusMeters.round()} m radius',
@@ -238,7 +240,7 @@ class _BinLabel extends pw.StatelessWidget {
         ),
         pw.SizedBox(height: 1 * PdfPageFormat.mm * _scale),
         pw.Text(
-          bin.qrPayload,
+          publicLink,
           textAlign: pw.TextAlign.center,
           maxLines: 1,
           style: pw.TextStyle(

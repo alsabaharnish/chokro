@@ -2,10 +2,9 @@
 
 **Course:** CSE489 — Android App Development, BRAC University
 **Student:** Arnish (solo project)
-**Platform:** Flutter (Android + Web, single codebase) + Node service
+**Platform:** Flutter (Android + iOS + Web, single codebase) + Node service
 **Repository:** `https://github.com/alsabaharnish/chokro`
-**Document version:** 3.2 — SDG-aligned Admin reporting, explicit data
-provenance, and dashboard resilience complete
+**Document version:** 3.3 — one QR entry for installed-app and browser disposal
 
 > Formerly titled *EcoPoint360*. The product is now **Chokro**. Older drafts of
 > this document circulate under the previous name; this file supersedes them.
@@ -45,6 +44,18 @@ the product already records, labels cached or bounded reads, and deliberately
 does not invent weight, carbon, employment, income, or progress-to-target
 figures. It also fixes stale temporary-suspension counts and keeps independently
 healthy account totals and Admin shortcuts visible if platform counters fail.
+
+Version 3.3 changes newly generated and reprinted labels from token-only codes to
+HTTPS bin-entry links. The operating system opens the installed Chokro app when
+the domain association is verified; otherwise the same URL loads the Flutter web
+client. An anonymous visitor creates the existing minimal account (name, email,
+password), then the auth gate restores the exact bin link and continues through
+the same authenticated upload, live-location, lockout, screening, review, and
+points path. Native forces a new camera capture, while a browser uses a file
+chooser and cannot prove that its selected image was freshly captured. Firestore
+continues to store only the opaque bin token, so this adds no data migration or
+server-check bypass. Existing token-only labels remain app-scannable but must be
+reprinted to gain the website fallback.
 
 The persisted `users.role` values remain `admin`, `seller`, and `buyer`, and
 existing field names such as `sellerId` and `buyerId` remain unchanged. They are
@@ -104,7 +115,7 @@ registration. Code does not.
 A cross-platform mobile and web application that rewards verified sustainable
 behaviour with points, and lets those points be spent with 3ZERO Greenpreneurs
 or donated to 3ZERO green initiatives. It is built as a single Flutter codebase
-targeting Android and the browser, backed by a cloud datastore and a small
+targeting Android, iOS, and the browser, backed by a cloud datastore and a small
 trusted service.
 
 ### 3.2 The problem
@@ -169,10 +180,10 @@ safeguards available — human review, a fixed action vocabulary and a weekly qu
 alone.
 
 **Printed QR codes rather than smart bins.** Hardware integration is out of
-scope, and a printed code performs the same identification function within the
-verification workflow at effectively zero deployment cost — which also happens to
-be the only realistic way such a system would actually reach bins in a
-Bangladeshi neighbourhood.
+scope. A printed HTTPS code identifies the bin at effectively zero deployment
+cost. A verified Android App Link or iOS Universal Link opens Chokro when it is
+installed; otherwise the browser loads the same Flutter flow. The URL carries
+only the opaque bin token, never coordinates or user data.
 
 **Machine assistance with a human fallback.** Automated checks screen and sort.
 Where every mechanical check passes and the screen is confident, the submission
@@ -251,10 +262,10 @@ boundary of what is delivered is stated rather than left implicit.
 
 | Layer | Choice | Notes |
 |---|---|---|
-| Framework | Flutter (stable channel) | Single codebase, Android + Web targets |
+| Framework | Flutter (stable channel) | Single codebase, Android + iOS + Web targets |
 | Language | Dart | |
 | State management | Riverpod (`flutter_riverpod` 3.4.x, `AsyncNotifier`) | Chosen over Provider for testability and role-gated state |
-| Routing | `go_router` | Gives real URLs on the web build — required for admin deep links |
+| Routing | `go_router` | Gives real URLs on web and restores protected bin links after registration |
 | QR generation | `qr_flutter` | |
 | QR scanning | `mobile_scanner` 7.4.0 | |
 | Location | `geolocator` 14.0.3 | |
@@ -272,6 +283,7 @@ boundary of what is delivered is stated rather than left implicit.
 | `targetSdk` | current | |
 | Manifest permissions | `INTERNET`, `CAMERA`, `ACCESS_FINE_LOCATION`, `ACCESS_COARSE_LOCATION` | Runtime-requested with denial states handled |
 | `uses-feature` camera | `required="false"` | With `true`, Play Store hides the app from camera-less devices; the marketplace half works fine without one |
+| Verified links | HTTPS host `chokro-30887.web.app`, path `/b/*` | Android App Link opens the installed app; Firebase Hosting is the fallback |
 
 **Note on `image_picker` and the camera permission.** Declaring `CAMERA` in the
 manifest changes `image_picker`'s behaviour: without the declaration it delegates
@@ -291,7 +303,7 @@ codec is needed.
 | Auth | Firebase Auth | |
 | Database | Cloud Firestore | Syllabus material, Week 11 |
 | File storage | Cloudinary, via the Node service | Disposal and claim photographs. Firebase Storage needs the Blaze plan, so uploads go through `POST /photos/disposal` and the client never holds a storage credential |
-| Web hosting | Firebase Hosting | Live at `https://chokro-30887.web.app` |
+| Web hosting | Firebase Hosting | Production origin `https://chokro-30887.web.app`; v3.3 web redeploy pending |
 | Rules testing | Firebase Emulator Suite + Jest | 130 tests across 5 files in `rules_test/`, run serially |
 | Firebase project | `chokro-30887` | |
 
@@ -452,32 +464,22 @@ Distinguish a **capability limit** (the platform cannot do it) from a **layout
 preference** (both can, but one is more comfortable). Only the first justifies
 excluding a feature from a target.
 
-**The one genuine capability limit** is the disposal flow. Camera and geolocation
-on Flutter web go through browser APIs, with HTTPS requirements and weaker
-permissions than a native build. The disposal flow is therefore **mobile-only by
-design** — defensible as a product decision: disposal is a "standing at a bin
-with a phone" action.
-
-This is a **runtime** boundary, not a build one, and the distinction matters
-because it is easy to misread. The whole application compiles for web: `flutter
-build web` succeeds in release and in WebAssembly. What is mobile-only is the
-*execution* of five files that take a `dart:io` `File` for photo capture
-(`photo_upload_service`, `disposal_controller`, `claim_controller`, `photo_view`,
-`declare_view`, plus `claim_submit_view`); on web those code paths would throw
-`UnsupportedError` if reached, and nothing routes to them there. A further five
-services import `dart:io` only to name `SocketException` in a catch clause, which
-is inert on web — the browser raises `http.ClientException`, which each of them
-already handles on the next clause.
-
-None of the web-primary screens is affected: the admin review queue, the claim
-queue and the QR/PDF label contain no `dart:io` and no `File`.
+The disposal flow now runs on both targets. On web, a user-initiated file chooser
+selects the photo; it does not require camera permission, and the browser cannot
+prove that the file was captured at that moment. Browser geolocation requires a
+secure origin and explicit site permission. Native builds force the device
+camera and use the platform location-permission flow. Both clients produce the
+same compressed byte input, write the same pending document shape, and call the
+same trusted verification endpoint. The web route has lower live-capture
+assurance, but it does not bypass the server-owned bin radius, duplicate,
+daily-cap, lockout, photo-content screening, review, or wallet rules.
 
 **Everything else ships to both targets.** Since controllers and services are
 shared, a second view tree is roughly a day of work per screen.
 
 | Capability | Mobile | Web | Notes |
 |---|---|---|---|
-| Disposal flow (scan → photo → GPS) | ✅ | ❌ | Only true platform limit |
+| Disposal flow (QR link → photo → GPS) | ✅ | ✅ | Native forces camera capture; web uses a file chooser, while geolocation needs a secure origin and site permission |
 | Browse, cart, checkout | ✅ | ✅ | |
 | Account profile switcher | ✅ | ✅ | Held profiles only; never elevates authorization |
 | Greenpreneur console | ✅ | ✅ primary | |
@@ -593,8 +595,10 @@ may carry several at once.
 - **A product's image URLs are validated by index, not by iteration.** The
   three-image ceiling exists so each slot can be named explicitly in the rules;
   an unbounded list would mean unvalidated entries.
-- The `bins.qrPayload` is an opaque bin identifier only. It carries no
-  coordinates and no user data, so a photographed code discloses nothing.
+- The `bins.qrPayload` remains an opaque bin identifier. Labels generated or
+  reprinted by v3.3 encode `https://chokro-30887.web.app/b/{payload}` so one
+  scan can enter the app or browser; the URL carries no coordinates or user
+  data.
 - Every `createdAt`, `expiresAt` and review timestamp uses
   `FieldValue.serverTimestamp()`.
 
@@ -675,7 +679,7 @@ releases purchase points. A Greenpreneur cannot confirm their own delivery.
 
 ---
 
-## 7. Scope — 41 features
+## 7. Scope — 42 features
 
 ### FR-1 Identity and roles
 
@@ -692,17 +696,18 @@ releases purchase points. A Greenpreneur cannot confirm their own delivery.
 | ID | Feature | Platform | Status |
 |---|---|---|---|
 | F2.1 | Bin registration with printable QR generation | Both (mobile-first, GPS capture) | M2 |
-| F2.2 | Bin QR scan | Mobile | M2 |
-| F2.3 | Disposal photo capture and upload | Mobile | M2 |
-| F2.4 | Geolocation capture at time of scan | Mobile | M2 |
-| F2.5 | GPS radius validation against bin coordinates | Mobile + server | M2 |
+| F2.2 | Bin QR scan or HTTPS link entry | Both | M2 + v3.3 |
+| F2.3 | Disposal photo capture/selection and upload | Both | M2 + v3.3 |
+| F2.4 | Geolocation capture at time of submission | Both | M2 + v3.3 |
+| F2.5 | GPS radius validation against bin coordinates | Both + server | M2 + v3.3 |
 | F2.6 | Duplicate-claim lockout (time window per user per bin) | Rules + server | M2 |
 | F2.7 | 3ZERO Admin review queue for pending submissions | Both (web primary) | M2 |
 | F2.8 | Approve or reject with logged reason | Both (web primary) | M2 |
-| F2.9 | **Declared item count and type at submission** | Mobile | M2 |
+| F2.9 | **Declared item count and type at submission** | Both | M2 + v3.3 |
 | F2.10 | **Automated photo screening (Groq)** | Server | M2 |
 | F2.11 | **Perceptual-hash duplicate detection** | Server | M2 |
 | F2.12 | **Two-lane decision: auto-approve or route to review** | Server | M2 |
+| F2.13 | **HTTPS bin QR opens installed app or browser fallback, preserving the bin through registration** | Both | ✅ v3.3 |
 
 The client-side distance check in F2.5 is for user feedback only. The
 authoritative check runs on the server against the stored coordinates — a client
@@ -781,15 +786,18 @@ where mechanical checks can pass.
 ### 7.1 End-to-end workflows
 
 **Earn loop (disposal).**
-`3ZERO Admin registers bin on site → GPS captured → QR generated and printed →
-Champion scans code → app resolves bin → Champion declares item count and type →
-photographs disposal → device coordinates captured → submission stored as pending
+`3ZERO Admin registers bin on site → GPS captured → HTTPS QR generated and
+printed → Champion scans code → installed app opens, or Flutter web opens and a
+new visitor registers → auth gate restores the same bin → Champion captures a
+native photo or selects a current browser photo → device coordinates captured →
+Champion declares item count and type → submission stored as pending
 → server recomputes distance, hashes the photo, checks for duplicates, screens
-the image → if everything passes, credit and push "50 points added" → otherwise
-flag and route to the Admin queue → Admin reviews photo, distance, flags and the
-user's history → approve or reject with reason → on approval, wallet credited and
-ledger entry written with source=disposal, push "manually verified" → Champion
-sees balance and reason in history`
+the image → if everything passes, credit; mobile receives a push such as "50
+points added," while web shows the immediate result and history → otherwise flag
+and route to the Admin queue → Admin reviews photo, distance, flags and the user's
+history → approve or reject with reason → on approval, wallet credited and ledger
+entry written with source=disposal; mobile receives "manually verified" push,
+while every platform shows the balance and reason in history`
 
 **Spend loop (marketplace).**
 `Greenpreneur lists product → Champion browses and filters catalogue → adds to cart →
@@ -973,13 +981,14 @@ endpoint's immediate response; Admin reporting uses aggregate counters.
 | NFR-4 | Every balance change written as a ledger entry; balance reconstructable from history |
 | NFR-5 | Strict separation between models, services, controllers and views |
 | NFR-6 | Both builds run from one codebase; no forked logic between platforms |
-| NFR-7 | Firestore offline persistence enabled. A submission composed with no connectivity queues and syncs on reconnection — connectivity at a roadside bin is not assumed |
+| NFR-7 | Firestore offline persistence is enabled for compatible cached reads and queued writes. Disposal still requires live connectivity for trusted photo upload and verification; offline disposal remains an explicit product gap rather than a silent promise |
 | NFR-8 | Interface language is English; structured for localisation |
 | NFR-9 | **No credential appears in the repository.** Verified by `.gitignore` and checked before each commit |
 | NFR-10 | **The server never logs credential content.** Parse failures report length and first character only |
 | NFR-11 | Profile and donation selectors and the bin QR dialog remain keyboard-, screen-reader-, and touch-usable without layout failures or semantics mutation during a render pass |
 | NFR-12 | User-facing copy uses 3ZERO Admin, 3ZERO Greenpreneur, and 3ZERO Champion; legacy role words remain only in technical wire names or historical context |
 | NFR-13 | SDG reporting distinguishes operational contribution signals from official indicators and audited outcomes; never estimates kilograms, tonnes, avoided emissions, jobs, or income without source data, and always labels cached or bounded values |
+| NFR-14 | Every newly generated or reprinted bin QR uses an HTTPS entry URL with an installed-app association and browser fallback; registration preserves the requested bin, while the URL discloses no coordinates or user data |
 
 ---
 
@@ -1179,7 +1188,8 @@ Every code deliverable above is built. See `INTEGRATION_NOTES_M3.md`.
   across the demonstration ledger
 - Both builds run cleanly with no analyzer warnings
 - The APK installs and runs without a development server attached
-- Every feature except the disposal flow is reachable on both targets
+- Every user journey is reachable on mobile and web; browser disposal enters
+  through the HTTPS bin link instead of the in-app scanner camera
 
 **Risks:** Polish always overruns. Freeze features one week before the
 presentation. **Warm the Render service before demonstrating.**
@@ -1284,6 +1294,48 @@ by design and are not additive.
 tests pass; focused model and widget regressions cover derivation, provenance,
 independent failure states, contrast, and narrow-screen large-text layout; and
 the production web build succeeds. See `INTEGRATION_NOTES_SDG_DASHBOARD.md`.
+
+---
+
+### Product revision 3.3 — QR app link and browser submission ✅ IMPLEMENTED · RELEASE STEPS PENDING
+
+**Objective:** Let a person at a Chokro bin submit without installing the app,
+while keeping one QR and one server verification path.
+
+**Features:** F2.1 revision, F2.13, NFR-14
+
+**Delivered:**
+
+- New labels encode an HTTPS `/b/{opaque-token}` link; old token-only labels
+  remain readable inside the app
+- Android App Link and iOS Universal Link declarations for the Firebase Hosting
+  domain, plus hosted association files and JSON content-type headers
+- A resolved-bin entry screen with clear active, closed, unknown, locked-out,
+  loading, and retry states
+- Existing pending-destination auth behavior returns a new browser visitor to
+  the exact bin after the three-field registration form
+- PDF labels, on-screen QR, copy action, and supporting text all use the public
+  link without changing the stored `bins.qrPayload`
+- Strict parsing rejects malformed tokens and lookalike web hosts
+- Flutter path routing preserves the clean `/b/...` address after Firebase
+  Hosting serves the single-page app
+
+**Release boundary:** the checked-in Android association authorises the local
+debug certificate, and the current Gradle `release` build is debug-signed for
+local demos only. A Play release must list the Play App Signing certificate
+SHA-256; a direct APK needs a configured production signing key and that
+certificate's SHA-256. The Apple App ID and distribution profile must carry the
+Associated Domains capability. The browser fallback also requires the hosted web
+build and association files to be deployed, the exact origin in production
+`ALLOWED_ORIGINS`, working production Cloudinary credentials plus an authenticated
+upload smoke test, and legacy physical labels to be reprinted. See
+`INTEGRATION_NOTES_QR_WEB_FALLBACK.md`.
+
+**Verification:** `flutter analyze lib test` is clean, all 705 Flutter tests
+pass, the production web build succeeds, and the built Hosting directory carries
+byte-identical Android and Apple association payloads. The Firebase Hosting
+emulator returns HTTP 200 for `/b/...` and both `/.well-known` proof URLs, with
+the required JSON content types on the association responses.
 
 ---
 

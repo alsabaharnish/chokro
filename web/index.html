@@ -66,6 +66,15 @@
     For more details:
     * https://docs.flutter.dev/platform-integration/web/initialization
   -->
+  <script>
+    // PathUrlStrategy reads clean `/route` addresses. Preserve any link shared
+    // by an older hash-based build by converting `/#/route` in place before
+    // Flutter reads the initial location.
+    if (window.location.hash.startsWith('#/') &&
+        !window.location.hash.startsWith('#//')) {
+      window.history.replaceState(null, '', window.location.hash.substring(1));
+    }
+  </script>
   <script src="flutter_bootstrap.js" async></script>
   <script>
     window.addEventListener('flutter-first-frame', function () {

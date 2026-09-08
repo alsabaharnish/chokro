@@ -3,7 +3,9 @@ import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_web_plugins/url_strategy.dart';
 import 'controllers/push_controller.dart';
+import 'core/bin_link.dart';
 import 'core/theme.dart';
 import 'services/server_warmup.dart';
 import 'firebase_options.dart';
@@ -36,7 +38,13 @@ Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
+  // Bin labels use a real HTTPS path (`/b/<opaque-token>`), not a hash route.
+  // Firebase Hosting rewrites that path to the SPA and this strategy makes
+  // Flutter read the original browser pathname. It is a no-op on native.
+  usePathUrlStrategy();
+
   try {
+    BinLink.validateConfiguration();
     await _initialise();
   } catch (error, stack) {
     // Unguarded, a failure here left a black screen and nothing else: no

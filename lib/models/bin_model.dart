@@ -8,8 +8,8 @@ library;
 /// A registered disposal point.
 ///
 /// Bins are created by an administrator standing at the bin, so `lat`/`lng` come
-/// from a live GPS fix rather than typed input (§5.3). The [qrPayload] is printed
-/// and attached to the physical bin.
+/// from a live GPS fix rather than typed input (§5.3). The [qrPayload] is wrapped
+/// in a public HTTPS entry URL on labels attached to the physical bin.
 class BinModel {
   /// Firestore document ID. Null for a bin not yet written.
   final String? id;
@@ -26,7 +26,7 @@ class BinModel {
   /// one in an open compound.
   final double radiusMeters;
 
-  /// The opaque identifier encoded into the printed QR code.
+  /// The opaque lookup identifier carried inside the printed QR's HTTPS URL.
   ///
   /// SECURITY: this carries no coordinates and no user data (§6). A photographed
   /// or copied code discloses nothing, and possessing one proves nothing — it

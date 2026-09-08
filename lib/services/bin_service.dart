@@ -1,6 +1,7 @@
 import 'package:cloud_firestore/cloud_firestore.dart';
 
 import '../core/constants.dart';
+import '../core/bin_link.dart';
 
 import '../models/bin_model.dart';
 
@@ -15,7 +16,11 @@ import '../models/bin_model.dart';
 /// Dart with no Firebase imports, so it does not know what a `Timestamp` is;
 /// converting here is what keeps the model unit-testable without an emulator.
 class BinService {
-  final FirebaseFirestore _db = FirebaseFirestore.instance;
+  BinService([this._firestore]);
+
+  final FirebaseFirestore? _firestore;
+
+  FirebaseFirestore get _db => _firestore ?? FirebaseFirestore.instance;
 
   CollectionReference<Map<String, dynamic>> get _bins => _db.collection('bins');
 
@@ -25,15 +30,15 @@ class BinService {
   /// another system, or it was printed for a bin that has since been removed.
   ///
   /// The lookup is by `qrPayload` rather than by document ID because the payload
-  /// is the opaque identifier the printed code carries (§6). Nothing about the
-  /// bin's location or the user is encoded in it, so a photographed code
-  /// discloses nothing and possessing one proves nothing.
+  /// is the opaque identifier carried inside the public bin link (§6). Nothing
+  /// about the bin's location or the user is encoded in it, so a photographed
+  /// code discloses nothing and possessing one proves nothing.
   Future<BinModel?> resolveByPayload(String payload) async {
-    final trimmed = payload.trim();
-    if (trimmed.isEmpty) return null;
+    final lookupPayload = BinLink.payloadFromScannedValue(payload);
+    if (lookupPayload == null) return null;
 
     final snapshot = await _bins
-        .where('qrPayload', isEqualTo: trimmed)
+        .where('qrPayload', isEqualTo: lookupPayload)
         .limit(1)
         .get();
 

@@ -30,6 +30,11 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  # Required for clean browser routes such as `/b/<token>`. Without the path
+  # URL strategy, Flutter reads only `#/...` and a QR opened at `/b/...` falls
+  # through to the home screen even though Hosting served the SPA correctly.
+  flutter_web_plugins:
+    sdk: flutter
 
   # Kept, despite carrying no direct `CupertinoIcons` reference.
   #

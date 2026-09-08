@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import 'package:chokro/core/bin_label_pdf.dart';
+import 'package:chokro/core/bin_link.dart';
 import 'package:chokro/models/bin_model.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -119,9 +120,10 @@ void main() {
   });
 
   group('what the label must not disclose', () {
-    test('the barcode encodes the payload and nothing else', () async {
-      // §6 of the brief: the QR carries an opaque bin identifier only, so a
-      // photographed code discloses nothing and possessing one proves nothing.
+    test('the barcode URL carries the payload and nothing else', () async {
+      // The public URL carries only the opaque identifier. A photographed code
+      // still discloses no coordinates or account information, and possessing
+      // one proves nothing because location is checked separately.
       //
       // The coordinates are printed on the paper — the label is physically at
       // the bin it describes — but they must not be *in the code*. This asserts
@@ -129,12 +131,12 @@ void main() {
       const payload = 'chokro:bin:deadbeef1234';
       final bin = _bin(payload: payload, lat: 23.7808, lng: 90.4074);
 
-      // The builder passes `bin.qrPayload` straight through as the barcode
-      // data; nothing composes coordinates into it.
+      final publicLink = BinLink.forPayload(bin.qrPayload).toString();
       expect(bin.qrPayload, payload);
-      expect(bin.qrPayload, isNot(contains('23.78')));
-      expect(bin.qrPayload, isNot(contains('90.40')));
-      expect(bin.qrPayload, isNot(contains(bin.createdBy)));
+      expect(Uri.parse(publicLink).pathSegments, ['b', payload]);
+      expect(publicLink, isNot(contains('23.78')));
+      expect(publicLink, isNot(contains('90.40')));
+      expect(publicLink, isNot(contains(bin.createdBy)));
 
       // And the document builds from it without error.
       expect(_pageCount(await buildBinLabelPdf(bin)), 1);

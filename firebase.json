@@ -24,7 +24,43 @@
       "**/.*",
       "**/node_modules/**"
     ],
+    "headers": [
+      {
+        "source": "/.well-known/assetlinks.json",
+        "headers": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=3600"
+          }
+        ]
+      },
+      {
+        "source": "/.well-known/apple-app-site-association",
+        "headers": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          },
+          {
+            "key": "Cache-Control",
+            "value": "public, max-age=3600"
+          }
+        ]
+      }
+    ],
     "rewrites": [
+      {
+        "source": "/.well-known/assetlinks.json",
+        "destination": "/assetlinks.json"
+      },
+      {
+        "source": "/.well-known/apple-app-site-association",
+        "destination": "/apple-app-site-association"
+      },
       {
         "source": "**",
         "destination": "/index.html"

@@ -7,6 +7,7 @@ import 'package:qr_flutter/qr_flutter.dart';
 
 import '../../controllers/admin_bins_controller.dart';
 import '../../core/bin_label_pdf.dart';
+import '../../core/bin_link.dart';
 import '../../core/geo.dart';
 import '../../core/label_format.dart';
 import '../../core/network_errors.dart';
@@ -852,6 +853,7 @@ class _QrDialogState extends State<_QrDialog> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final bin = widget.bin;
+    final publicLink = BinLink.forPayload(bin.qrPayload).toString();
     const qrSize = 200.0;
     const qrPlateSize = qrSize + (AppTheme.gapMd * 2);
 
@@ -880,7 +882,7 @@ class _QrDialogState extends State<_QrDialog> {
                 child: Padding(
                   padding: const EdgeInsets.all(AppTheme.gapMd),
                   child: QrImageView(
-                    data: bin.qrPayload,
+                    data: publicLink,
                     version: QrVersions.auto,
                     size: qrSize,
                     backgroundColor: Colors.white,
@@ -891,7 +893,7 @@ class _QrDialogState extends State<_QrDialog> {
             ),
             const SizedBox(height: AppTheme.gapMd),
             SelectableText(
-              bin.qrPayload,
+              publicLink,
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall?.copyWith(
                 fontFamily: 'monospace',
@@ -901,9 +903,10 @@ class _QrDialogState extends State<_QrDialog> {
             const SizedBox(height: AppTheme.gapSm),
             Text(
               kIsWeb
-                  ? 'Print the label and attach it to the bin.'
-                  : 'Print the label, or share it to print from another '
-                        'device.',
+                  ? 'Print the label and attach it to the bin. Scanning opens '
+                        'the website when the app is not installed.'
+                  : 'Print or share the label. Scanning opens Chokro when '
+                        'installed, or the website otherwise.',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodySmall?.copyWith(
                 color: theme.colorScheme.onSurfaceVariant,
@@ -918,10 +921,10 @@ class _QrDialogState extends State<_QrDialog> {
               ? null
               : () => _run(() async {
                   final notify = AppSnackBar.of(context);
-                  await Clipboard.setData(ClipboardData(text: bin.qrPayload));
-                  notify.success('Payload copied.');
-                }, 'The payload could not be copied.'),
-          child: const Text('Copy payload'),
+                  await Clipboard.setData(ClipboardData(text: publicLink));
+                  notify.success('Disposal link copied.');
+                }, 'The disposal link could not be copied.'),
+          child: const Text('Copy link'),
         ),
         TextButton(
           onPressed: _busy ? null : _share,

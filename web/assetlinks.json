@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.arnish.chokro",
+      "sha256_cert_fingerprints": [
+        "DB:EA:B1:A1:82:58:04:7B:9D:7B:DD:72:96:60:C2:22:CF:16:E1:D6:BD:17:F9:B6:C3:8E:DD:96:C1:CB:5B:15"
+      ]
+    }
+  }
+]

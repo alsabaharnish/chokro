@@ -74,8 +74,8 @@ Future<void> retirePushRegistration({
 /// ## Platform
 ///
 /// Mobile only, matching the F7.1 row in §7. Web push needs a VAPID key pair and
-/// a service worker, and the disposal flow that generates most notifications is
-/// already mobile-only. [isSupported] is checked before every call rather than
+/// a service worker; browser disposal users instead see their result in the
+/// in-app history. [isSupported] is checked before every call rather than
 /// letting the plugin throw on an unsupported platform.
 class PushService {
   PushService({this._messaging, this._firestore});

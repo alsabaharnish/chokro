@@ -86,4 +86,80 @@ void main() {
       expect(sellerRouteRedirect(user(role: 'buyer')), '/apply-seller');
     });
   });
+
+  group('anonymous deep-link entry', () {
+    test('a bin QR starts with the short registration form', () {
+      expect(
+        anonymousGateDestination(
+          '/b/chokro:bin:a1b2c3d4e5f6',
+          sessionJustEnded: false,
+        ),
+        '/register',
+      );
+    });
+
+    test('a cold QR still starts registration after the splash pass', () {
+      final pending = PendingDestination()
+        ..remember('/b/chokro:bin:a1b2c3d4e5f6');
+
+      expect(
+        anonymousGateDestination(
+          '/splash',
+          sessionJustEnded: false,
+          deferredLocation: pending.current,
+        ),
+        '/register',
+      );
+      // Choosing the auth screen must not consume the destination; successful
+      // authentication still needs it to restore the exact bin.
+      expect(pending.current, '/b/chokro:bin:a1b2c3d4e5f6');
+    });
+
+    test('a cold native HTTPS app link is normalized and still registers', () {
+      final nativeLink = Uri.parse(
+        'https://chokro-30887.web.app/b/chokro:bin:a1b2c3d4e5f6'
+        '?source=printed-label',
+      );
+      final restored = restorableRouteLocation(nativeLink);
+
+      expect(restored, '/b/chokro:bin:a1b2c3d4e5f6?source=printed-label');
+      expect(
+        anonymousGateDestination(
+          '/splash',
+          sessionJustEnded: false,
+          deferredLocation: restored,
+        ),
+        '/register',
+      );
+    });
+
+    test('absolute deferred links are recognized defensively', () {
+      expect(
+        anonymousGateDestination(
+          '/splash',
+          sessionJustEnded: false,
+          deferredLocation:
+              'https://chokro-30887.web.app/b/chokro:bin:a1b2c3d4e5f6',
+        ),
+        '/register',
+      );
+    });
+
+    test('ordinary protected routes still ask existing users to sign in', () {
+      expect(
+        anonymousGateDestination('/history', sessionJustEnded: false),
+        '/login',
+      );
+    });
+
+    test('sign-out on a bin route never implies creating another account', () {
+      expect(
+        anonymousGateDestination(
+          '/b/chokro:bin:a1b2c3d4e5f6',
+          sessionJustEnded: true,
+        ),
+        '/login',
+      );
+    });
+  });
 }
