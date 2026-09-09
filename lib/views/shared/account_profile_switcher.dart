@@ -11,6 +11,7 @@ IconData accountProfileIcon(AccountProfile profile) => switch (profile) {
   AccountProfile.admin => Icons.admin_panel_settings_outlined,
   AccountProfile.greenpreneur => Icons.storefront_outlined,
   AccountProfile.champion => Icons.eco_outlined,
+  AccountProfile.producer => Icons.factory_outlined,
 };
 
 /// A visible reminder that one account may contain several working profiles.

@@ -192,7 +192,13 @@ service cloud.firestore {
         && u.keys().hasAll(['name', 'email', 'role', 'status', 'createdAt'])
         && validString(u.name, 2, 80)
         && validString(u.email, 3, 254)
-        && u.role in ['buyer', 'seller', 'admin']
+        // 'producer' is accepted so a producer's document is a *valid*
+        // document — otherwise every update to one fails this validator, and a
+        // producer could not change their own name while an administrator could
+        // not suspend them. Accepting the value here does not grant the role:
+        // create forces 'buyer', and the admin update branch below refuses to
+        // move a role into or out of 'producer' (EPR-1).
+        && u.role in ['buyer', 'seller', 'admin', 'producer']
         && u.status in ['active', 'suspended']
         && u.createdAt is timestamp
         && (!('suspendedAt' in u) || u.suspendedAt is timestamp)
@@ -350,6 +356,107 @@ service cloud.firestore {
     }
 
     // -------------------------------------------------------------------------
+    // Helpers (EPR producer portal) — tenant isolation
+    // -------------------------------------------------------------------------
+    //
+    // SEC-1 is the primary control in this feature, and its failure mode is the
+    // most damaging incident this product can have: one company reading
+    // another's compliance position. Everything below exists to make that a
+    // single, unforgeable document read.
+    //
+    // WHY MEMBERSHIP IS A DOCUMENT AND NOT A CLAIM
+    // A custom claim is a cache, not the authority (SEC-2). It is only as fresh
+    // as the client's last token refresh, so a member removed this morning
+    // keeps a valid token carrying `orgOwner` until it expires. These rules
+    // therefore never read `request.auth.token.orgId` or `orgRole`, and the
+    // server re-reads the same stored document on every write. A removal takes
+    // effect on the next request, everywhere, which is what "revoked" has to
+    // mean for a corporate dataset.
+    //
+    // WHY THE COMPOSITE ID
+    // `organizationMembers/{orgId}_{uid}` lets these rules *compose* the path
+    // they check from the resource being accessed and the authenticated uid —
+    // no query, no index, and nothing believed on the client's word. A
+    // membership that had to be found by query would mean trusting something in
+    // the request to build that query, which is the hole this shape closes.
+    // `lockoutActive` above uses the same trick for the same reason.
+
+    function orgMemberPath(orgId) {
+      return /databases/$(database)/documents/organizationMembers/$(orgId + '_' + request.auth.uid);
+    }
+
+    function orgMemberData(orgId) {
+      return get(orgMemberPath(orgId)).data;
+    }
+
+    // Whether a membership document carries at least `minRole`.
+    //
+    // Mirrors `OrgRoles.atLeast` in Dart and `requireOrgRole` on the server; all
+    // three must agree. Fails closed on both halves: a membership that is not
+    // `active` holds nothing (an invitation is not a membership), and an
+    // orgRole this rule set does not recognise matches none of the lists below.
+    function orgRoleAtLeast(m, minRole) {
+      return m.status == 'active'
+        && (minRole == 'orgViewer'
+              ? m.orgRole in ['orgOwner', 'orgReporter', 'orgViewer']
+              : (minRole == 'orgReporter'
+                  ? m.orgRole in ['orgOwner', 'orgReporter']
+                  : m.orgRole == 'orgOwner'));
+    }
+
+    // Three document reads: the user, the membership's existence, the
+    // membership itself. Rules do not cache get(), and the budget is ten, so
+    // this is deliberately the whole cost of an authorisation decision here.
+    //
+    // `isActive()` is not decoration. A suspended platform account keeps its
+    // stored membership document — suspension does not rewrite other
+    // collections — so without it a suspended employee would keep full read
+    // access to the company's compliance data.
+    function isOrgMemberAtLeast(orgId, minRole) {
+      return isSignedIn()
+        && isActive()
+        && exists(orgMemberPath(orgId))
+        && orgRoleAtLeast(orgMemberData(orgId), minRole);
+    }
+
+    function isOrgMember(orgId) {
+      return isOrgMemberAtLeast(orgId, 'orgViewer');
+    }
+
+    // The disjoint producer role (EPR-1).
+    //
+    // Mirrors `UserModel.isProducer` in Dart. It grants nothing: authorisation
+    // inside the portal comes from membership, never from the platform role
+    // alone. A producer with no active membership can do nothing, which is
+    // correct — the role says which workspace exists, the membership says
+    // whose.
+    //
+    // What it does is keep producers *out* of the citizen surfaces, which is
+    // the half of disjointness the rules have to enforce. `isActive()` is true
+    // for a producer account — it is a perfectly ordinary active account — so
+    // every client create path gated only on activity would accept one. A
+    // corporate compliance account submitting disposals for the brand whose
+    // collected kilograms Chokro certifies is the exact conflict EPR-1 exists
+    // to prevent, and `isActiveCitizen()` below is where that is refused.
+    function isProducerWith(u) {
+      return u.role == 'producer';
+    }
+
+    // An active account that belongs to the citizen hierarchy.
+    //
+    // Written as a `*With(u)` pair for the same budget reason as
+    // `isActiveSellerWith` further down: rules do not cache get(), and calling
+    // `isActive()` and a separate producer check would spend two of the
+    // ten-read allowance on one user document.
+    function isActiveCitizenWith(u) {
+      return isActiveWith(u) && !isProducerWith(u);
+    }
+
+    function isActiveCitizen() {
+      return isSignedIn() && isActiveCitizenWith(userData());
+    }
+
+    // -------------------------------------------------------------------------
     // users (M1, unchanged)
     // -------------------------------------------------------------------------
 
@@ -387,6 +494,19 @@ service cloud.firestore {
           && uid != request.auth.uid
           && request.resource.data.diff(resource.data).affectedKeys()
                .hasOnly(['role', 'status', 'suspendedAt', 'reinstatedAt', 'suspendedUntil'])
+          // The producer role is neither granted nor removed here (EPR-1,
+          // EPR-4). Both directions are refused, and both for the same reason:
+          // becoming a producer means redeeming an invitation and gaining a
+          // membership document, and ceasing to be one means those memberships
+          // are deactivated. Neither is a single field flip, so neither belongs
+          // on a path where a client writes one field. The server owns both,
+          // and it owns them transactionally.
+          //
+          // An equality rather than two comparisons, so an administrator may
+          // still suspend or reinstate an existing producer account — which is
+          // the platform-level control EPR-47 leans on.
+          && (request.resource.data.role == 'producer')
+               == (resource.data.role == 'producer')
           && validUser(request.resource.data, uid));
 
       allow delete: if false;
@@ -504,8 +624,11 @@ service cloud.firestore {
       allow read: if isSignedIn()
         && (resource.data.userId == request.auth.uid || isAdmin());
 
+      // isActiveCitizen(), not isActive(): a producer account is active, and
+      // must not be able to submit the disposals that produce its own
+      // attributed kilograms (EPR-1).
       allow create: if isSignedIn()
-        && isActive()
+        && isActiveCitizen()
         && validDisposalCreate(request.resource.data, request.auth.uid)
 
         && binIsOpen(request.resource.data.binId)
@@ -537,7 +660,7 @@ service cloud.firestore {
         && (resource.data.userId == request.auth.uid || isAdmin());
 
       allow create: if isSignedIn()
-        && isActive()
+        && isActiveCitizen()
         && validClaimCreate(request.resource.data, request.auth.uid);
 
       // Approval is a payout decision, so it goes to the server like every
@@ -606,8 +729,11 @@ service cloud.firestore {
       allow read: if isSignedIn()
         && (resource.data.userId == request.auth.uid || isAdmin());
 
+      // A producer company does not apply to become a Greenpreneur. The role
+      // is disjoint, so the application would be granting a citizen profile to
+      // a corporate account (EPR-1).
       allow create: if isSignedIn()
-        && isActive()
+        && isActiveCitizen()
         && request.resource.data.userId == request.auth.uid
         && request.resource.data.status == 'pending'
         && request.resource.data.keys().hasOnly([
@@ -932,8 +1058,9 @@ service cloud.firestore {
       // needs to read what somebody has not bought yet.
       allow read: if isSelf(uid);
 
+      // No wallet, no marketplace, no cart (EPR-1).
       allow create, update: if isSelf(uid)
-        && isActive()
+        && isActiveCitizen()
         && request.resource.data.keys().hasOnly(['userId', 'items', 'updatedAt'])
         && request.resource.data.keys().hasAll(['userId', 'items', 'updatedAt'])
         && request.resource.data.userId == uid
@@ -1032,6 +1159,223 @@ service cloud.firestore {
         && validAppeal(request.resource.data);
 
       allow delete: if false;
+    }
+
+    // =========================================================================
+    // EPR PRODUCER PORTAL
+    // =========================================================================
+    //
+    // Read access is scoped by a stored membership document; write access is
+    // absent. That asymmetry is sharper here than anywhere else in this file,
+    // and deliberately: every figure a regulator will read is produced by the
+    // trusted service from an approved mass and a screened count (§0). If a
+    // client could write one, security rules could only police one of the two
+    // code paths that produce it, and the evidentiary value of the whole system
+    // would rest on the weaker one.
+    //
+    // The collections below are therefore denied to every client on write,
+    // administrators included — the same sentence, and the same reasoning, that
+    // already governs `wallets`, `orders` and `stats`.
+
+    // -------------------------------------------------------------------------
+    // organizations — the obligated entity
+    // -------------------------------------------------------------------------
+    //
+    // Readable by its own active members and by an administrator. Nothing else
+    // on the platform can see that a company is registered at all: a Champion
+    // has no business knowing which brands are obligated, and a rival producer
+    // certainly does not.
+    //
+    // Every write is a server write. Onboarding approval sets `sizeClass`,
+    // which fixes which gazette targets apply; a company that could set its own
+    // would choose the year it is measured against.
+
+    match /organizations/{orgId} {
+      allow read: if isOrgMember(orgId) || isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // organizationMembers — who is in which company, and in what capacity
+    // -------------------------------------------------------------------------
+    //
+    // The composite id `{orgId}_{uid}` is what makes SEC-1 a single document
+    // read; see `orgMemberPath` above.
+    //
+    // Two read branches, and the first is not redundant. Reading *your own*
+    // membership must work even when it is `invited` or `removed`, so the app
+    // can say "your access to this workspace was removed" instead of showing an
+    // empty screen with no explanation. The second branch is the members list,
+    // and it requires an active membership of that same organisation.
+    //
+    // Writes are absent for everyone. An invitation is issued, redeemed against
+    // a single-use token and revoked by the trusted service (SEC-8); a client
+    // that could write here could add itself to any organisation on the
+    // platform, which is the whole tenancy boundary in one document.
+
+    match /organizationMembers/{memberId} {
+      allow read: if isSignedIn()
+        && (
+          memberId == resource.data.orgId + '_' + request.auth.uid
+          || isOrgMember(resource.data.orgId)
+          || isAdmin()
+        );
+      allow create, update, delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // producerSkus — read by the organisation, written only by the service
+    // -------------------------------------------------------------------------
+    //
+    // §5.1 calls this "the one collection with a real client write path", on the
+    // test this file applies throughout: keep a write here when the governing
+    // constraint is expressible where it is enforced, as it is for a seller's
+    // product price.
+    //
+    // THAT TEST FAILS HERE, AND IT FAILS ON THE CONSTRAINT THAT MATTERS.
+    //
+    // EPR-9's governing constraint is that the declared component masses **sum
+    // to** the declared unit mass. Rules have no fold, no reduce and no way to
+    // iterate a variable-length list, so that sum cannot be written in this
+    // language at all. A create rule here can check that `components` is a list
+    // of between one and twelve things and nothing whatsoever about what is in
+    // them — which means it would accept a 5 kg declared unit mass alongside a
+    // single 0.1 g body, and the 5 kg would become the baseline for every
+    // verification and every attributed kilogram.
+    //
+    // Two further things a client write cannot do, both required elsewhere in
+    // the specification:
+    //
+    //   EPR-44 requires every change to a producer's record to land in
+    //   `producerAuditLog`. Rules cannot append to it — correctly, since an
+    //   entry a client could author is an entry an attacker could author — so a
+    //   client-written SKU is a change with no audit entry.
+    //
+    //   EPR-12 requires an edit that changes what was weighed to invalidate the
+    //   verification and close the standing revision. That is a multi-document
+    //   transaction across `producerSkus` and `skuRevisions`, conditional on a
+    //   comparison with the stored document. Rules can refuse a write; they
+    //   cannot perform the other half of one.
+    //
+    // So the write goes where those checks can actually run, exactly as a wallet
+    // balance does. `POST /epr/skus` on the trusted service validates the sum on
+    // integers, writes the audit entry in the same transaction, and applies the
+    // invalidation. Reads stay here, scoped to the owning organisation.
+    //
+    // Recorded as a deliberate divergence from §5.1 in INTEGRATION_NOTES_EPR.md
+    // rather than left as an undocumented difference between spec and code.
+
+    match /producerSkus/{skuId} {
+      // Scoped to the owning organisation. A producer's catalogue is
+      // commercially sensitive — a rival reading which SKUs a company has
+      // registered learns its packaging portfolio.
+      allow read: if isSignedIn()
+        && (isOrgMember(resource.data.orgId) || isAdmin());
+
+      // Every write, including an Admin's. Same sentence as `wallets`.
+      allow create, update, delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // skuRevisions — append-only, and the reason last quarter stays true
+    // -------------------------------------------------------------------------
+    //
+    // A report issued last quarter must remain reproducible after a producer
+    // edits a gram weight this quarter (EPR-12). Without a stored history of
+    // what the verified mass *was*, and when, that is impossible — the only
+    // figure available would be the current one, and re-running the report
+    // would silently produce a different answer.
+    //
+    // Readable by the organisation, because a producer is entitled to see the
+    // basis of the numbers Chokro certifies on its behalf. Written by nobody
+    // but the service: a revision a client could author is a mass a client
+    // could set.
+
+    match /skuRevisions/{revisionId} {
+      allow read: if isSignedIn()
+        && (isOrgMember(resource.data.orgId) || isAdmin());
+      allow create, update, delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // skuMassAudits — the weighing that makes a declared mass a verified one
+    // -------------------------------------------------------------------------
+    //
+    // Sample size, measured mean, standard deviation, the scale photograph and
+    // the operator. This is what a Department of Environment inspector would
+    // ask to see, and it is what separates "Chokro verified this mass" from a
+    // claim that a weighing happened.
+    //
+    // The producer reads its own audits — being shown the evidence for a figure
+    // you are certified against is not optional — and writes none of them.
+
+    match /skuMassAudits/{auditId} {
+      allow read: if isSignedIn()
+        && (isOrgMember(resource.data.orgId) || isAdmin());
+      allow create, update, delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // orgInvitations — invisible to every client, in both directions
+    // -------------------------------------------------------------------------
+    //
+    // The only collection in this file denied even a read to the party it
+    // concerns. An owner sees its organisation's outstanding invitations
+    // through the trusted service, which returns the address, the role and the
+    // status and never the token — because no token is stored. The document id
+    // *is* the SHA-256 digest of the token, so a read of this collection would
+    // disclose only digests, and a read granted anyway would be a read that
+    // serves nobody and widens the surface.
+    //
+    // Redemption is a public endpoint on the service (SEC-8), not a client
+    // write: it creates a Firebase Auth account, a `users` document and a
+    // membership in one commit, which rules cannot express and must not be
+    // asked to.
+
+    match /orgInvitations/{invitationId} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // producerAuditHeads — the chain pointer
+    // -------------------------------------------------------------------------
+    //
+    // One document per organisation holding the latest sequence and digest, so
+    // an appended entry can link to its predecessor in a single read. Not
+    // evidence in itself — rewriting a head cannot forge a chain, only make the
+    // next entry link to the wrong place, which `verifyChain` then reports —
+    // but it is what makes a *truncated* log detectable, so no client touches
+    // it either.
+
+    match /producerAuditHeads/{orgId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // producerAuditLog — append-only, and append-only for administrators too
+    // -------------------------------------------------------------------------
+    //
+    // SEC-12. Entries are hash-chained per organisation, so a removal is
+    // detectable rather than merely forbidden — which matters because the Admin
+    // SDK bypasses these rules by definition, and a control that only the
+    // honest path respects is not a control.
+    //
+    // What the rules can enforce is that no client appends, amends or deletes
+    // an entry, and that is written here as an unconditional denial rather than
+    // as "create allowed, update denied". A client has no reason to append: the
+    // entry that matters is the one the service writes in the same breath as
+    // the action it records, and an entry a client could author would be an
+    // entry an attacker could author.
+    //
+    // Reading is a different question. An organisation is entitled to see its
+    // own history — that is most of what an audit trail is for — so its members
+    // read it, and so does an administrator.
+
+    match /producerAuditLog/{entryId} {
+      allow read: if isSignedIn()
+        && (isOrgMember(resource.data.orgId) || isAdmin());
+      allow create, update, delete: if false;
     }
 
     // -------------------------------------------------------------------------

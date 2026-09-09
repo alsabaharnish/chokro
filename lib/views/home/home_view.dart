@@ -230,6 +230,40 @@ class HomeView extends ConsumerWidget {
                                           ? null
                                           : () => context.push('/admin/points'),
                                     ),
+                                    // Reached from here rather than from the
+                                    // navigation bar: the tested five-item
+                                    // Admin bar stays as it is (NFR-E-1), and a
+                                    // sixth destination would not fit a phone
+                                    // in landscape.
+                                    ActionCard(
+                                      icon: Icons.scale_outlined,
+                                      title: 'Mass verification',
+                                      subtitle:
+                                          'Weigh submitted packaging and set '
+                                          'the mass reporting uses.',
+                                      disabledSubtitle:
+                                          'Unavailable while suspended.',
+                                      tone: ActionTone.admin,
+                                      onTap: suspended
+                                          ? null
+                                          : () => context.push(
+                                              '/admin/mass-queue',
+                                            ),
+                                    ),
+                                    ActionCard(
+                                      icon: Icons.factory_outlined,
+                                      title: 'EPR producers',
+                                      subtitle:
+                                          'Review company onboarding, verify '
+                                          'brand ownership and track activity.',
+                                      disabledSubtitle:
+                                          'Unavailable while suspended.',
+                                      tone: ActionTone.admin,
+                                      onTap: suspended
+                                          ? null
+                                          : () =>
+                                                context.push('/admin/producers'),
+                                    ),
                                   ],
                                 ),
                               ],
@@ -424,6 +458,35 @@ class HomeView extends ConsumerWidget {
                                             : () =>
                                                   context.push('/apply-seller'),
                                       ),
+                                  ],
+                                ),
+                              ],
+                              // A producer account normally never reaches this
+                              // screen: `producerHomeRedirect` in the router
+                              // sends `/home` to `/producer`, because a
+                              // corporate compliance account has no citizen
+                              // home to return to (EPR-1).
+                              //
+                              // This branch is the honest fallback for the one
+                              // frame in which a role change has been written
+                              // and the redirect has not yet re-run. It offers
+                              // the workspace and nothing citizen-facing.
+                              AccountProfile.producer => <Widget>[
+                                const SizedBox(height: AppTheme.gapXl),
+                                const SectionHeading(
+                                  'EPR producer workspace',
+                                  icon: Icons.factory_outlined,
+                                ),
+                                _ActionGrid(
+                                  children: [
+                                    ActionCard(
+                                      icon: Icons.insights_outlined,
+                                      title: 'Open my workspace',
+                                      subtitle:
+                                          'Registered products, collected packaging and reporting.',
+                                      tone: ActionTone.primary,
+                                      onTap: () => context.go('/producer'),
+                                    ),
                                   ],
                                 ),
                               ],

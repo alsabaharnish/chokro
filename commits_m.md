@@ -17,6 +17,156 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-09-09 14:05 (+06) — EPR producer portal, Phase B: the mass chain, plus an adversarial audit of A and B
+
+A producer can now register what it places on the market, Chokro weighs it, and
+the weighed figure — not the declared one — is what any report would use. Coca-
+Cola's 250 ml bottle exists, declared at 10 g, verified at 9.8 g with a revision
+history, and no attribution exists anywhere yet, which is Phase B's exit
+condition.
+
+Mass is integer milligrams end to end (EPR-20). `units × unitMassMg` is exact
+integer multiplication and a sum of such products is an exact integer sum, so
+there is nothing to accumulate error; rounding happens once, at display, to
+three significant figures. Tested over 412,000 rows and over 100,000 tenth-gram
+rows for zero drift. A separate exact formatter renders *discrepancies*, because
+three significant figures turned a one-milligram component mismatch into "the
+parts add up to 10 g, but the unit mass is 10 g".
+
+`producerSkus` is **not** a client write path, which diverges from §5.1 and the
+reason is recorded rather than left implicit. §5.1's own test is whether the
+governing constraint is expressible where it is enforced; EPR-9's constraint is
+that the component masses sum to the declared unit mass, and Firestore rules
+have no fold. A create rule there could check that `components` is a list of one
+to twelve things and nothing about what is in them — so it would accept a 5 kg
+unit mass beside a single 0.1 g body. Rules also cannot append to
+`producerAuditLog` (EPR-44) or perform EPR-12's invalidation. The write goes
+where those checks run, as a wallet balance does.
+
+The measured mean is always adopted as the verified mass. EPR-11's wording reads
+otherwise, but Appendix A step 3 records a measured 9.8 g against a declared
+10.0 g that was "within the ± 10% tolerance" and states in bold that reporting
+uses 9.8. Appendix A is right: keeping the declaration whenever it is close
+enough makes the tolerance a licence to overstate by just under it, repeatably.
+Flagged for the author as an EPR-11 wording fix.
+
+An adversarial nine-dimension audit of Phases A and B found four critical
+defects that the test suite was passing over, and all four are fixed:
+
+Four transactions read after they wrote. Firestore's Admin SDK throws
+unconditionally on that, so every mass verification and every organisation
+creation would have failed on the first real request — invisible in tests
+because a hand-written fake transaction does not enforce the rule. The audit
+append is now split into a read half and a write half so the ordering is a
+property of the signature, and all three test fakes now throw on a read after a
+write.
+
+The server's gram parser used `Number.parseFloat`, which prefix-parses: '1,250'
+became 1 gram against a 1250 gram declaration, and '8.2g' was accepted silently.
+Dart rejected all three. Both copies are now pinned against the same inputs.
+
+A reporter could rewrite a verified product's declaration through the server
+route, turning a verified 19.5 g bottle into a 1.3 g cap while the verified mass
+stayed attached. Changing what was weighed now invalidates the verification and
+closes the standing revision rather than deleting it.
+
+The SKU update rule had no affectedKeys guard, so one deleteField write could
+remove `revision` — and the next verification would then compute revision 1 and
+overwrite the append-only row a passport was built on.
+
+Seven high-severity findings are also fixed: a suspended organisation was still
+writable server-side (EPR-47's read-only was not read-only); the audit chain was
+an unkeyed hash the named insider adversary could recompute, and is now an HMAC
+under a key that must be independent of the Firestore credential; actorName,
+actorRole, ip, userAgent and the server timestamp were stored but not hashed;
+deleting a log and its head returned intact:true; the invitation ceiling sampled
+stale rows and could be bypassed to mint unlimited tokens for one address; and
+the 0.1 g unit floor was applied per component, making a bottle with a 0.05 g
+tamper ring unregisterable.
+
+The §6.7 boundary statements are now constants rather than strings typed into a
+widget, because the first attempt at testing them flagged the correct disclaimer
+as a violation — a sentence denying a claim contains the claim. The Plastic
+Passport will print the same list.
+
+Files: lib/core (mass_math, sku_csv, epr_claims), lib/models (producer_sku,
+sku_revision, producer_audit), lib/services/producer_sku_service.dart,
+lib/controllers/sku_controller.dart, lib/views/producer (skus, editor, import),
+lib/views/admin/admin_mass_queue_view.dart, lib/routing/router.dart,
+server/src (producerSkus, eprPolicy, producerAudit, organizations, auth, index),
+firestore.rules, firestore.indexes.json, INTEGRATION_NOTES_EPR.md.
+
+Checks: `flutter analyze lib test` clean; 878 Flutter tests pass (767 after
+Phase A); 497 server tests pass (402); 290 emulator rules tests pass; rules
+compile with no warnings; 36 indexes validate. AUDIT_CHAIN_KEY joins
+APP_CHECK_ENFORCED as release-blocking before a real producer is onboarded.
+
+---
+
+## 2026-09-09 09:40 (+06) — EPR producer portal, Phase A: tenancy and identity
+
+A company can now be approved, invited, sign in, and see nothing but its own
+empty workspace — and the rules tests prove it can see nothing else. This is
+Phase A of `EPR_PRODUCER_PORTAL_SPEC.md` v1.0; no kilogram, percentage or
+compliance figure exists yet, and the workspace states which inputs are
+outstanding instead of showing zeros that could be read as measurements.
+
+`producer` joins the stored role vocabulary as a **disjoint** role, not another
+inclusive profile. Adding a fourth `AccountProfile` turned three implicit
+assumptions into compile errors, which was the point: `accountProfilesForRole`
+fell through to Champion, and `UserModel.isChampion` returned an unconditional
+true, so a producer role added without touching either would have handed a
+corporate compliance account a points wallet. `firestore.rules` states the same
+exclusion through `isActiveCitizen()`, which replaces `isActive()` on the four
+client create paths a producer would otherwise have passed — disposals, claims,
+seller applications and carts. A producer account is a perfectly ordinary active
+account, so a rule gated only on activity accepted one.
+
+Five new collections, all server-owned: `organizations`, `organizationMembers`
+(composite id `{orgId}_{uid}`, so tenant isolation is one unforgeable document
+read), `producerAuditLog`, `producerAuditHeads` and `orgInvitations`. Every
+client write is denied, administrators included, in the manner of `wallets` and
+`orders`. There is no self-registration: an Admin opens and reviews a company
+record — approval sets the size class and obligation start date that decide
+which gazette target applies and from when — and people arrive by invitation.
+
+Invitations are 256-bit, single-use, 72-hour, bound to one address, revokable,
+capped per organisation. The token is never stored; its SHA-256 digest is the
+document id, so a dump of the collection yields nothing redeemable and Chokro
+cannot mint access to a customer's workspace from its own database. Chokro has
+no mail service, so the link is shown once to the inviter to send — disclosed on
+the dialog, along with the consequence that it cannot be re-sent. Email
+verification does not have that problem and gates every producer write.
+
+The audit log is append-only in the rules for every principal and SHA-256
+chained per organisation with a monotonic sequence, so an edit, a mid-log
+deletion, a truncation and a full wipe are four distinguishable findings rather
+than one vague "invalid". The rules cannot bind this service — the Admin SDK
+bypasses them by definition — so the chain does not prevent tampering; it makes
+it detectable by anyone holding the log, the producer included. Audit writes
+throw and roll back the action they were recording, and an Admin's read-only
+view of a company does not open if its entry cannot be written.
+
+Server-side: `requireProducer`, `requireVerifiedEmail`, `requireFreshAuth` and
+`requireOrgRole`, which resolves the organisation from the route or the caller's
+own membership and never from the request body. An Admin does not pass it —
+a shared code path would give an audit trail that cannot distinguish an owner
+acting in their company from a Chokro employee acting on it. App Check
+enforcement ships behind `APP_CHECK_ENFORCED` with three named exemptions;
+setting it is release-blocking before the first real producer, not a follow-up.
+
+Files: lib/core (constants, account_profile, epr_categories), lib/models
+(organization, org_member, producer_audit, user), lib/services
+(organization_service), lib/controllers (producer_workspace, admin_producers),
+lib/views (producer/*, admin/admin_producers_view, shared/app_shell,
+shared/account_profile_switcher, home, profile), lib/routing/router.dart,
+server/src (organizations, producerAudit, passwordPolicy, appCheck, auth,
+index), firestore.rules, firestore.indexes.json, INTEGRATION_NOTES_EPR.md.
+
+Checks: `flutter analyze lib test` clean; 767 Flutter tests pass (687 before);
+402 server tests pass (308 before); 270 emulator rules tests pass (233 before);
+`firebase deploy --only firestore:rules --dry-run` compiles with no warnings.
+
 ## 2026-09-08 17:25 (+06) — One bin QR now reaches the app or a browser submission
 
 New bin labels encode an HTTPS `/b/{opaque-token}` entry instead of a token-only

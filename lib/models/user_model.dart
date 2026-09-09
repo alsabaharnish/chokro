@@ -80,16 +80,40 @@ class UserModel {
 
   bool get isAdmin => role == AppConstants.roleAdmin;
 
+  /// A company employee working in the EPR producer portal (EPR-1).
+  ///
+  /// Disjoint from every other role: see [isChampion] below for what that
+  /// costs and why it is worth it.
+  bool get isProducer => role == AppConstants.roleProducer;
+
   bool get hasProfilePhoto =>
       profilePhotoUrl != null &&
       profilePhotoUrl!.isNotEmpty &&
       profilePhotoPublicId != null &&
       profilePhotoPublicId!.isNotEmpty;
 
-  /// Higher tiers retain the profiles below them: every account is a Champion,
-  /// and a 3ZERO Admin can also work as a Greenpreneur.
-  bool get isChampion => true;
-  bool get isGreenpreneur => role == AppConstants.roleSeller || isAdmin;
+  /// Higher tiers retain the profiles below them: an Admin can also work as a
+  /// Greenpreneur, and both can work as a Champion.
+  ///
+  /// ## This used to be `=> true`, and the producer role is why it is not
+  ///
+  /// Every *citizen* account is a Champion, so an unconditional true was
+  /// correct for as long as citizen accounts were the only kind. A producer is
+  /// a corporate compliance account (EPR-1), and a Champion is someone who
+  /// earns points by photographing waste going into a bin. Letting the two be
+  /// the same account would put the party whose collected kilograms Chokro
+  /// certifies on both sides of its own evidence, and give it a wallet to earn
+  /// into while doing so.
+  ///
+  /// So the exclusion is stated here rather than assumed to fall out of the
+  /// role string never matching anything. `firestore.rules` states the same
+  /// exclusion in `isProducer()`, and the two must agree — a client that offers
+  /// a Champion screen the rules will refuse is a worse failure than one that
+  /// never offers it.
+  bool get isChampion => !isProducer;
+
+  bool get isGreenpreneur =>
+      !isProducer && (role == AppConstants.roleSeller || isAdmin);
 
   /// Internal compatibility name for marketplace permission checks.
   bool get isSeller => isGreenpreneur;

@@ -32,7 +32,22 @@ const express = require('express');
 const cors = require('cors');
 
 const { initFirebase } = require('./firebase');
-const { requireAuth, requireAdmin, requireSeller } = require('./auth');
+const {
+  requireAuth,
+  requireAdmin,
+  requireSeller,
+  requireProducer,
+  requireVerifiedEmail,
+  requireFreshAuth,
+  requireOrgRole,
+  requireActiveOrganization,
+} = require('./auth');
+const organizations = require('./organizations');
+const producerAudit = require('./producerAudit');
+const passwordPolicy = require('./passwordPolicy');
+const appCheck = require('./appCheck');
+const producerSkus = require('./producerSkus');
+const eprPolicy = require('./eprPolicy');
 const { uploadImage, MAX_BYTES } = require('./cloudinary');
 const { uploadAndSaveProfilePhoto } = require('./profilePhoto');
 const { approveDisposal, rejectDisposal } = require('./award');
@@ -184,6 +199,22 @@ const writeLimit = rateLimit({ name: 'writes', windowMs: 60 * 1000, max: 30 });
 // the claim quota is read once before composing a claim.
 const readLimit = rateLimit({ name: 'reads', windowMs: 60 * 1000, max: 60 });
 
+// Invitation redemption (SEC-8).
+//
+// The only unauthenticated write path in the producer portal, so it is the only
+// one this limiter can key by IP rather than by uid — the caller has no account
+// yet, by definition.
+//
+// Tight, because the thing being protected is a 256-bit token guess and the
+// legitimate use is once per person per invitation. Ten attempts an hour is
+// generous for someone mistyping a password against the policy and
+// astronomically short of useful for anyone enumerating tokens.
+const redeemLimit = rateLimit({ name: 'redeem', windowMs: 60 * 60 * 1000, max: 10 });
+
+// Producer-portal writes. Separate from `writeLimit` so a producer's membership
+// changes and a Champion's disposals do not share one budget (SEC-11).
+const eprWriteLimit = rateLimit({ name: 'eprWrites', windowMs: 60 * 1000, max: 20 });
+
 // ---------------------------------------------------------------------------
 // Body parsing
 // ---------------------------------------------------------------------------
@@ -205,6 +236,24 @@ const readLimit = rateLimit({ name: 'reads', windowMs: 60 * 1000, max: 60 });
 // route, so browser preflights remain unauthenticated.
 const photoJson = express.json({ limit: '12mb' });
 const regularJson = express.json({ limit: '64kb' });
+
+// ---------------------------------------------------------------------------
+// App Check (SEC-10)
+// ---------------------------------------------------------------------------
+//
+// Registered here — after CORS, before every route and before either body
+// parser — for two reasons. A browser preflight must already have been answered
+// or the check would break CORS for legitimate clients rather than block any
+// illegitimate one. And an unattested request must be refused before this free
+// instance decodes a 12 MB photo body for it.
+//
+// Global rather than per-route, so a route added later is covered by default
+// and an exemption has to be written down in `appCheck.EXEMPT_PATHS` where a
+// reviewer will see it.
+//
+// A no-op until `APP_CHECK_ENFORCED=true`. Setting it is release-blocking
+// before the first real producer is onboarded (NFR-E-9), not a follow-up.
+app.use(appCheck.verifyAppCheck);
 
 // ---------------------------------------------------------------------------
 // Health and diagnostics
@@ -867,6 +916,873 @@ app.post('/config/points', requireAuth, requireAdmin, writeLimit, async (req, re
   }
 });
 
+// ===========================================================================
+// EPR PRODUCER PORTAL
+// ===========================================================================
+//
+// Two families of route, and they never share a handler.
+//
+// `/epr/admin/*` is Chokro's side: onboarding review, the producer directory,
+// suspension. Guarded by `requireAdmin`.
+//
+// `/epr/*` is the producer's own workspace. Guarded by `requireOrgRole`, which
+// resolves a stored membership document rather than reading an `orgId` from the
+// body (SEC-1, SEC-5). An administrator does not pass that guard, deliberately:
+// a shared code path would produce an audit trail that could not distinguish an
+// owner acting in their company from a Chokro employee acting on it, and EPR-46
+// requires exactly that distinction.
+//
+// The privileged actions additionally carry `requireFreshAuth` (SEC-9). Its
+// failure mode is an unattended office desktop, not a stolen token.
+
+/** How recently a session must have signed in to change membership (SEC-9). */
+const PRIVILEGED_AUTH_MAX_AGE_SECONDS = 30 * 60;
+
+function eprFailure(res, err, fallbackStatus = 409) {
+  const status = err?.code === 'unavailable' ? 503 : fallbackStatus;
+  return res.status(status).json({
+    error: err?.code || 'epr_action_failed',
+    message: err?.message || 'That action could not be completed.',
+    ...(err?.problems ? { problems: err.problems } : {}),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Invitation redemption — the one public write path (EPR-4, SEC-8)
+// ---------------------------------------------------------------------------
+
+/**
+ * The policy, so a form can state it before anyone types rather than refusing
+ * afterwards. No authentication and nothing account-specific in the response.
+ */
+app.get('/epr/password-policy', (req, res) => {
+  res.json({ ok: true, requirements: passwordPolicy.describePolicy() });
+});
+
+app.post('/epr/invitations/redeem', redeemLimit, async (req, res) => {
+  const { token, name, password } = req.body || {};
+
+  try {
+    const result = await organizations.redeemInvitation({ token, name, password });
+    return res.status(201).json({ ok: true, ...result });
+  } catch (err) {
+    if (err.code === 'weak_password') {
+      return res.status(400).json({
+        error: 'weak_password',
+        message: err.message,
+        problems: err.problems,
+      });
+    }
+    if (err.code === 'email_in_use') {
+      return res.status(409).json({ error: 'email_in_use', message: err.message });
+    }
+    // Everything else — unknown token, revoked, expired, already redeemed, a
+    // closed organisation — returns one shape. Distinguishing them tells
+    // somebody holding a stolen link which organisations exist and which
+    // addresses have been invited (SEC-7's reasoning, applied here).
+    if (err.code !== 'invalid_invitation') {
+      console.error('Invitation redemption failed:', err.message);
+    }
+    return res.status(400).json({
+      error: 'invalid_invitation',
+      message: 'This invitation link is no longer valid. Ask for a new one.',
+    });
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Producer workspace
+// ---------------------------------------------------------------------------
+
+/**
+ * Everything the workspace needs to render its first frame: the organisation,
+ * this person's capability in it, and whether the account is ready to work.
+ *
+ * Deliberately not gated on `requireVerifiedEmail`, unlike the write routes
+ * below. A member who has not verified must be able to load the screen that
+ * tells them so; gating this would leave them looking at an error with no
+ * explanation of what to do about it.
+ */
+app.get('/epr/me', requireAuth, requireProducer, readLimit, async (req, res) => {
+  try {
+    const membership = await organizations.findMembershipForUser(req.user.uid);
+    if (!membership) {
+      return res.json({
+        ok: true,
+        emailVerified: req.user.emailVerified,
+        membership: null,
+        organization: null,
+      });
+    }
+
+    const organization = await organizations.getOrganization(membership.orgId);
+    return res.json({
+      ok: true,
+      emailVerified: req.user.emailVerified,
+      membership,
+      organization,
+    });
+  } catch (err) {
+    console.error('Producer bootstrap failed:', err.message);
+    return res.status(503).json({
+      error: 'workspace_unavailable',
+      message: 'The workspace could not be loaded. Try again.',
+    });
+  }
+});
+
+app.get(
+  '/epr/members',
+  requireAuth,
+  requireOrgRole('orgViewer'),
+  readLimit,
+  async (req, res) => {
+    try {
+      const members = await organizations.listMembers({
+        orgId: req.orgMembership.orgId,
+      });
+      return res.json({ ok: true, members });
+    } catch (err) {
+      console.error('Member list failed:', err.message);
+      return res.status(503).json({ error: 'members_unavailable' });
+    }
+  },
+);
+
+app.get(
+  '/epr/invitations',
+  requireAuth,
+  requireOrgRole('orgOwner'),
+  readLimit,
+  async (req, res) => {
+    try {
+      const invitations = await organizations.listInvitations({
+        orgId: req.orgMembership.orgId,
+      });
+      // No tokens in this response, because none are stored. The link is shown
+      // once, at issue, and is unrecoverable afterwards by anyone including
+      // Chokro.
+      return res.json({ ok: true, invitations });
+    } catch (err) {
+      console.error('Invitation list failed:', err.message);
+      return res.status(503).json({ error: 'invitations_unavailable' });
+    }
+  },
+);
+
+app.post(
+  '/epr/invitations',
+  requireAuth,
+  requireVerifiedEmail,
+  requireOrgRole('orgOwner'),
+  requireActiveOrganization,
+  requireFreshAuth(PRIVILEGED_AUTH_MAX_AGE_SECONDS),
+  eprWriteLimit,
+  async (req, res) => {
+    const { email, orgRole } = req.body || {};
+    try {
+      const invitation = await organizations.createInvitation({
+        orgId: req.orgMembership.orgId,
+        email,
+        orgRole,
+        actorUid: req.user.uid,
+        actorName: req.user.name,
+        actorRole: 'producer',
+      });
+      return res.status(201).json({ ok: true, invitation });
+    } catch (err) {
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+app.post(
+  '/epr/invitations/:invitationId/revoke',
+  requireAuth,
+  requireVerifiedEmail,
+  requireOrgRole('orgOwner'),
+  requireActiveOrganization,
+  requireFreshAuth(PRIVILEGED_AUTH_MAX_AGE_SECONDS),
+  eprWriteLimit,
+  async (req, res) => {
+    try {
+      const result = await organizations.revokeInvitation({
+        invitationId: req.params.invitationId,
+        // Scoped to the caller's own organisation, so an invitation id from
+        // another tenant is not actionable with this session's authority.
+        orgId: req.orgMembership.orgId,
+        actorUid: req.user.uid,
+        actorName: req.user.name,
+      });
+      return res.json({ ok: true, ...result });
+    } catch (err) {
+      return eprFailure(res, err, 409);
+    }
+  },
+);
+
+app.post(
+  '/epr/members/:uid/role',
+  requireAuth,
+  requireVerifiedEmail,
+  requireOrgRole('orgOwner'),
+  requireActiveOrganization,
+  requireFreshAuth(PRIVILEGED_AUTH_MAX_AGE_SECONDS),
+  eprWriteLimit,
+  async (req, res) => {
+    try {
+      const result = await organizations.changeMemberRole({
+        orgId: req.orgMembership.orgId,
+        uid: req.params.uid,
+        orgRole: req.body?.orgRole,
+        actorUid: req.user.uid,
+        actorName: req.user.name,
+      });
+      return res.json({ ok: true, ...result });
+    } catch (err) {
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+app.post(
+  '/epr/members/:uid/remove',
+  requireAuth,
+  requireVerifiedEmail,
+  requireOrgRole('orgOwner'),
+  requireActiveOrganization,
+  requireFreshAuth(PRIVILEGED_AUTH_MAX_AGE_SECONDS),
+  eprWriteLimit,
+  async (req, res) => {
+    if (req.params.uid === req.user.uid) {
+      // Removing yourself as the acting owner is how an organisation ends up
+      // with nobody who can invite anyone back.
+      return res.status(400).json({
+        error: 'cannot_remove_self',
+        message: 'Ask another owner to remove your access.',
+      });
+    }
+    try {
+      const result = await organizations.removeMember({
+        orgId: req.orgMembership.orgId,
+        uid: req.params.uid,
+        actorUid: req.user.uid,
+        actorName: req.user.name,
+      });
+      return res.json({ ok: true, ...result });
+    } catch (err) {
+      return eprFailure(res, err, 409);
+    }
+  },
+);
+
+app.get(
+  '/epr/audit',
+  requireAuth,
+  requireOrgRole('orgViewer'),
+  readLimit,
+  async (req, res) => {
+    try {
+      const entries = await producerAudit.listForOrg({
+        orgId: req.orgMembership.orgId,
+      });
+      return res.json({ ok: true, entries });
+    } catch (err) {
+      console.error('Producer audit read failed:', err.message);
+      return res.status(503).json({ error: 'audit_unavailable' });
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// The product registry (EPR-9 to EPR-14)
+// ---------------------------------------------------------------------------
+
+app.get(
+  '/epr/skus',
+  requireAuth,
+  requireOrgRole('orgViewer'),
+  readLimit,
+  async (req, res) => {
+    try {
+      const skus = await producerSkus.listSkus({
+        orgId: req.orgMembership.orgId,
+      });
+      const policy = await eprPolicy.readPolicy();
+      return res.json({
+        ok: true,
+        skus,
+        // Re-verification is due lazily, resolved at read time because nothing
+        // runs on a timer (EPR-13, NFR-E-2). The list carries the answer rather
+        // than each client re-deriving it from a policy it would also have to
+        // fetch.
+        revalidationDue: skus
+          .filter((s) => producerSkus.revalidationDue(s, policy))
+          .map((s) => s.skuId),
+        policy: {
+          massAuditSampleSize: policy.massAuditSampleSize,
+          massToleranceFraction: policy.massToleranceFraction,
+          massRevalidationMonths: policy.massRevalidationMonths,
+        },
+      });
+    } catch (err) {
+      console.error('SKU list failed:', err.message);
+      return res.status(503).json({ error: 'skus_unavailable' });
+    }
+  },
+);
+
+app.get(
+  '/epr/skus/:skuId/history',
+  requireAuth,
+  requireOrgRole('orgViewer'),
+  readLimit,
+  async (req, res) => {
+    try {
+      const revisions = await producerSkus.listRevisions({
+        skuId: req.params.skuId,
+      });
+      const audits = await producerSkus.listMassAudits({
+        skuId: req.params.skuId,
+      });
+
+      // Tenant check on the returned rows, not only on the caller. The route
+      // parameter is a document id the caller supplied, and a revision from
+      // another organisation must not be readable with this session's
+      // authority even though the membership check passed (SEC-1).
+      const orgId = req.orgMembership.orgId;
+      if (revisions.some((r) => r.orgId !== orgId)) {
+        return res.status(404).json({ error: 'not_found' });
+      }
+
+      return res.json({
+        ok: true,
+        revisions,
+        audits: audits.filter((a) => a.orgId === orgId),
+      });
+    } catch (err) {
+      console.error('SKU history failed:', err.message);
+      return res.status(503).json({ error: 'history_unavailable' });
+    }
+  },
+);
+
+app.post(
+  '/epr/skus',
+  requireAuth,
+  requireVerifiedEmail,
+  requireOrgRole('orgReporter'),
+  requireActiveOrganization,
+  eprWriteLimit,
+  async (req, res) => {
+    try {
+      const result = await producerSkus.saveSkuDraft({
+        orgId: req.orgMembership.orgId,
+        draft: req.body || {},
+        actorUid: req.user.uid,
+        actorName: req.user.name,
+      });
+      return res.status(201).json({ ok: true, ...result });
+    } catch (err) {
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+app.post(
+  '/epr/skus/:skuId',
+  requireAuth,
+  requireVerifiedEmail,
+  requireOrgRole('orgReporter'),
+  requireActiveOrganization,
+  eprWriteLimit,
+  async (req, res) => {
+    try {
+      const result = await producerSkus.saveSkuDraft({
+        skuId: req.params.skuId,
+        orgId: req.orgMembership.orgId,
+        draft: req.body || {},
+        actorUid: req.user.uid,
+        actorName: req.user.name,
+      });
+      return res.json({ ok: true, ...result });
+    } catch (err) {
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+/**
+ * Bulk import (EPR-10).
+ *
+ * All-or-nothing: the client parses and previews, and this route refuses the
+ * whole batch if any row fails validation here too. The client's parser is a
+ * courtesy to the person looking at the preview; this one is the control.
+ */
+app.post(
+  '/epr/skus/import',
+  requireAuth,
+  requireVerifiedEmail,
+  requireOrgRole('orgReporter'),
+  requireActiveOrganization,
+  eprWriteLimit,
+  async (req, res) => {
+    const drafts = Array.isArray(req.body?.skus) ? req.body.skus : null;
+    if (!drafts || drafts.length === 0) {
+      return res.status(400).json({
+        error: 'bad_request',
+        message: 'Send the products to import.',
+      });
+    }
+    if (drafts.length > 500) {
+      return res.status(400).json({
+        error: 'too_many',
+        message: '500 products is the most one import can carry.',
+      });
+    }
+
+    // Validate every row before writing any of them. A partial import leaves a
+    // producer with a catalogue it cannot reason about.
+    const rowProblems = [];
+    drafts.forEach((draft, index) => {
+      const { problems } = producerSkus.validateSkuDraft(draft);
+      if (problems.length > 0) {
+        rowProblems.push({ row: index + 1, problems });
+      }
+    });
+
+    if (rowProblems.length > 0) {
+      return res.status(400).json({
+        error: 'invalid_import',
+        message: `${rowProblems.length} of ${drafts.length} products could not be read. Nothing was imported.`,
+        rows: rowProblems.slice(0, 50),
+      });
+    }
+
+    try {
+      const created = [];
+      for (const draft of drafts) {
+        const result = await producerSkus.saveSkuDraft({
+          orgId: req.orgMembership.orgId,
+          draft,
+          actorUid: req.user.uid,
+          actorName: req.user.name,
+        });
+        created.push(result.skuId);
+      }
+      return res.status(201).json({ ok: true, created: created.length, skuIds: created });
+    } catch (err) {
+      // A failure partway through leaves the rows already written. Said
+      // plainly rather than reported as a clean failure, because the producer
+      // has to know its catalogue is now partly populated.
+      console.error('SKU import failed:', err.message);
+      return res.status(409).json({
+        error: 'import_incomplete',
+        message:
+          'The import stopped partway. Some products were registered — check '
+          + 'your product list before trying again.',
+      });
+    }
+  },
+);
+
+app.post(
+  '/epr/skus/:skuId/submit',
+  requireAuth,
+  requireVerifiedEmail,
+  requireOrgRole('orgReporter'),
+  requireActiveOrganization,
+  eprWriteLimit,
+  async (req, res) => {
+    try {
+      const result = await producerSkus.submitForVerification({
+        skuId: req.params.skuId,
+        orgId: req.orgMembership.orgId,
+        actorUid: req.user.uid,
+        actorName: req.user.name,
+      });
+      return res.json({ ok: true, ...result });
+    } catch (err) {
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// The Admin mass-verification queue (EPR-42)
+// ---------------------------------------------------------------------------
+//
+// "The single most consequential screen in the system: it is where a number
+// that will appear on regulatory filings is accepted or refused."
+
+app.get(
+  '/epr/admin/mass-queue',
+  requireAuth,
+  requireAdmin,
+  readLimit,
+  async (req, res) => {
+    try {
+      const queue = await producerSkus.listVerificationQueue({});
+      const policy = await eprPolicy.readPolicy();
+      return res.json({ ok: true, queue, policy });
+    } catch (err) {
+      console.error('Mass queue failed:', err.message);
+      return res.status(503).json({ error: 'queue_unavailable' });
+    }
+  },
+);
+
+app.get(
+  '/epr/admin/skus/:skuId/history',
+  requireAuth,
+  requireAdmin,
+  readLimit,
+  async (req, res) => {
+    try {
+      const revisions = await producerSkus.listRevisions({ skuId: req.params.skuId });
+      const audits = await producerSkus.listMassAudits({ skuId: req.params.skuId });
+      return res.json({ ok: true, revisions, audits });
+    } catch (err) {
+      console.error('SKU history failed:', err.message);
+      return res.status(503).json({ error: 'history_unavailable' });
+    }
+  },
+);
+
+app.post(
+  '/epr/admin/skus/:skuId/audit',
+  requireAuth,
+  requireAdmin,
+  requireFreshAuth(PRIVILEGED_AUTH_MAX_AGE_SECONDS),
+  writeLimit,
+  async (req, res) => {
+    try {
+      const result = await producerSkus.recordMassAudit({
+        skuId: req.params.skuId,
+        sampleSize: req.body?.sampleSize,
+        measuredMeanMg: req.body?.measuredMeanMg,
+        measuredStdDevMg: req.body?.measuredStdDevMg ?? null,
+        weighingLocation: req.body?.weighingLocation,
+        scalePhotoUrl: req.body?.scalePhotoUrl ?? null,
+        note: req.body?.note,
+        adminUid: req.user.uid,
+        adminName: req.user.name,
+      });
+      return res.json({ ok: true, ...result });
+    } catch (err) {
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+app.post(
+  '/epr/admin/skus/:skuId/verified-mass',
+  requireAuth,
+  requireAdmin,
+  requireFreshAuth(PRIVILEGED_AUTH_MAX_AGE_SECONDS),
+  writeLimit,
+  async (req, res) => {
+    try {
+      const result = await producerSkus.setVerifiedMass({
+        skuId: req.params.skuId,
+        verifiedUnitMassMg: req.body?.verifiedUnitMassMg,
+        reason: req.body?.reason,
+        note: req.body?.note,
+        adminUid: req.user.uid,
+        adminName: req.user.name,
+      });
+      return res.json({ ok: true, ...result });
+    } catch (err) {
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+app.post(
+  '/epr/admin/skus/:skuId/reject',
+  requireAuth,
+  requireAdmin,
+  requireFreshAuth(PRIVILEGED_AUTH_MAX_AGE_SECONDS),
+  writeLimit,
+  async (req, res) => {
+    try {
+      const result = await producerSkus.rejectSku({
+        skuId: req.params.skuId,
+        reason: req.body?.reason,
+        adminUid: req.user.uid,
+        adminName: req.user.name,
+      });
+      return res.json({ ok: true, ...result });
+    } catch (err) {
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+/** The EPR policy (§6.2, EPR-17). Readable by any signed-in account, in the
+ * manner of `/config/points` — a producer is entitled to know the tolerance its
+ * declarations are judged against. */
+app.get('/epr/config/policy', requireAuth, readLimit, async (req, res) => {
+  const policy = await eprPolicy.readPolicy();
+  return res.json({ ok: true, policy });
+});
+
+app.post(
+  '/epr/config/policy',
+  requireAuth,
+  requireAdmin,
+  requireFreshAuth(PRIVILEGED_AUTH_MAX_AGE_SECONDS),
+  writeLimit,
+  async (req, res) => {
+    try {
+      const policy = await eprPolicy.writePolicy(req.body || {}, {
+        adminUid: req.user.uid,
+      });
+      return res.json({ ok: true, policy });
+    } catch (err) {
+      return res.status(400).json({
+        error: 'invalid_policy',
+        message: err.message,
+        ...(err.problems ? { problems: err.problems } : {}),
+      });
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Chokro administration of producers (EPR-40 to EPR-47)
+// ---------------------------------------------------------------------------
+
+app.get('/epr/admin/organizations', requireAuth, requireAdmin, readLimit, async (req, res) => {
+  try {
+    const list = await organizations.listOrganizations({
+      status: req.query.status || null,
+    });
+    return res.json({ ok: true, organizations: list });
+  } catch (err) {
+    console.error('Producer directory failed:', err.message);
+    return res.status(503).json({ error: 'directory_unavailable' });
+  }
+});
+
+app.get(
+  '/epr/admin/organizations/:orgId',
+  requireAuth,
+  requireAdmin,
+  readLimit,
+  async (req, res) => {
+    try {
+      const organization = await organizations.getOrganization(req.params.orgId);
+      if (!organization) {
+        return res.status(404).json({ error: 'not_found' });
+      }
+      // Collisions travel with the record rather than being a separate call,
+      // because EPR-14 makes them a *blocking flag on the review screen* — an
+      // Admin must not be able to approve without having seen them.
+      const brandCollisions = await organizations.findBrandCollisions({
+        tradeName: organization.tradeName,
+        legalName: organization.legalName,
+        excludeOrgId: organization.orgId,
+      });
+      const members = await organizations.listMembers({ orgId: req.params.orgId });
+      return res.json({ ok: true, organization, brandCollisions, members });
+    } catch (err) {
+      console.error('Producer detail failed:', err.message);
+      return res.status(503).json({ error: 'organization_unavailable' });
+    }
+  },
+);
+
+app.post('/epr/admin/organizations', requireAuth, requireAdmin, writeLimit, async (req, res) => {
+  try {
+    const result = await organizations.createOrganization({
+      ...(req.body || {}),
+      adminUid: req.user.uid,
+      adminName: req.user.name,
+    });
+    return res.status(201).json({ ok: true, ...result });
+  } catch (err) {
+    return eprFailure(res, err, 400);
+  }
+});
+
+app.post(
+  '/epr/admin/organizations/:orgId/review',
+  requireAuth,
+  requireAdmin,
+  requireFreshAuth(PRIVILEGED_AUTH_MAX_AGE_SECONDS),
+  writeLimit,
+  async (req, res) => {
+    const { decision, reason, sizeClass, categories, complianceRoute, bin,
+      tradeLicenceNo, doeRegistrationNo, obligationStartDate } = req.body || {};
+
+    // Parsed here rather than in the module, so a malformed date is a 400 with
+    // a sentence rather than an exception inside a transaction.
+    let startDate = null;
+    if (obligationStartDate) {
+      startDate = new Date(obligationStartDate);
+      if (Number.isNaN(startDate.getTime())) {
+        return res.status(400).json({
+          error: 'invalid_date',
+          message: 'The obligation start date is not a valid date.',
+        });
+      }
+    }
+
+    try {
+      const result = await organizations.reviewOrganization({
+        orgId: req.params.orgId,
+        decision,
+        reason,
+        sizeClass,
+        categories,
+        complianceRoute,
+        bin,
+        tradeLicenceNo,
+        doeRegistrationNo,
+        obligationStartDate: startDate,
+        adminUid: req.user.uid,
+        adminName: req.user.name,
+      });
+      return res.json({ ok: true, ...result });
+    } catch (err) {
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+app.post(
+  '/epr/admin/organizations/:orgId/status',
+  requireAuth,
+  requireAdmin,
+  requireFreshAuth(PRIVILEGED_AUTH_MAX_AGE_SECONDS),
+  writeLimit,
+  async (req, res) => {
+    try {
+      const result = await organizations.setOrganizationStatus({
+        orgId: req.params.orgId,
+        status: req.body?.status,
+        reason: req.body?.reason,
+        adminUid: req.user.uid,
+        adminName: req.user.name,
+      });
+      return res.json({ ok: true, ...result });
+    } catch (err) {
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+/**
+ * An Admin invites the first owner of a newly approved organisation.
+ *
+ * The bootstrap case, and the reason this route exists alongside the producer's
+ * own: an organisation with no members has nobody who could issue the first
+ * invitation.
+ */
+app.post(
+  '/epr/admin/organizations/:orgId/invitations',
+  requireAuth,
+  requireAdmin,
+  requireFreshAuth(PRIVILEGED_AUTH_MAX_AGE_SECONDS),
+  writeLimit,
+  async (req, res) => {
+    try {
+      const invitation = await organizations.createInvitation({
+        orgId: req.params.orgId,
+        email: req.body?.email,
+        orgRole: req.body?.orgRole,
+        actorUid: req.user.uid,
+        actorName: req.user.name,
+        actorRole: 'admin',
+      });
+      return res.status(201).json({ ok: true, invitation });
+    } catch (err) {
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+/** One organisation's activity timeline (EPR-44). */
+app.get(
+  '/epr/admin/organizations/:orgId/audit',
+  requireAuth,
+  requireAdmin,
+  readLimit,
+  async (req, res) => {
+    try {
+      const entries = await producerAudit.listForOrg({ orgId: req.params.orgId });
+      return res.json({ ok: true, entries });
+    } catch (err) {
+      console.error('Producer audit read failed:', err.message);
+      return res.status(503).json({ error: 'audit_unavailable' });
+    }
+  },
+);
+
+/**
+ * Chain verification (SEC-12, EPR-48).
+ *
+ * A control nobody can run is a claim rather than a control, so it is an
+ * endpoint and not a script.
+ */
+app.get(
+  '/epr/admin/organizations/:orgId/audit/verify',
+  requireAuth,
+  requireAdmin,
+  readLimit,
+  async (req, res) => {
+    try {
+      const result = await producerAudit.verifyChain({ orgId: req.params.orgId });
+      return res.json({ ok: true, ...result });
+    } catch (err) {
+      console.error('Audit chain verification failed:', err.message);
+      return res.status(503).json({ error: 'verification_unavailable' });
+    }
+  },
+);
+
+/**
+ * An Admin opening the read-only "view as organisation" (EPR-46).
+ *
+ * Recorded, because a read of a company's compliance position by somebody
+ * outside that company is exactly the event an audit trail exists for. There is
+ * no impersonation anywhere in this system — the entry names the Admin, and no
+ * action is ever taken under a producer's identity.
+ */
+app.post(
+  '/epr/admin/organizations/:orgId/view',
+  requireAuth,
+  requireAdmin,
+  writeLimit,
+  async (req, res) => {
+    try {
+      await producerAudit.append({
+        orgId: req.params.orgId,
+        action: producerAudit.ACTIONS.ADMIN_VIEWED_AS_ORG,
+        actorUid: req.user.uid,
+        actorName: req.user.name,
+        actorRole: 'admin',
+        targetType: 'organization',
+        targetId: req.params.orgId,
+        summary: 'Admin opened the read-only organisation view.',
+        ip: req.ip,
+        userAgent: req.get('User-Agent'),
+      });
+      return res.json({ ok: true });
+    } catch (err) {
+      console.error('View-as logging failed:', err.message);
+      // A view that could not be logged is a view that did not happen, as far
+      // as this system is concerned. Refusing is the honest outcome — the
+      // alternative is an unrecorded read of a customer's compliance data.
+      return res.status(503).json({
+        error: 'view_not_recorded',
+        message: 'The view could not be recorded, so it was not opened.',
+      });
+    }
+  },
+);
+
 // ---------------------------------------------------------------------------
 // Fallbacks
 // ---------------------------------------------------------------------------
@@ -976,6 +1892,20 @@ server = app.listen(port, () => {
     console.log(
       '[cors] loopback origins accepted (ALLOW_LOOPBACK_ORIGINS=true). This ' +
         'must not be set in production.',
+    );
+  }
+
+  // Stated at boot so the posture is visible in the deploy log rather than
+  // inferred from an absent error.
+  console.log(`[appCheck] ${appCheck.describeEnforcement()}`);
+
+  if (!producerAudit.isKeyed()) {
+    console.warn(
+      '[audit] AUDIT_CHAIN_KEY is not set. The producer audit chain is an '
+        + 'unkeyed hash, so it is tamper-evident against anything without write '
+        + 'access and NOT evidence against an insider who holds the Firestore '
+        + 'credential — the adversary SEC-12 names. Set it, to a value the '
+        + 'database operator cannot read, before onboarding a real producer.',
     );
   }
 

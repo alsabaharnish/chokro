@@ -31,6 +31,14 @@ import '../views/donations/donation_view.dart';
 import '../views/admin/admin_disposals_view.dart';
 import '../views/admin/admin_appeals_view.dart';
 import '../views/admin/admin_dashboard_view.dart';
+import '../views/admin/admin_mass_queue_view.dart';
+import '../views/admin/admin_producers_view.dart';
+import '../views/producer/invitation_redeem_view.dart';
+import '../views/producer/producer_activity_view.dart';
+import '../views/producer/producer_dashboard_view.dart';
+import '../views/producer/producer_members_view.dart';
+import '../views/producer/producer_skus_view.dart';
+import '../views/producer/sku_import_view.dart';
 import '../views/appeals/appeal_form_view.dart';
 import '../views/appeals/appeals_view.dart';
 import '../views/market/catalog_view.dart';
@@ -211,14 +219,53 @@ const String accountIncompletePath = '/account-incomplete';
 /// Auth or profile could not be read because the service/network failed.
 const String startupErrorPath = '/startup-error';
 
+/// Where a producer invitation link lands (EPR-4).
+///
+/// Treated as an auth route by the gate below, so an anonymous visitor holding
+/// an invitation reaches the form that redeems it instead of the sign-in screen.
+const String invitationRedeemPath = '/join';
+
 /// Pure route policies, kept outside GoRouter so role/suspension agreement can
 /// be tested without constructing Firebase-backed providers.
 bool canAccessAdminRoutes(UserModel user) => user.isAdmin && user.isActive;
 
-String? activeRouteRedirect(UserModel user) => user.isActive ? null : '/home';
+/// Whether this account may open the EPR producer portal (EPR-1).
+///
+/// The platform role and nothing else. Which *organisation* the account may
+/// read, and what it may do there, is decided by a stored membership document —
+/// in `firestore.rules`, in `requireOrgRole` on the server, and in the
+/// workspace's own first frame. A route gate cannot resolve that without a
+/// network read, and a gate that guessed at it would be a fourth copy of an
+/// authorisation rule that already exists in three places that agree.
+///
+/// So this opens the door and the workspace says what is behind it: an
+/// unverified address, a revoked membership and a suspended company each get
+/// their own explanation rather than a bounce to `/home` with no reason given.
+bool canAccessProducerRoutes(UserModel user) => user.isProducer && user.isActive;
+
+/// Where an account belongs when it lands on a route it does not hold.
+///
+/// A producer has no citizen home to fall back to, so `/home` is the wrong
+/// answer for one — it would send a compliance officer to a screen offering a
+/// wallet, a shop and a bin scanner, none of which their account can use.
+String homeFor(UserModel user) => user.isProducer ? '/producer' : '/home';
+
+String? activeRouteRedirect(UserModel user) =>
+    user.isActive ? null : homeFor(user);
+
+/// Sends a producer away from the citizen home screen.
+///
+/// `/home` is the router's `initialLocation` and the fallback of several
+/// redirects, so a producer reaches it by default rather than by asking. This
+/// is what makes signing in as a producer land in the producer workspace.
+String? producerHomeRedirect(UserModel user) =>
+    user.isProducer ? '/producer' : null;
 
 String? sellerRouteRedirect(UserModel user) {
   if (!user.isActive) return '/home';
+  // A producer is not a Greenpreneur who has not applied yet — the roles are
+  // disjoint (EPR-1) — so the application form is the wrong destination.
+  if (user.isProducer) return '/producer';
   return user.isSeller ? null : '/apply-seller';
 }
 
@@ -389,6 +436,28 @@ final routerProvider = Provider<GoRouter>((ref) {
     };
   }
 
+  /// Guards the EPR producer portal (EPR-1, NFR-E-1).
+  ///
+  /// Waits on [_Gate.unresolved] rather than bouncing, for the same deep-link
+  /// reason `requireAdmin` does: a producer opening `/producer/members` from a
+  /// link would otherwise be redirected away in the moment before their profile
+  /// loaded.
+  ///
+  /// A non-producer is sent to their own home, not shown an empty workspace.
+  String? requireProducerRoute(BuildContext context, GoRouterState state) {
+    final (gate: gate, user: user) = resolve();
+    return switch (gate) {
+      _Gate.unresolved => splashPath,
+      _Gate.anonymous => '/login',
+      _Gate.profileMissing => accountIncompletePath,
+      _Gate.failed => startupErrorPath,
+      // The role alone is not authority here either. A suspended producer is
+      // refused by the rules and by the server, so the route agrees rather than
+      // opening a workspace whose every request will be denied.
+      _Gate.signedIn => canAccessProducerRoutes(user!) ? null : homeFor(user),
+    };
+  }
+
   String? requireSignedIn(BuildContext context, GoRouterState state) {
     final (gate: gate, user: _) = resolve();
     return switch (gate) {
@@ -425,7 +494,16 @@ final routerProvider = Provider<GoRouter>((ref) {
         RouteErrorView(location: state.uri.toString()),
     redirect: (context, state) {
       final location = state.matchedLocation;
-      final isAuthRoute = location == '/login' || location == '/register';
+      // `/join` belongs here for the same reason `/register` does: it is a
+      // place an anonymous visitor is *supposed* to be. It carries a
+      // single-use invitation token in its query string, and the anonymous
+      // branch below would otherwise redirect it to `/login` — dropping the
+      // token, since a signed-out visitor has nothing to consume the pending
+      // destination with, and there is no second copy of the link.
+      final isAuthRoute =
+          location == '/login' ||
+          location == '/register' ||
+          location == invitationRedeemPath;
       final isSplash = location == splashPath;
       final isIncomplete = location == accountIncompletePath;
       final isStartupError = location == startupErrorPath;
@@ -511,11 +589,20 @@ final routerProvider = Provider<GoRouter>((ref) {
           // Nothing to do on the splash but leave it, and an authenticated user
           // has no business on the sign-in screen or the recovery screen.
           //
-          // `/home` is the fallback, not the destination. Hardcoding it here is
-          // what discarded admin deep links and terminated-state push taps.
+          // The fallback is `homeFor(user)` rather than a hardcoded `/home`:
+          // a producer account holds no citizen profile, so `/home` for one is
+          // a screen offering a wallet, a shop and a bin scanner it cannot use
+          // (EPR-1). Hardcoding a destination here is also what once discarded
+          // admin deep links and terminated-state push taps, which is why the
+          // remembered destination still wins.
+          final signedInUser = resolve().user!;
           if (isSplash || isAuthRoute || isIncomplete || isStartupError) {
-            return pending.consume() ?? '/home';
+            return pending.consume() ?? homeFor(signedInUser);
           }
+          // A producer that has arrived at the citizen home — by the router's
+          // own `initialLocation`, or by a redirect that predates this role —
+          // is moved to its own workspace.
+          if (location == '/home') return producerHomeRedirect(signedInUser);
           return null;
       }
     },
@@ -729,6 +816,58 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/admin/dashboard',
         builder: (context, state) => const AdminDashboardView(),
         redirect: requireAdmin,
+      ),
+      GoRoute(
+        path: '/admin/producers',
+        builder: (context, state) => const AdminProducersView(),
+        redirect: requireAdmin,
+      ),
+      GoRoute(
+        path: '/admin/mass-queue',
+        builder: (context, state) => const AdminMassQueueView(),
+        redirect: requireAdmin,
+      ),
+
+      // ---- EPR producer portal (EPR-1, NFR-E-1) ----
+      //
+      // Under `/producer/*`, laid out for a desktop browser. No new mobile
+      // navigation destination is added to any citizen profile: these routes
+      // are reachable only by a producer account, whose shell has its own
+      // destination set.
+      GoRoute(
+        path: invitationRedeemPath,
+        builder: (context, state) => InvitationRedeemView(
+          // From the query string, and tolerant of an absent one: the view says
+          // "no invitation in this link" rather than throwing, because a
+          // truncated paste is the likeliest way to arrive here without a
+          // token.
+          token: state.uri.queryParameters['token'] ?? '',
+        ),
+      ),
+      GoRoute(
+        path: '/producer',
+        builder: (context, state) => const ProducerDashboardView(),
+        redirect: requireProducerRoute,
+      ),
+      GoRoute(
+        path: '/producer/members',
+        builder: (context, state) => const ProducerMembersView(),
+        redirect: requireProducerRoute,
+      ),
+      GoRoute(
+        path: '/producer/skus',
+        builder: (context, state) => const ProducerSkusView(),
+        redirect: requireProducerRoute,
+      ),
+      GoRoute(
+        path: '/producer/skus/import',
+        builder: (context, state) => const SkuImportView(),
+        redirect: requireProducerRoute,
+      ),
+      GoRoute(
+        path: '/producer/activity',
+        builder: (context, state) => const ProducerActivityView(),
+        redirect: requireProducerRoute,
       ),
     ],
   );

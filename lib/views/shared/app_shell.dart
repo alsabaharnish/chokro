@@ -163,6 +163,42 @@ class AppShell extends ConsumerWidget {
           'History',
         ),
       ],
+      // The EPR producer workspace (EPR-1, NFR-E-1).
+      //
+      // Deliberately its own destination set with nothing citizen-facing in
+      // it: no Home, no Shop, no Wallet. A producer account holds only this
+      // profile, so there is no other workspace to return to, and offering a
+      // marketplace to a compliance officer would be offering something the
+      // rules will refuse.
+      //
+      // Destinations are added as their phases land rather than shipped as
+      // dead tabs. This is Phase A's set.
+      AccountProfile.producer => const <ShellDestination>[
+        ShellDestination(
+          '/producer',
+          Icons.insights_outlined,
+          Icons.insights,
+          'Workspace',
+        ),
+        ShellDestination(
+          '/producer/skus',
+          Icons.inventory_2_outlined,
+          Icons.inventory_2,
+          'Products',
+        ),
+        ShellDestination(
+          '/producer/members',
+          Icons.group_outlined,
+          Icons.group,
+          'Members',
+        ),
+        ShellDestination(
+          '/profile',
+          Icons.person_outline,
+          Icons.person,
+          'Profile',
+        ),
+      ],
     };
 
     final location = GoRouterState.of(context).matchedLocation;

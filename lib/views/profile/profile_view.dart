@@ -458,19 +458,28 @@ class _ProfileViewState extends ConsumerState<ProfileView>
                       ),
                     ),
                   ],
-                  const SizedBox(height: AppTheme.gapSm),
-                  OutlinedButton.icon(
-                    onPressed: active
-                        ? () {
-                            ref
-                                .read(accountProfileControllerProvider.notifier)
-                                .select(AccountProfile.champion);
-                            context.push('/donate');
-                          }
-                        : null,
-                    icon: const Icon(Icons.volunteer_activism_outlined),
-                    label: const Text('Support green initiatives'),
-                  ),
+                  // Champions only. Donating spends reward points, and a
+                  // producer account holds no wallet to spend from (EPR-1) —
+                  // the profile switch inside this callback would be refused
+                  // by `roleHoldsAccountProfile` and the push would land a
+                  // compliance officer on a screen with nothing on it.
+                  if (user.isChampion) ...[
+                    const SizedBox(height: AppTheme.gapSm),
+                    OutlinedButton.icon(
+                      onPressed: active
+                          ? () {
+                              ref
+                                  .read(
+                                    accountProfileControllerProvider.notifier,
+                                  )
+                                  .select(AccountProfile.champion);
+                              context.push('/donate');
+                            }
+                          : null,
+                      icon: const Icon(Icons.volunteer_activism_outlined),
+                      label: const Text('Support green initiatives'),
+                    ),
+                  ],
                 ],
               ),
             ),
