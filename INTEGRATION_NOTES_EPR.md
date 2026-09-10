@@ -15,7 +15,7 @@ specification.
 |---|---|---|
 | **A** | Tenancy and identity | **Delivered** |
 | **B** | Product registry and verified mass | **Delivered** |
-| C | Attribution | Not started |
+| **C** | Attribution | **Delivered**, behind `EPR_ATTRIBUTION_ENABLED` |
 | D | Declarations, reporting and the passport | Not started |
 | E | Oversight, hardening and audit readiness | Not started |
 
@@ -603,3 +603,426 @@ New suites since Phase A:
 - **EPR-11's wording** contradicts Appendix A on whether a within-tolerance
   declaration is adopted. Implemented per Appendix A; needs the author's
   confirmation.
+
+---
+
+## Phase C — Attribution
+
+Phase C is the only phase that touches the existing disposal decision path, and
+§14's sequencing note asks for three things: a feature flag, proof that
+attribution failure never affects a disposal outcome, and a disproportionate
+share of review time. All three are below.
+
+### The shape, and the one decision everything else follows from
+
+**Attribution runs after the decision commits, in its own transaction, and
+every failure is swallowed.**
+
+`award.js` already establishes the pattern for the push notification: "AFTER the
+commit, never inside it. Firestore retries a transaction body on contention, so
+a send inside one fires once per attempt." The same reasoning applies with more
+force here. Inside the decision transaction, a registry read failing or a mass
+being unverifiable would roll back a Champion's points — a payout undone because
+a producer's paperwork was incomplete. EPR-16's sentence is that a screening
+outage must degrade attribution, not disposal, and this is where that holds.
+
+So the flow is:
+
+```
+verifyDisposal → screen (one call, extended with the SKU shortlist)
+               → store skuMatches as server-only evidence
+               → decide → approveDisposal (commits points, ledger, caps)
+                        → [after the commit] attributeDisposal
+                                            → attributions + eprPeriods, one txn
+```
+
+**There is no second model call.** NFR-E-7 allows "one model call per approved
+disposal (or extends the existing one)", and extending it is the cheaper half —
+and the only half that works for a manual approval. A disposal routed to review
+carries its recognition evidence forward, so an Admin approving three days later
+attributes against what was screened at the time rather than re-screening a bin
+that has since been emptied.
+
+### EPR-27: mass stays out of the points path
+
+§6.8 asks the architect to read the warning twice, and `server/test/attributePointsIsolation.test.js`
+is the "verify by test" it demands. Sixteen assertions, of which the load-bearing
+ones are:
+
+- `decide()` returns an **identical** result whether the screening verdict
+  carries a high-confidence match, an empty match list, or nothing at all. If it
+  read `skuMatches` even incidentally, a producer registering a product would
+  change what a Champion is paid.
+- The flag vocabulary gained nothing. A new flag would be a new reason a
+  disposal could be routed to review, and attribution must never be one.
+- `attribute.js` names none of `wallets`, `transactions`, `dailyCaps`,
+  `lockouts` or `stats`, and requires neither `award.js` nor `decide.js` nor
+  `pointsPolicy.js`.
+- The disposal update names only EPR-6's four server-owned fields and nothing
+  that could move a payout or resurrect a rejected disposal.
+- `attributeDisposal` cannot throw into its caller — proven by calling it with
+  Firestore unreachable, the harshest failure available.
+- Nothing the hook returns is read. A caller of `approveDisposal` gets the same
+  shape it always did.
+
+Those source-level assertions strip comments before scanning. The first version
+did not, and matched the very prose explaining why a field is absent — the same
+trap as the claim-boundary test in Phase B.
+
+### The tier ladder, and what each tier costs
+
+| Tier | Threshold | Outcome |
+|---|---|---|
+| `high` | ≥ 0.85 | Attributed |
+| `medium` | 0.60–0.85 | Attributed, **and counted into `uncertainMassMg`** so the producer sees its own uncertainty (EPR-37), and queued for sampling |
+| `low` | < 0.60 | **Not attributed.** Queued for human confirmation |
+| barcode | n/a | `high`, with `confidence: null` |
+
+A barcode carries **null** confidence rather than 1.0. A read barcode is not a
+probabilistic judgement, and a fabricated certainty would pollute the accuracy
+statistics EPR-17 requires be published.
+
+Anything unreadable — a missing confidence, a non-numeric one, one out of range
+— is `low`, and `low` attributes nothing. Defaulting to `high` would
+auto-attribute an unrated guess.
+
+### Null and empty are different facts (EPR-19)
+
+This distinction runs through the whole phase and is the reason
+`parseSkuMatches` returns `null` rather than `[]` on failure:
+
+- `skuMatches: null` — recognition did not run, or could not be read. The
+  disposal stays `pending`, so a backfill can attribute it later. **It is not
+  counted into the unattributed pool**, because counting it would claim it had
+  been checked.
+- `skuMatches: []` — recognition ran and recognised nothing. *This* is
+  `unattributable`, and it increments the pool that is reported as its own line.
+
+Collapsing the two would either lose real attributions or invent an empty pool.
+
+The pool is counted on a `__platform` rollup and **not** per organisation: an
+unrecognised item belongs to nobody by definition, so attributing its absence to
+a producer would invent the very thing EPR-19 forbids. That document is
+Admin-read-only, because a producer reading it would learn how much of every
+other company's packaging goes unrecognised.
+
+### The mass that applied at the time (EPR-12)
+
+`revisionActiveAt({skuId, moment})` is the function that makes a past period
+reproducible. An attribution multiplies by the verified mass that applied on the
+day the disposal was decided, and stores both the revision number and the
+`unitMassMgUsed` it actually used.
+
+Appendix A step 11 is the case: a November re-weighing finds the bottle
+light-weighted to 9.1 g, and September's figure stays 19.6 g because September's
+rows say 9.8 g. Reading `producerSkus.verifiedUnitMassMg` instead would silently
+rewrite every past report every time a product was re-weighed.
+
+A revision now also **freezes its component breakdown**, which Phase B did not.
+Per-polymer reporting is computed from those masses, so reproducing a past
+period needs the breakdown as it was — and while editing components already
+invalidates a verification, a *closed* revision's split must stay its own.
+
+### The polymer split sums exactly
+
+`polymerSplitFor` applies the component proportions to the verified mass on
+integers, floors each share, and gives the remainder to the heaviest part. The
+lines therefore add up to the attributed mass **exactly**, for every mass —
+tested across six magnitudes.
+
+Two things this avoids. Adding component masses directly would report polymer
+lines totalling more than the product's own mass whenever the verified figure
+came in lighter than the declaration. And flooring without a remainder would
+leave a report whose breakdown does not add up to its own total, which is
+precisely what a regulator notices — and "rounding" is not an answer when both
+figures are integers.
+
+No components means **no split**, deliberately empty rather than assigning the
+whole mass to the dominant polymer, because that would be a guess (§6.7).
+
+### The shortlist is an accuracy control, not only a cost control (EPR-15)
+
+Sending a national catalogue in a prompt is neither affordable nor accurate.
+Not affordable on a metered quota; not accurate because a model asked to pick
+from hundreds of near-identical bottles will pick one, confidently — and a
+confident wrong brand attributes one company's kilograms to another.
+
+So candidates are narrowed by three facts that are not the model's guess: the
+declared item type, the bin's district, and what has actually been recognised at
+that bin before. Ranking is by local history (worth most, because it is observed
+rather than assumed), then district, then whether a GTIN is on file. Ties break
+on `skuId`, so the same disposal produces the same shortlist twice — an unstable
+order would make the accuracy audit measure the shortlist rather than the model.
+
+**Only products with a verified mass are candidates**, which is a correctness
+filter before an efficiency one: a match against an unverified product could not
+become a defensible kilogram anyway.
+
+**Every returned `skuId` is checked against the shortlist that was sent.** A
+model returning an id it was not offered has hallucinated or echoed training
+data, and accepting it would attribute mass to whichever organisation owns that
+id. This is the single most important line in `parseSkuMatches`.
+
+**The model is never told what anything weighs.** It returns counts; the mass is
+applied afterwards from the verified revision. A model that knew the masses could
+be nudged toward the heavier option, and a compromised prompt could not inflate a
+kilogram.
+
+### The barcode path (EPR-18, NFR-E-6)
+
+Two constraints meet on one field, and both are honoured:
+
+- **EPR-6** forbids the `disposals` client create allowlist growing "by a single
+  key". So the scanned digits never enter the create payload. They travel with
+  the *verification* request, and the server validates and writes them as a
+  server-owned field.
+- **NFR-E-6** forbids the barcode making the flow require another live round
+  trip: "a disposal that fails at the bin because a barcode lookup timed out is
+  a worse product than no barcode path at all". So nothing is looked up while
+  the person is standing at the bin. The sheet reads digits and closes; the GTIN
+  is resolved server-side afterwards.
+
+The sheet does not tell the person whether the product is registered, because
+finding out means a network call — and the answer is "no" for almost every
+barcode, which helps nobody and costs a spinner. It is presented as optional in
+its own words, because a Champion's points do not depend on it at all (EPR-27)
+and implying otherwise would send people hunting for a barcode that is not there.
+
+A misread is ignored rather than raised. A misread barcode is a common, harmless
+event at a bin; blocking the flow for one would make scanning riskier than not
+scanning. The check digit is deliberately not verified — an invalid GTIN simply
+does not resolve, so it costs nothing, whereas a check-digit implementation
+disagreement would cost an accurate attribution.
+
+Two registered products sharing one GTIN is refused rather than resolved.
+Picking either would attribute one company's mass on a coin flip.
+
+### Reconciliation (EPR-22, EPR-48, QA-3)
+
+The rollup is incremented transactionally, which makes it a derived figure that
+can drift. §3.3 means there is no scheduler to reconcile it nightly, so an Admin
+triggers a rebuild and **the result records whether the rebuilt total matched**.
+
+A mismatch is **surfaced, never silently corrected**. The recomputed figure is
+stored *beside* the incremented one, and the incremented one is not overwritten —
+it is what every report issued so far was built from, so replacing it would make
+a past passport unreproducible in order to tidy a discrepancy.
+
+The walk is resumable in 500-row batches with a cursor (NFR-E-3), and an
+incomplete pass writes nothing: a partial rebuild compared against a complete
+increment would report a mismatch that is an artefact of paging.
+
+A reversal (EPR-21) marks the row and decrements the rollup in one transaction,
+and `accumulate` skips reversed rows — so the two halves line up and a reversal
+does not show up as a reconciliation mismatch.
+
+### Periods are Asia/Dhaka (EPR-23)
+
+A fixed +6 offset, and the reasoning is recorded rather than assumed: Bangladesh
+has observed DST exactly once, June to December 2009, at UTC+7. Every timestamp
+in scope is 2026 or later. If that changes, one constant moves and historical
+periods must be *recomputed* rather than reinterpreted — which is what
+`recomputedAt` is for.
+
+Both copies are pinned to the same boundary cases. The one that matters: a
+disposal decided at 20:00 UTC on 30 September is 02:00 on 1 October in Dhaka, and
+filing it in September would make one reported month short and the next long,
+with nothing in either document that looks wrong.
+
+### What a producer can see, and what it cannot (SEC-3)
+
+The workspace reads `eprPeriods`, **not** `attributions`, and both halves of
+that sentence are now enforced rather than merely true of the current screens.
+
+**A producer cannot read attribution rows at all.** An earlier version of this
+phase granted a producer's members read on their own rows, with a comment
+conceding that no screen rendered them and that pseudonymisation would arrive in
+Phase D. **That reasoning was wrong**, and the way it was wrong is worth
+recording: *"no screen renders it" is a statement about the product, not a
+control.* A producer holds its own Firebase credentials,
+`attributions(orgId, periodId, createdAt)` is a shipped composite index, and the
+Firestore SDK is a public API — so a member could query the rows directly and
+get, per row, `binId`, `disposalDecidedAt` at second precision, and the real
+`disposalId`. `bins` is readable by any signed-in account and carries lat/lng,
+because the app must resolve a scanned code. Joining the two reconstructs
+exactly what SEC-3 names as its failure mode: "a map of who throws what where,
+to a commercial party, in a jurisdiction now legislating on personal data."
+
+The grant is Admin-only until the pseudonymised chain-of-custody export exists.
+It costs nothing today, and the rules test now pins the **denial** rather than
+the leak.
+
+**The period response is projected through an explicit allowlist.**
+`listPeriods` used to return the stored document verbatim, which shipped two
+things a producer must never receive:
+
+- `lastAttributionAt`, a server timestamp at second precision. On a period with
+  one disposal that is the exact moment one identifiable person threw something
+  into a named district. The period is the resolution a producer reports at.
+- `recomputedBy`, the Firebase uid of the Chokro employee who ran the
+  reconciliation. A producer needs to know *whether* its period reconciled; it
+  has no business knowing which member of staff touched its figures, and a staff
+  identifier is a target.
+
+An allowlist rather than a deletion list, because a deletion list would have
+missed both again the next time the rollup gained a field. A new field is now
+invisible to producers until somebody decides it should not be.
+
+**The k-anonymity floor exists** (`config/eprPolicy.kAnonymityFloor`, default 5).
+It did not before, and SEC-3 requires it: "any producer-facing aggregate broken
+down finely enough to isolate individuals (a single bin, a single day) is
+suppressed below a policy k-anonymity floor".
+
+The floor applies to **geography and only geography**. District is the
+identifying dimension SEC-3 names; category and polymer are properties of the
+*packaging* — 21 g of rigid PET tells you about a bottle, not about a person —
+and the total is the figure the producer is certified on, so suppressing it would
+make the workspace useless rather than private.
+
+Suppression is **stated, never silent**. `districtSuppressed` and the floor
+travel with the response, and the card says how many disposals a period needs
+before its geography appears. An empty district map with the flag false means
+"no geography recorded"; with it true it means "recorded and withheld". Those
+are different facts, and rendering the second as the first would be a false
+claim about Chokro's own evidence.
+
+Proven by test: a producer cannot read an attribution row, a `disposals`
+document, a `users` document or a `wallets` document; the projection drops both
+leaked fields and refuses a field added later; and geography is withheld at four
+disposals and shown at five.
+
+### Main implementation files
+
+**New Flutter**
+
+```
+lib/core/epr_period.dart                    Asia/Dhaka period resolution
+lib/models/attribution_model.dart           the atomic evidence record
+lib/models/epr_period_model.dart            the rollup, with derived totals
+lib/services/attribution_read_service.dart
+lib/controllers/attribution_controller.dart
+lib/views/producer/collected_mass_card.dart
+lib/views/disposal/barcode_scan_sheet.dart
+```
+
+**New server**
+
+```
+server/src/eprPeriod.js      the authoritative period derivation
+server/src/skuShortlist.js   candidate selection, ranking, GTIN resolution
+server/src/attribute.js      recognition to attribution to rollup
+server/src/eprPeriods.js     recompute, reversal, period reads
+```
+
+**Modified**
+
+```
+server/src/screen.js       the SKU recognition block; existing verdict
+                           semantics and null-on-failure unchanged, and the
+                           prompt is byte-identical when no shortlist is sent
+server/src/verify.js       shortlist build, skuMatches storage, GTIN validation
+server/src/award.js        the post-commit attribution hook
+server/src/producerSkus.js revisionActiveAt; components frozen onto revisions
+lib/controllers/disposal_controller.dart  scannedGtin on the draft
+lib/services/verification_service.dart    carries the scan
+lib/views/disposal/declare_view.dart      the optional barcode row
+firestore.rules            attributions, eprPeriods, attributionConfirmations,
+                           binSkuFrequency; disposals allowlist UNCHANGED
+firestore.indexes.json     8 more indexes
+```
+
+### Verification
+
+| Gate | Result |
+|---|---|
+| `flutter analyze lib test` | clean |
+| `flutter test` | **949** passing (878 after Phase B) |
+| `npm test --prefix server` | **587** passing (497) |
+| `rules_test` on the emulator | **312** passing (290) |
+| `firebase deploy --only firestore:rules --dry-run` | compiles, no warnings |
+| `firebase deploy --only firestore:indexes --dry-run` | passes, 44 indexes |
+
+Notable new suites:
+
+- `server/test/attributePointsIsolation.test.js` — EPR-27, described above.
+- `server/test/attribute.test.js` — the Appendix A worked example end to end;
+  idempotence; only-terminal-approved; the tier ladder; null-versus-empty; the
+  November re-weighing not changing September; the barcode path; the Dhaka
+  boundary; and every failure returning an outcome rather than throwing. Its
+  fake transaction enforces read-before-write, as Phase B's now do.
+- `server/test/eprPeriods.test.js` — a mismatch surfaced and the incremented
+  figure left intact; reversal decrementing and a later recompute agreeing;
+  paging writing nothing.
+- `rules_test/epr_attribution.rules.test.js` — every client write denied
+  including an Admin's; the platform pool Admin-only; and the QA-2 regression
+  that **the `disposals` client create allowlist has not grown**, asserted field
+  by field against every attribution key.
+- `test/core/epr_period_test.dart` — the boundaries, including that the two
+  definitions of "which period" agree at every edge.
+
+### Two more the review caught, both silent
+
+**The district key disagreed in three places.** The attribution path sanitised
+it — a dot in a Firestore map key is read as a nested field path — and the
+recompute and the reversal did not. The reversal was the worse half: it
+decremented a key that had never been written, creating a **negative district
+total in a compliance rollup**. The recompute rebuilt the period under the raw
+name, so every period with a punctuated district reported a reconciliation
+mismatch that was two spellings rather than a discrepancy — exactly the noise
+that makes a real mismatch easy to dismiss. `sanitizeMapKey` now lives in
+`eprPeriod.js`, the module all three already import, and each calls it.
+
+**`uniqueSkuCount` was never incremented.** It was declared on the model,
+rebuilt by the reconciliation, and set nowhere — so it read 0 for every period,
+and a passport would have printed "0 distinct products" beside a real mass.
+
+A counter could not have fixed it: `FieldValue.increment(1)` on every
+attribution counts rows rather than products, and nothing inside an increment
+can ask whether a product has been seen before. The rollup now stores
+`skuIds` via `FieldValue.arrayUnion`, which adds only what is absent — exactly a
+set, and idempotent under the retries `increment` would double-count. The count
+is derived from the set's length rather than stored beside it, so the two cannot
+drift.
+
+A reversal deliberately leaves the set alone: whether a product still belongs
+depends on whether any other row for it survives, which one row cannot answer.
+`arrayRemove` would drop a product still attributed elsewhere in the period.
+Overstating variety is the smaller error — it never overstates mass — and a
+recompute corrects it exactly.
+
+### Two bugs this phase's own tests caught
+
+Worth recording because both were silent.
+
+**The confirmation queue was never written on the unattributable path.** A
+low-confidence match was deferred, `deferredCount` was reported, and nothing was
+queued — EPR-17's "queued for human confirmation" satisfied on paper and nowhere
+else, in exactly the case where a deferred match is the only remaining chance of
+a real attribution.
+
+**The accuracy sample selected nothing.** A polynomial hash mapped a family of
+ids sharing a prefix into a narrow band, so `disposal_0` through `disposal_3999`
+were either all sampled or none — zero at a 2% fraction. Firestore's real
+auto-ids are random, which would have hidden this in production and left the
+published accuracy figure resting on whichever ids happened to fall in the band.
+Now a SHA-256 digest, uniform over any input family.
+
+### Deployment, added to the list
+
+6. `EPR_ATTRIBUTION_ENABLED=true` on the service. **Off by default**, and while
+   it is off the disposal path is observably unchanged: the shortlist is not
+   built, so the screening prompt is byte-identical to the pre-Phase-C one, and
+   `attributeDisposal` returns `{outcome: 'disabled'}` without a read. Turn it on
+   after the registry has verified masses in it, or every disposal will be
+   correctly recorded as `unattributable`.
+
+### Open decisions this phase touched
+
+- **§15 decision 4** (category-average estimates for unmatched mass) is
+  answered as the recommendation states: not in v1.
+  `config/eprPolicy.estimateUnmatchedMass` is `false`, and
+  `AttributionMethod.reportable` is the list an estimating method would have to
+  be added to — visible in review rather than able to join a headline total
+  quietly.
+- **§15 decision 5** (branded-item incentive) is answered as recommended: no
+  points effect, enforced by test rather than by convention.

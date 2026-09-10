@@ -48,6 +48,13 @@ const passwordPolicy = require('./passwordPolicy');
 const appCheck = require('./appCheck');
 const producerSkus = require('./producerSkus');
 const eprPolicy = require('./eprPolicy');
+const eprPeriods = require('./eprPeriods');
+const eprPeriodModule = require('./eprPeriod');
+const declarations = require('./declarations');
+const passports = require('./passports');
+const passportPdf = require('./passportPdf');
+const reportJobs = require('./reportJobs');
+const attribute = require('./attribute');
 const { uploadImage, MAX_BYTES } = require('./cloudinary');
 const { uploadAndSaveProfilePhoto } = require('./profilePhoto');
 const { approveDisposal, rejectDisposal } = require('./award');
@@ -461,6 +468,12 @@ app.post('/disposals/:id/verify', requireAuth, verifyLimit, async (req, res) => 
     const result = await verifyDisposal({
       disposalId: req.params.id,
       callerUid: req.user.uid,
+      // The scanned barcode arrives HERE rather than on the disposal document
+      // (EPR-18, EPR-6). The client create allowlist in `firestore.rules` does
+      // not grow by a key; the server writes this one as a server-owned field
+      // and resolves it after the decision, so nothing is looked up while the
+      // person is standing at the bin (NFR-E-6).
+      scannedGtin: req.body?.scannedGtin ?? null,
     });
     return res.json({ ok: true, ...result });
   } catch (err) {
@@ -938,6 +951,25 @@ app.post('/config/points', requireAuth, requireAdmin, writeLimit, async (req, re
 /** How recently a session must have signed in to change membership (SEC-9). */
 const PRIVILEGED_AUTH_MAX_AGE_SECONDS = 30 * 60;
 
+/**
+ * The origin printed on a Plastic Passport as its verification address.
+ *
+ * This one is worth being careful about. The URL is rendered into a PDF that
+ * leaves Chokro and goes to a regulator or a customer; if it is wrong, every
+ * certificate issued while it was wrong is unverifiable, and reissuing them all
+ * is the only fix. So it comes from configuration rather than from the request
+ * (a `Host` header is attacker-controlled and would let someone induce Chokro
+ * to print their own domain on a genuine certificate), and `startup` warns when
+ * it is unset.
+ */
+function publicBaseUrl() {
+  const configured = process.env.PUBLIC_BASE_URL;
+  if (typeof configured === 'string' && /^https:\/\/[^\s/]+/.test(configured.trim())) {
+    return configured.trim().replace(/\/+$/, '');
+  }
+  return 'https://chokro.app';
+}
+
 function eprFailure(res, err, fallbackStatus = 409) {
   const status = err?.code === 'unavailable' ? 503 : fallbackStatus;
   return res.status(status).json({
@@ -1409,6 +1441,756 @@ app.post(
 );
 
 // ---------------------------------------------------------------------------
+// Attributed mass — what a producer actually reads (EPR-22)
+// ---------------------------------------------------------------------------
+//
+// The workspace reads `eprPeriods`, not `attributions`. That is a privacy
+// decision as much as a performance one: a rollup carries no disposal
+// reference, so there is nothing in it that could correlate an event or a
+// person across two producers' views (SEC-3). Row-level access arrives with the
+// chain-of-custody export in Phase D, pseudonymised.
+
+app.get(
+  '/epr/periods',
+  requireAuth,
+  requireOrgRole('orgViewer'),
+  readLimit,
+  async (req, res) => {
+    try {
+      const [periods, policy] = await Promise.all([
+        eprPeriods.listPeriods({ orgId: req.orgMembership.orgId }),
+        eprPolicy.readPolicy(),
+      ]);
+      // Projected, never spread. The stored rollup carries a second-precision
+      // `lastAttributionAt` and the uid of the Chokro employee who ran the
+      // reconciliation, and the district breakdown needs the k floor applied
+      // (SEC-3). See `projectForProducer`.
+      return res.json({
+        ok: true,
+        periods: periods.map((period) =>
+          eprPeriods.projectForProducer(period, policy),
+        ),
+      });
+    } catch (err) {
+      console.error('Period list failed:', err.message);
+      return res.status(503).json({ error: 'periods_unavailable' });
+    }
+  },
+);
+
+app.get(
+  '/epr/periods/:periodId',
+  requireAuth,
+  requireOrgRole('orgViewer'),
+  readLimit,
+  async (req, res) => {
+    // Validated rather than queried with. A malformed period returns an empty
+    // rollup, which a screen renders as a month with no activity —
+    // indistinguishable from a real quiet month.
+    if (!eprPeriodModule.isValidPeriodId(req.params.periodId)) {
+      return res.status(400).json({
+        error: 'invalid_period',
+        message: 'That is not a reporting period.',
+      });
+    }
+
+    try {
+      const [period, policy] = await Promise.all([
+        eprPeriods.getPeriod({
+          orgId: req.orgMembership.orgId,
+          periodId: req.params.periodId,
+        }),
+        eprPolicy.readPolicy(),
+      ]);
+      // A month with nothing in it is a valid answer, not a 404. The client
+      // renders "no activity recorded" from a period that knows its own id.
+      return res.json({
+        ok: true,
+        period: eprPeriods.projectForProducer(
+          period ?? {
+            orgId: req.orgMembership.orgId,
+            periodId: req.params.periodId,
+          },
+          policy,
+        ),
+      });
+    } catch (err) {
+      console.error('Period read failed:', err.message);
+      return res.status(503).json({ error: 'period_unavailable' });
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Reconciliation (EPR-22, EPR-48)
+// ---------------------------------------------------------------------------
+//
+// Admin-triggered because nothing in this system runs on a timer (§3.3). The
+// match/mismatch flag is itself a reportable control, and a mismatch is
+// surfaced rather than silently corrected (QA-3).
+
+app.post(
+  '/epr/admin/periods/:orgId/:periodId/recompute',
+  requireAuth,
+  requireAdmin,
+  writeLimit,
+  async (req, res) => {
+    try {
+      const result = await eprPeriods.recomputePeriod({
+        orgId: req.params.orgId,
+        periodId: req.params.periodId,
+        // Resumable across requests: a year of attributions is not one read,
+        // and the free instance will not hold a connection open long enough to
+        // try (NFR-E-3).
+        cursor: req.body?.cursor ?? null,
+        carried: req.body?.carried ?? null,
+        adminUid: req.user.uid,
+      });
+      return res.json({ ok: true, ...result });
+    } catch (err) {
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+app.post(
+  '/epr/admin/attributions/:attributionId/reverse',
+  requireAuth,
+  requireAdmin,
+  requireFreshAuth(PRIVILEGED_AUTH_MAX_AGE_SECONDS),
+  writeLimit,
+  async (req, res) => {
+    try {
+      const result = await eprPeriods.reverseAttribution({
+        attributionId: req.params.attributionId,
+        reason: req.body?.reason,
+        adminUid: req.user.uid,
+      });
+
+      // EPR-30: "a reversed attribution above a policy materiality threshold"
+      // must supersede every affected passport. Run AFTER the reversal
+      // commits, and never allowed to throw — a supersession failure must not
+      // turn an Admin's recorded correction into an error they conclude did
+      // not take effect. The same reasoning as attribution running after the
+      // disposal decision commits.
+      const supersession = await passports.supersedeForReversal({
+        orgId: result.orgId,
+        periodId: result.periodId,
+        massMg: result.massMg,
+        actorUid: req.user.uid,
+      });
+
+      return res.json({ ok: true, ...result, supersession });
+    } catch (err) {
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Put-on-market declarations (EPR-40 to EPR-43)
+// ---------------------------------------------------------------------------
+//
+// The one figure on the whole certificate that the producer supplies, and so
+// the denominator of every collection percentage Chokro states. Drafting is an
+// `orgReporter` action; attesting to it is not — `orgOwner`, because the
+// attestation names a person and an offence.
+
+app.get(
+  '/epr/declarations',
+  requireAuth,
+  requireOrgRole('orgViewer'),
+  readLimit,
+  async (req, res) => {
+    try {
+      const rows = await declarations.listDeclarations({
+        orgId: req.orgMembership.orgId,
+      });
+      return res.json({ ok: true, declarations: rows });
+    } catch (err) {
+      console.error('Declaration list failed:', err.message);
+      return res.status(503).json({ error: 'declarations_unavailable' });
+    }
+  },
+);
+
+app.get(
+  '/epr/declarations/:periodId',
+  requireAuth,
+  requireOrgRole('orgViewer'),
+  readLimit,
+  async (req, res) => {
+    if (!eprPeriodModule.isValidPeriodId(req.params.periodId)) {
+      return res.status(400).json({
+        error: 'invalid_period',
+        message: 'That is not a reporting period.',
+      });
+    }
+
+    try {
+      const [declaration, versions] = await Promise.all([
+        declarations.getDeclaration({
+          orgId: req.orgMembership.orgId,
+          periodId: req.params.periodId,
+        }),
+        declarations.listVersions({
+          orgId: req.orgMembership.orgId,
+          periodId: req.params.periodId,
+        }),
+      ]);
+
+      return res.json({
+        ok: true,
+        // Null, not a zeroed shape. A period with no declaration has not
+        // declared nil (EPR-42), and the client renders the difference.
+        declaration: declaration ?? null,
+        versions,
+        // Sent with the form, so the words a signatory sees come from the same
+        // place the words copied onto the record come from.
+        attestationText: declarations.ATTESTATION_TEXT,
+      });
+    } catch (err) {
+      console.error('Declaration read failed:', err.message);
+      return res.status(503).json({ error: 'declaration_unavailable' });
+    }
+  },
+);
+
+app.put(
+  '/epr/declarations/:periodId',
+  requireAuth,
+  requireVerifiedEmail,
+  requireOrgRole('orgReporter'),
+  // A suspended workspace is read-only: existing records and certificates stay
+  // available, and nothing new can be filed. Without this a suspended producer
+  // could keep changing the denominator its past certificates were computed
+  // against.
+  requireActiveOrganization,
+  eprWriteLimit,
+  async (req, res) => {
+    try {
+      const result = await declarations.saveDraft({
+        orgId: req.orgMembership.orgId,
+        periodId: req.params.periodId,
+        lines: req.body?.lines,
+        attestedByName: req.body?.attestedByName,
+        note: req.body?.note,
+        actorUid: req.user.uid,
+        actorName: req.user.name || '',
+      });
+      return res.json({ ok: true, ...result });
+    } catch (err) {
+      // Every problem at once. A form that reports the first fault and hides
+      // the rest makes a five-line declaration a five-round-trip exercise.
+      if (err.code === 'invalid_declaration') {
+        return res.status(400).json({
+          error: 'invalid_declaration',
+          message: err.message,
+          problems: err.problems,
+        });
+      }
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+app.post(
+  '/epr/declarations/:periodId/submit',
+  requireAuth,
+  requireVerifiedEmail,
+  // Not `orgReporter`. Submitting is signing: the attestation names a person
+  // and states that a false figure may cost the company its registration, so
+  // it is the owner's act and not a data-entry step.
+  requireOrgRole('orgOwner'),
+  requireActiveOrganization,
+  eprWriteLimit,
+  async (req, res) => {
+    try {
+      const result = await declarations.submitDeclaration({
+        orgId: req.orgMembership.orgId,
+        periodId: req.params.periodId,
+        attestedByName: req.body?.attestedByName,
+        actorUid: req.user.uid,
+        actorName: req.user.name || '',
+      });
+      return res.json({ ok: true, ...result });
+    } catch (err) {
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+app.post(
+  '/epr/declarations/:periodId/correct',
+  requireAuth,
+  requireVerifiedEmail,
+  requireOrgRole('orgOwner'),
+  requireActiveOrganization,
+  // A correction supersedes certificates a third party may already hold, so it
+  // is treated as a privileged act rather than an edit.
+  requireFreshAuth(PRIVILEGED_AUTH_MAX_AGE_SECONDS),
+  eprWriteLimit,
+  async (req, res) => {
+    try {
+      const result = await declarations.openCorrection({
+        orgId: req.orgMembership.orgId,
+        periodId: req.params.periodId,
+        reason: req.body?.reason,
+        actorUid: req.user.uid,
+        actorName: req.user.name || '',
+      });
+      // Says how many certificates this invalidated, because the producer is
+      // about to be asked why a passport it has already sent to a customer now
+      // reads as superseded (EPR-30).
+      return res.json({ ok: true, ...result });
+    } catch (err) {
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+app.get(
+  '/epr/admin/declarations/review',
+  requireAuth,
+  requireAdmin,
+  readLimit,
+  async (req, res) => {
+    try {
+      // EPR-43's period-over-period variance, plus the within-period
+      // correction variance that catches a withdrawn denominator.
+      const queue = await declarations.listForReview({});
+      return res.json({ ok: true, declarations: queue });
+    } catch (err) {
+      console.error('Declaration review failed:', err.message);
+      return res.status(503).json({ error: 'review_unavailable' });
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// The Plastic Passport (EPR-28 to EPR-31, SEC-7)
+// ---------------------------------------------------------------------------
+
+app.get(
+  '/epr/passports',
+  requireAuth,
+  requireOrgRole('orgViewer'),
+  readLimit,
+  async (req, res) => {
+    try {
+      const rows = await passports.listPassports({
+        orgId: req.orgMembership.orgId,
+      });
+      return res.json({
+        ok: true,
+        // The stored figure snapshot is not sent to the list view: it is large,
+        // and the workspace already reads the same figures from `eprPeriods`.
+        // What a list needs is which certificates exist and what state they are
+        // in.
+        passports: rows.map((p) => ({
+          serial: p.serial,
+          periodId: p.periodId,
+          scope: p.scope,
+          status: p.status,
+          contentHash: p.contentHash,
+          issuedAt: p.issuedAt ?? null,
+          supersededBy: p.supersededBy ?? null,
+          supersededReason: p.supersededReason ?? null,
+          revocationReason: p.revocationReason ?? null,
+        })),
+      });
+    } catch (err) {
+      console.error('Passport list failed:', err.message);
+      return res.status(503).json({ error: 'passports_unavailable' });
+    }
+  },
+);
+
+/**
+ * Downloads a certificate, in either language (NFR-E-4).
+ *
+ * Rendered from the passport's own stored figure snapshot, not from a fresh
+ * read of the period — so a certificate stays byte-reproducible after the
+ * period is recomputed or a unit mass re-verified, and its content hash keeps
+ * verifying (NFR-E-8).
+ */
+app.get(
+  '/epr/passports/:serial.pdf',
+  requireAuth,
+  requireOrgRole('orgViewer'),
+  readLimit,
+  async (req, res) => {
+    const locale = passportPdf.LOCALES.includes(req.query.locale)
+      ? req.query.locale
+      : 'en';
+
+    try {
+      const passport = await passports.getPassport(req.params.serial);
+      // Membership is checked against the certificate's own organisation, not
+      // against the serial's shape. A serial is unguessable but not secret —
+      // it is printed on a document that gets emailed around — so possession
+      // of one must not be authorisation to read another tenant's certificate
+      // (SEC-1).
+      if (!passport || passport.orgId !== req.orgMembership.orgId) {
+        return res.status(404).json({ error: 'passport_not_found' });
+      }
+
+      const buffer = await passportPdf.renderPassportPdf({
+        passport: { ...passport, locale },
+        verifyBaseUrl: publicBaseUrl(),
+      });
+
+      await producerAudit.append({
+        orgId: passport.orgId,
+        action: producerAudit.ACTIONS.REPORT_DOWNLOADED,
+        actorUid: req.user.uid,
+        actorName: req.user.name || '',
+        actorRole: req.orgMembership.orgRole,
+        targetType: 'passport',
+        targetId: passport.serial,
+        summary:
+          `Plastic Passport ${passport.serial} downloaded `
+          + `(${locale === 'bn' ? 'Bangla' : 'English'} edition).`,
+      });
+
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader(
+        'Content-Disposition',
+        `attachment; filename="chokro-plastic-passport-${passport.periodId}-${locale}.pdf"`,
+      );
+      // A compliance certificate must not be served from a shared cache, and
+      // must not be revalidated from one either: its status can change.
+      res.setHeader('Cache-Control', 'private, no-store');
+      return res.end(buffer);
+    } catch (err) {
+      // The Bangla edition refuses rather than emitting a page whose text
+      // would silently render blank, so this is a real 503 and not a 400.
+      console.error('Passport render failed:', err.message);
+      return res.status(503).json({
+        error: 'passport_render_failed',
+        message: 'The certificate could not be produced. Chokro has been notified.',
+      });
+    }
+  },
+);
+
+app.post(
+  '/epr/admin/passports/:orgId/:periodId/issue',
+  requireAuth,
+  requireAdmin,
+  // Issuance is Chokro putting its name to a figure a third party will rely on.
+  requireFreshAuth(PRIVILEGED_AUTH_MAX_AGE_SECONDS),
+  writeLimit,
+  async (req, res) => {
+    try {
+      const result = await passports.issuePassport({
+        orgId: req.params.orgId,
+        periodId: req.params.periodId,
+        adminUid: req.user.uid,
+        adminName: req.user.name || '',
+      });
+      return res.json({ ok: true, ...result });
+    } catch (err) {
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+app.post(
+  '/epr/admin/passports/:serial/revoke',
+  requireAuth,
+  requireAdmin,
+  requireFreshAuth(PRIVILEGED_AUTH_MAX_AGE_SECONDS),
+  writeLimit,
+  async (req, res) => {
+    try {
+      const result = await passports.revokePassport({
+        serial: req.params.serial,
+        reason: req.body?.reason,
+        adminUid: req.user.uid,
+        adminName: req.user.name || '',
+      });
+      return res.json({ ok: true, ...result });
+    } catch (err) {
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Report jobs (EPR-33, EPR-34, EPR-35, SEC-6)
+// ---------------------------------------------------------------------------
+//
+// A job, not a request: "a year of attributions is not something to stream into
+// a Flutter widget, and the free-tier service will not hold a connection open
+// long enough to try" (EPR-35).
+//
+// There is no scheduler (§3.3), so the request that creates the job runs it —
+// after replying, without awaiting. The client already has its job id and is
+// polling a cheap document.
+
+app.get(
+  '/epr/reports',
+  requireAuth,
+  requireOrgRole('orgViewer'),
+  readLimit,
+  async (req, res) => {
+    try {
+      const jobs = await reportJobs.listJobs({ orgId: req.orgMembership.orgId });
+      return res.json({
+        ok: true,
+        jobs,
+        // The catalogue, so a client does not hardcode a list that drifts out
+        // of step with what the server will accept.
+        reportTypes: Object.entries(reportJobs.REPORT_TYPES).map(([key, spec]) => ({
+          key,
+          label: spec.label,
+          formats: spec.formats,
+          needsPeriod: Boolean(spec.needsPeriod),
+          needsYear: Boolean(spec.needsYear),
+          minRole: spec.minRole,
+        })),
+      });
+    } catch (err) {
+      console.error('Report list failed:', err.message);
+      return res.status(503).json({ error: 'reports_unavailable' });
+    }
+  },
+);
+
+app.post(
+  '/epr/reports',
+  requireAuth,
+  requireVerifiedEmail,
+  // The minimum any report needs. The per-report minimum is checked below,
+  // because `chainOfCustody` and the annual return are owner-only while a
+  // period statement is not — and a single guard cannot express both.
+  requireOrgRole('orgViewer'),
+  requireActiveOrganization,
+  eprWriteLimit,
+  async (req, res) => {
+    const spec = reportJobs.REPORT_TYPES[req.body?.reportType];
+    if (!spec) {
+      return res.status(400).json({
+        error: 'unknown_report',
+        message: 'That is not a report Chokro produces.',
+      });
+    }
+
+    // Row-level evidence and the annual return are owner-only: they are the
+    // export SEC-11's "org member exfiltrates data" row is about.
+    if (!organizations.orgRoleAtLeast(req.orgMembership.orgRole, spec.minRole)) {
+      return res.status(403).json({
+        error: 'forbidden',
+        message: `${spec.label} can only be requested by an owner.`,
+      });
+    }
+
+    try {
+      const result = await reportJobs.enqueue({
+        orgId: req.orgMembership.orgId,
+        reportType: req.body.reportType,
+        periodId: req.body?.periodId ?? null,
+        year: Number.isInteger(req.body?.year) ? req.body.year : null,
+        format: req.body?.format ?? spec.formats[0],
+        actorUid: req.user.uid,
+        actorName: req.user.name || '',
+        actorRole: req.orgMembership.orgRole,
+      });
+
+      // Replied to first, then run. Not awaited: the whole point of a job is
+      // that the connection does not stay open for it. `runJob` never throws
+      // to here — it catches everything and writes the failure onto the job
+      // document, because an unhandled rejection would take the instance down
+      // and turn one producer's report fault into an outage for every tenant.
+      res.status(202).json({ ok: true, ...result });
+      reportJobs.runJob(result.jobId);
+      return undefined;
+    } catch (err) {
+      if (err.code === 'reports_unconfigured') {
+        // Named, because the operator reading this log is the person who has
+        // to set the variable.
+        console.error('Report generation is not configured:', err.message);
+        return res.status(503).json({
+          error: 'reports_unconfigured',
+          message: 'Report generation is not available on this deployment.',
+        });
+      }
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+app.get(
+  '/epr/reports/:jobId',
+  requireAuth,
+  requireOrgRole('orgViewer'),
+  readLimit,
+  async (req, res) => {
+    try {
+      // Membership is checked against the job's own organisation inside
+      // `getJob`, which returns null for another tenant's job rather than
+      // throwing — so this 404 covers both "no such job" and "not yours",
+      // and a caller cannot probe for job ids.
+      const job = await reportJobs.getJob({
+        jobId: req.params.jobId,
+        orgId: req.orgMembership.orgId,
+      });
+      if (!job) return res.status(404).json({ error: 'report_not_found' });
+
+      // The signed URL is NOT included here. This endpoint is polled, so
+      // embedding one would mint a fresh ten-minute credential on every poll
+      // and leave a trail of live URLs in whatever logs the poll (SEC-6).
+      return res.json({ ok: true, job: { ...job, storagePath: undefined } });
+    } catch (err) {
+      console.error('Report poll failed:', err.message);
+      return res.status(503).json({ error: 'report_unavailable' });
+    }
+  },
+);
+
+app.post(
+  '/epr/reports/:jobId/download',
+  requireAuth,
+  requireOrgRole('orgViewer'),
+  // A write limit rather than a read one, and deliberately: each call mints a
+  // credential and writes an audit entry, so it is a side-effecting action
+  // however much it looks like a fetch.
+  eprWriteLimit,
+  async (req, res) => {
+    try {
+      const result = await reportJobs.signedUrlFor({
+        jobId: req.params.jobId,
+        orgId: req.orgMembership.orgId,
+        actorUid: req.user.uid,
+        actorName: req.user.name || '',
+        // Re-checked inside `signedUrlFor` against the report's own minimum
+        // role. `listJobs` returns every job for the organisation, so an
+        // authorisation enforced only at enqueue would let a viewer download
+        // the row-level export an owner requested.
+        actorRole: req.orgMembership.orgRole,
+      });
+      return res.json({ ok: true, ...result });
+    } catch (err) {
+      if (err.code === 'forbidden') {
+        return res.status(403).json({ error: 'forbidden', message: err.message });
+      }
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+/**
+ * Picks a stalled job back up (EPR-35).
+ *
+ * There is no scheduler to retry it (§3.3). A job whose instance slept or
+ * restarted mid-run sits `running` until `getJob` reports it `stalled`, and
+ * this is what restarts it — from the job document, which `runJob` treats
+ * idempotently.
+ */
+app.post(
+  '/epr/reports/:jobId/resume',
+  requireAuth,
+  requireVerifiedEmail,
+  requireOrgRole('orgViewer'),
+  requireActiveOrganization,
+  eprWriteLimit,
+  async (req, res) => {
+    try {
+      const job = await reportJobs.getJob({
+        jobId: req.params.jobId,
+        orgId: req.orgMembership.orgId,
+      });
+      if (!job) return res.status(404).json({ error: 'report_not_found' });
+      if (job.status === 'ready') {
+        return res.json({ ok: true, status: 'ready' });
+      }
+
+      res.status(202).json({ ok: true, status: 'running' });
+      reportJobs.runJob(req.params.jobId);
+      return undefined;
+    } catch (err) {
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+/**
+ * The public verification endpoint (EPR-29, SEC-7).
+ *
+ * ## Unauthenticated, by design
+ *
+ * A certificate's whole value is that a regulator, a buyer's sustainability
+ * team or a journalist can check it without a Chokro account. Requiring one
+ * would make verification a Chokro-relationship gate rather than a check.
+ *
+ * ## Deliberately impoverished
+ *
+ * Five fields: existence, status, the trade name, the period and the content
+ * hash. No figures, no evidence, no member details, no contact information —
+ * see `verifySerial`, which builds the response by explicit allowlist rather
+ * than by omission.
+ *
+ * ## Why an unknown serial gets a 200 and not a 404
+ *
+ * SEC-7: the same shape for unknown and revoked serials. A 404 for unknown and
+ * a 200 for revoked would let an enumerator separate real serials from guesses
+ * by status code alone. The 40-bit serial space plus this rate limit is the
+ * control; leaking the answer in the status line would undo it.
+ */
+app.get(
+  '/passports/verify/:serial',
+  // No `requireAuth`. Rate-limited harder than an authenticated read, because
+  // this one is reachable by anybody.
+  rateLimit({ name: 'passport-verify', windowMs: 60 * 1000, max: 20 }),
+  async (req, res) => {
+    try {
+      const result = await passports.verifySerial(req.params.serial);
+      // Cacheable briefly: a status change matters, but so does surviving a
+      // burst when a certificate is shared publicly.
+      res.setHeader('Cache-Control', 'public, max-age=60');
+      return res.json(result);
+    } catch (err) {
+      // A read failure must not become a "not found", because that would tell
+      // a holder their genuine certificate is fake.
+      return res.status(503).json({
+        error: 'verification_unavailable',
+        message: 'Verification is temporarily unavailable. Please try again.',
+      });
+    }
+  },
+);
+
+/**
+ * Attributes an already-approved disposal that has not been attributed yet.
+ *
+ * The backfill handle. A disposal whose recognition was unavailable keeps
+ * `attributionStatus: 'pending'` (EPR-16), and this is what clears the backlog
+ * once recognition is working again — idempotent on disposalId, so running it
+ * twice over the same set is safe.
+ */
+app.post(
+  '/epr/admin/disposals/:disposalId/attribute',
+  requireAuth,
+  requireAdmin,
+  writeLimit,
+  async (req, res) => {
+    try {
+      const result = await attribute.attributeDisposal({
+        disposalId: req.params.disposalId,
+        actorUid: req.user.uid,
+      });
+      return res.json({ ok: true, ...result });
+    } catch (err) {
+      // `attributeDisposal` does not throw, so reaching here is a programming
+      // error rather than an attribution failure.
+      console.error('Attribution request failed:', err.message);
+      return res.status(500).json({ error: 'attribution_failed' });
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
 // The Admin mass-verification queue (EPR-42)
 // ---------------------------------------------------------------------------
 //
@@ -1491,7 +2273,17 @@ app.post(
         adminUid: req.user.uid,
         adminName: req.user.name,
       });
-      return res.json({ ok: true, ...result });
+
+      // EPR-30: "a re-verified unit mass that changes a period already
+      // certified" must supersede every affected passport. After the change
+      // commits, and never allowed to throw.
+      const supersession = await passports.supersedeForMassChange({
+        orgId: result.orgId,
+        skuId: result.skuId,
+        actorUid: req.user.uid,
+      });
+
+      return res.json({ ok: true, ...result, supersession });
     } catch (err) {
       return eprFailure(res, err, 400);
     }
@@ -1913,6 +2705,15 @@ server = app.listen(port, () => {
     console.warn(
       'ALLOWED_ORIGINS is empty — browser calls will be refused. Set it to ' +
         'your hosting URL before testing the web build.',
+    );
+  }
+
+  if (!process.env.PUBLIC_BASE_URL) {
+    console.warn(
+      `PUBLIC_BASE_URL is not set — Plastic Passports will print ${publicBaseUrl()} `
+        + 'as their verification address. That URL is rendered into a PDF that '
+        + 'leaves Chokro, so if it is wrong every certificate issued meanwhile '
+        + 'is unverifiable and reissuing them is the only fix.',
     );
   }
 

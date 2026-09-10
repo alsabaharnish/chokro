@@ -1,6 +1,6 @@
 # Impact Sol Website Requirements and Vendor Brief
 
-**Purpose:** Design and build a world-class corporate website for Impact Sol., an impact-driven technology company and social-business ecosystem.
+**Purpose:** Design and build a world-class corporate website for Impact Sol., the proposed parent business for an impact-driven technology company and social-business ecosystem.
 
 **Prepared for:** Website strategy, UX, content, design, development, quality assurance, and launch teams  
 **Document owner:** Impact Sol.  
@@ -10,17 +10,17 @@
 
 ## Executive brief
 
-Impact Sol. needs a corporate website that establishes the company as a credible parent organization, explains whom it serves, presents Chokro as its first product, and creates clear routes for makers, sustainability initiatives, institutions, funders, companies, and collaborators to engage.
+Impact Sol. needs a corporate website that establishes the proposed business as a credible parent organization, explains whom it intends to serve, presents the intended relationship with Chokro, and creates clear routes for makers, sustainability initiatives, institutions, funders, companies, and collaborators to engage.
 
 The website is not simply an online brochure. It must work as a trust platform, product portfolio, partnership channel, and long-term publishing system. It must be easy for Impact Sol. staff to update without a developer and must be designed to accommodate future products, stories, impact reports, and language versions.
 
-The corporate website should be a separate, search-friendly web property from the Chokro application. Chokro's existing application and QR entry routes must remain operational and must not be replaced or redirected without a separate technical migration plan.
+The corporate website should be a separate, search-friendly web property from the Chokro application. Before any domain or hosting change, the vendor must inventory which Chokro application, QR, app-link, and browser routes are actually deployed; test them; and protect every verified working route through a separately approved migration and rollback plan.
 
 ### Recommended positioning
 
-**Impact Sol. is an impact-driven technology company and social-business ecosystem that builds practical products, enables eco-conscious enterprises, and creates partnerships for a greener and more inclusive economy.**
+**Impact Sol. is being established as an impact-driven technology company and social-business ecosystem that builds practical products, supports eco-conscious enterprises, and develops partnerships for a greener and more inclusive economy.**
 
-**Chokro is the first product by Impact Sol.**
+**The intended brand relationship is: Chokro is the first product by Impact Sol.** Before publication, Impact Sol. must document the relevant ownership or licence and resolve any relationship among the founder, prior project identities, and Impact Sol.
 
 ### Recommended homepage headline
 
@@ -28,13 +28,13 @@ The corporate website should be a separate, search-friendly web property from th
 
 ### Recommended supporting statement
 
-Impact Sol. builds products and partnerships that help eco-conscious makers, small sellers, and sustainability initiatives grow through practical technology, shared resources, and responsible innovation.
+Impact Sol. is building products and partnerships intended to help eco-conscious makers, small sellers, and sustainability initiatives grow through practical technology, shared resources, and responsible innovation.
 
 ### Non-negotiable launch principles
 
 - The site must explain Impact Sol. clearly within the first screen and within approximately ten seconds.
 - The site must distinguish the parent company, its products, and its partner-facing work.
-- Chokro must always be described as the first product by Impact Sol., not as the company itself.
+- Once the ownership or licence is confirmed, Chokro must always be described as the first product by Impact Sol., not as the company itself.
 - Public impact, sustainability, legal, partnership, and affiliation claims must be specific, current, evidenced, and approved.
 - The site must conform to WCAG 2.2 Level AA.
 - Key page templates must be built to meet Google's good Core Web Vitals thresholds.
@@ -47,18 +47,20 @@ Impact Sol. builds products and partnerships that help eco-conscious makers, sma
 
 ### 1.1 Brand role
 
-Impact Sol. is the master brand and legal or trading identity. It may build its own products and may also provide technology, capability, and ecosystem support directly to outside organizations.
+Impact Sol. is the proposed master brand and intended trading identity, subject to name clearance and registration. It may build its own products and may also provide technology, capability, and ecosystem support directly to outside organizations.
 
 The preferred endorsed-brand structure is:
 
 | Level | Name | Public relationship |
 | --- | --- | --- |
-| Parent company | Impact Sol. | The company, platform, and ecosystem owner |
+| Parent company | Impact Sol. | The parent and organizing brand |
 | First product | Chokro | Chokro, the first product by Impact Sol. |
 | Future products | Individual product names | Product name, by Impact Sol. |
 | Services and programs | Impact Sol. | Delivered directly under the parent brand |
 
 The company website and the Chokro product experience should share enough visual and verbal DNA to feel related, while remaining distinct enough that visitors understand which organization or product they are using.
+
+**Launch precondition:** Confirm in writing the ownership or licence for the Chokro name, software, media, and business materials, together with the relationship among Arnish, any prior project or organizational identity, and Impact Sol. Do not publish "Chokro by Impact Sol." until that relationship and the right to use every asset are documented.
 
 ### 1.2 Meaning of the name
 
@@ -68,7 +70,7 @@ Recommended name-story copy:
 
 > Sol is short for solutions. It also reflects the energy created when people, ideas, and technology come together around a shared purpose. We explore new technologies when they can solve a real problem, strengthen trust, or extend positive impact.
 
-**Owner decision before launch:** Confirm whether the period is part of the official registered name or only the visual display name. Legal pages, invoices, registrations, and structured data must use the confirmed legal form consistently. Domains and email addresses will omit punctuation.
+**Hard gate before design lock:** Complete business-name clearance, domain and social-handle checks, and an appropriate trademark or conflict review. Confirm whether the period is part of the official registered name or only the visual display name. Legal pages, invoices, registrations, and structured data must use the confirmed legal form consistently. A trade licence must not be described as proof of incorporation or trademark ownership. Domains and email addresses will omit punctuation.
 
 ### 1.3 Provisional mission and vision
 
@@ -93,6 +95,8 @@ The brand should sound optimistic, grounded, warm, clear, commercially credible,
 Use plain language and concrete verbs. Prefer **makers, entrepreneurs, Greenpreneurs, partners, participants, and communities** over language that portrays people as passive beneficiaries. Avoid inflated or unsupported phrases such as "saving the planet," "100% sustainable," "revolutionary," "zero impact," or "the first in the world."
 
 Use **aligned with the Sustainable Development Goals** and **aligned with the 3ZERO vision** unless Impact Sol. holds written authorization to claim an official partnership, membership, endorsement, or certification.
+
+Before public launch, obtain written authorization and usage rules for 3ZERO terminology and marks or adopt neutral public role names. A disclaimer cannot cure unauthorized trademark use or an interface that implies affiliation.
 
 ### 1.6 Brand identity deliverables
 
@@ -129,7 +133,7 @@ Chokro's existing emerald, teal, warm-white, dark-ink, and reward-gold palette m
 | --- | --- | --- |
 | Understand the company | See what we do | Visitor reaches an offering or audience page |
 | Explore the first product | Explore Chokro | Visitor reaches the Chokro page or approved product URL |
-| Seek support | Apply for support | Complete, qualified support inquiry |
+| Seek support | Tell us about your work | Complete, qualified support inquiry |
 | Propose collaboration | Partner with Impact Sol. | Complete, qualified partnership inquiry |
 | Start a project | Discuss a project | Relevant project inquiry reaches its owner |
 | General question | Contact us | Message is delivered, acknowledged, and tracked |
@@ -156,13 +160,13 @@ No personal information, message content, email address, phone number, or form-f
 
 | Audience | What they need to know | Recommended journey | Primary action |
 | --- | --- | --- | --- |
-| Eco-friendly maker or small seller | Eligibility, support offered, process, cost, time, and examples | Home to Who We Support to Support Details | Apply for support |
-| Sustainability initiative or social enterprise | Capabilities, collaboration model, process, and relevant work | Home to What We Do to Case Study | Discuss a project |
-| NGO, foundation, development organization, or government body | Governance, team, safeguards, method, results, and reporting | Home to Impact to Partnerships | Partner with Impact Sol. |
-| Corporate CSR, sustainability, or ESG team | Credible programs, evidence, reporting, and partnership models | Partnerships to Impact to Case Study | Schedule a conversation |
+| Eco-friendly maker or small seller | Eligibility, support offered, process, cost, time, and examples | Home to What We Do to Get Involved | Tell us about your work |
+| Sustainability initiative or social enterprise | Capabilities, collaboration model, process, and relevant work | Home to What We Do to Get Involved | Discuss a project |
+| NGO, foundation, development organization, or government body | Governance, team, safeguards, method, results, and reporting | Home to Purpose and Approach to Get Involved | Propose a partnership |
+| Corporate CSR, sustainability, or ESG team | Credible programs, evidence, reporting, and partnership models | Get Involved to Purpose and Approach to Contact | Propose a partnership |
 | Conscious consumer or Chokro user | What Chokro is, whom it supports, and how to use it | Home or Products to Chokro | Explore Chokro |
-| Funder, investor, accelerator, or media contact | Model, leadership, milestones, traction, evidence, and contacts | About to Impact to Stories or Media | Contact the team |
-| Employee, advisor, mentor, or volunteer | Values, culture, current opportunities, and expectations | About to Get Involved | View opportunities |
+| Funder, investor, accelerator, or media contact | Model, leadership, milestones, traction, evidence, and contacts | About to Purpose and Approach to Contact | Contact the team |
+| Employee, advisor, mentor, or volunteer | Values, culture, current opportunities, and expectations | About to Get Involved | See current ways to contribute |
 | Future product user | Purpose, status, privacy, support, and availability | Products to Product Detail | Use, join, or register interest |
 
 Audience-specific pages and forms are preferred over sending every visitor to one generic contact form.
@@ -183,13 +187,13 @@ The vendor must price the launch scope separately from later enhancements. Every
 
 | Priority | Scope |
 | --- | --- |
-| P0 | Home, About, What We Do, Products, Chokro, Impact, Get Involved, Contact, Privacy, Terms, Accessibility, error pages, structured CMS, forms, SEO, analytics, security, accessibility, performance, and handover |
-| P0 | English content and complete technical support for English and Bangla |
-| P0 preferred | Human-reviewed Bangla versions of Home, About, Chokro, Get Involved, FAQs, Contact, Privacy, and form messages |
-| P1 | Stories and case-study library, complete Bangla parity, media resources, careers, partner directory, newsletter, and richer impact reporting |
+| P0 | Home, About, What We Do, Products, Chokro, Purpose and Approach, Get Involved, Contact, Privacy, Terms, Accessibility, error pages, structured CMS, forms, SEO, analytics, security, accessibility, performance, and handover |
+| P0 base launch | Complete English content and a tested architecture that can add Bangla without rebuilding templates or content models; no public Bangla URL or switcher until the locale is complete |
+| Optional bilingual launch | Fully equivalent, human-reviewed Bangla navigation, core pages, relevant FAQs, policies, forms, emails, metadata, and error states; the vendor must quote this option separately |
+| P1 | Stories and case-study library, complete Bangla parity if not included at launch, media resources, careers, partner directory, newsletter, and richer impact reporting |
 | P2 | Personalized portals, applicant dashboards, interactive data products, community accounts, advanced search, additional product sites, and responsibly justified Web3 features |
 
-If Bangla copy is not complete and human-reviewed at launch, the unfinished locale must remain unpublished. A language switcher must never lead to a page that is partly translated or substantially weaker than its English equivalent.
+Impact Sol. must choose either an English launch with Bangla-ready architecture and no public language switcher, or a fully bilingual launch with equivalent approved content. If Bangla copy is not complete and human-reviewed, the unfinished locale must remain unpublished. A language switcher must never lead to a page that is partly translated or substantially weaker than its English equivalent.
 
 ### 4.3 Explicitly outside the corporate-site launch
 
@@ -224,12 +228,13 @@ Persistent highlighted action: **Work with us** or **Join the ecosystem**. The f
 | What We Do | Explain build, enable, connect, and measure capabilities | Discuss a project | P0 |
 | Products | Present Chokro and allow future products | Explore a product | P0 |
 | Chokro | Explain the first product, current status, users, and value | Explore Chokro | P0 |
-| Impact | Explain the theory of change, focus, methods, SDG and 3ZERO alignment | Read the method or partner with us | P0 |
+| Purpose and Approach | Explain intended change, focus, methods, SDG and 3ZERO alignment without implying measured organization-level impact | Read the approach or partner with us | P0 |
 | Get Involved | Route makers, initiatives, institutions, and contributors | Select a pathway | P0 |
 | Contact | Provide reliable contact routes and inquiry handling | Send an inquiry | P0 |
 | Privacy | Explain data use, rights, processors, retention, and contact | Manage choices or contact privacy owner | P0 |
 | Terms | Set public-site terms | Contact for questions | P0 |
 | Accessibility | State commitment, conformance status, known limits, and feedback route | Report an accessibility issue | P0 |
+| FAQ modules | Answer approved questions within relevant P0 pages | Continue to the relevant action | P0 |
 | Stories index | Publish cases, insights, news, and learning | Read a story | P1 or P0 if content exists |
 | Story or case study | Present a useful, evidenced narrative | Related service or contact | P1 or P0 if content exists |
 | Partnerships | Explain partner types and models in depth | Partnership inquiry | P1 |
@@ -290,6 +295,8 @@ Each offering must state who it is for, the problem addressed, what Impact Sol. 
 
 Do not list technology capabilities solely because they are fashionable. Web3, AI, data, mobile, or automation should appear only where Impact Sol. can demonstrate capability and explain the user value, safeguards, and limitations.
 
+Before the vendor writes service copy, Impact Sol. must approve what can be delivered now, to whom, by which team, at what capacity, through what selection process, and under which commercial model. Paid, subsidized, grant-funded, and pro-bono work must be distinguished. Until a formal social-business model defines impact priority and treatment of surplus, use **guided by social-business principles** instead of presenting a specific model as operational fact.
+
 ### 6.4 Products overview
 
 The page must introduce Impact Sol. as a product-building company and support a growing list of independently branded products. Each product card requires:
@@ -306,18 +313,20 @@ Do not create empty cards announcing unnamed future products. A short statement 
 
 ### 6.5 Chokro product page
 
-Recommended safe description:
+Recommended safe description after the endorsed-brand relationship is documented:
 
-> Chokro is Impact Sol.'s first product: a cross-platform circular-action and rewards platform designed to make responsible disposal and other eco-actions visible and rewarding, while creating a dedicated marketplace for 3ZERO Greenpreneurs.
+> Chokro is Impact Sol.'s first product: a working cross-platform prototype designed to make responsible disposal and other eco-actions visible and rewarding, while creating a marketplace pathway for small eco-conscious sellers using Chokro's 3ZERO Greenpreneur role.
 
 Required content:
 
-- "The first product by Impact Sol." endorsement
+- "The first product by Impact Sol." endorsement, after the ownership or licence is documented
 - The problem: responsible disposal is poorly rewarded and small eco-friendly enterprises lack a dedicated channel
-- The current product approach: QR or bin entry, evidence and location checks, human review when needed, auditable rewards, eco-action participation, marketplace access, and support for green initiatives
-- Audiences: 3ZERO Champions, 3ZERO Greenpreneurs, 3ZERO Admins, and any additional stakeholder only when publicly supported
+- The current product approach: QR or bin entry, appropriate evidence checks, human review, traceable ledger-backed rewards, eco-action participation, prototype marketplace functions, and internal point contributions to initiative categories
+- A clear assurance distinction: registered-bin disposal uses photo, location, duplicate, rate-limit, and automated-screening checks; self-reported eco-actions do not use a bin or geofence and are always reviewed by a person
+- A platform distinction: native disposal requires a new camera capture, while browser submission uses a file chooser and cannot prove that the selected image was freshly captured
+- Audiences: 3ZERO Champions, 3ZERO Greenpreneurs, and 3ZERO Admins as Chokro's product-role labels, plus any additional stakeholder only when publicly supported
 - Product screenshots with captions and meaningful alternative text
-- Current status, geography, availability, and last-updated date
+- Current status, geography, availability, and last-updated date. The default public status is: "Working prototype. Android, iOS, and web code exists; public availability, native app links, and browser QR entry remain subject to production-release verification."
 - Clear separation of current capability, pilot operation, and roadmap
 - Privacy, support, and approved product links
 - Related SDG contribution areas, described as alignment rather than certification
@@ -325,23 +334,39 @@ Required content:
 
 Public content must not state that Chokro is Department of Environment approved, an accredited Producer Responsibility Organisation, legally sufficient for EPR compliance, or operating at production scale unless documentary evidence and legal approval exist.
 
-Keep planned or unconfirmed claims off current-feature sections. These include physical bin ownership at scale, signed recycler networks, production Plastic Passports, real bKash or Nagad processing, kilograms recovered, avoided carbon, jobs or income created, paying EPR customers, and formal 3ZERO affiliation. If approved for publication, place future items in a visibly labelled roadmap and include dates and status.
+For EPR-related content, state the boundary precisely: Chokro is currently an evidence and reporting provider in development; a producer remains legally responsible and files with the Department of Environment; a verified bin submission is evidence of collection, not proof of recycling; no kilogram is defensible without verified product mass; no collection percentage is defensible without the producer's put-on-market declaration; and only the regulator can determine whether an obligation is met. Production Plastic Passports and end-to-end EPR reporting are roadmap capabilities.
 
-### 6.6 Impact
+Keep planned or unconfirmed claims off current-feature sections. These include any current physical-bin operation, signed collection or recycler arrangements, production Plastic Passports, real bKash or Nagad processing, kilograms recovered, avoided carbon, jobs or income created, paying EPR customers, and formal 3ZERO affiliation. If approved for publication, place future items in a visibly labelled roadmap and include dates and status. Until physical operations are evidenced, describe Chokro as designed for Bangladesh with a focused Dhaka pilot planned, not as currently operating in Dhaka.
 
-The Impact page must prioritize transparency over decoration. Required sections:
+Chokro points are internal rewards, not money. They cannot be purchased, transferred, withdrawn, or described as tax-deductible donations. A point-contribution receipt does not prove that a corresponding field project was delivered. Current bKash, Nagad, and card journeys are simulations only and move no real money.
+
+The existing marketplace software is prototype-stage. Do not claim an active seller base, live inventory, completed commercial operations, a "verified eco seller," or a "verified sustainable product" without a defined standard and current evidence. Greenpreneur approval is not an independent environmental certification.
+
+Before a public marketplace or seller-support claim, publish an approved eligibility and environmental-claims standard covering evidence, permitted and prohibited claims, review frequency, complaints, removal, and appeal. Handmade products are not automatically environmentally preferable.
+
+The labels 3ZERO Champion, 3ZERO Greenpreneur, and 3ZERO Admin are current Chokro product-role labels. They do not themselves establish affiliation with the 3ZERO organization or movement. Written permission and trademark review must cover the terminology and not only logos or explicit partnership statements.
+
+A public "Try Chokro" or equivalent CTA may go live only after production availability is verified and current privacy, processor, retention, support, and security information is published for Chokro's handling of identity data, photographs, and precise location. Until then, use **Register interest**.
+
+Do not copy reward rates from historical decks or screenshots without checking the live approved policy at publication time. If rates are published, date them and state that they are subject to the current program rules.
+
+### 6.6 Purpose and Approach before verified impact results
+
+At launch, use **Purpose and Approach** unless Impact Sol. already has verified organization-level outcomes. The page may use an `/impact/` URL and later develop into a full Impact page, but it must prioritize transparency over decoration. Required sections:
 
 - Theory of change: resources and activities to outputs, outcomes, and intended long-term impact
 - Environmental and social focus areas
 - SDG alignment and exact targets where supported
 - 3ZERO alignment, without implying affiliation
 - Measurement principles and governance
-- Current metrics, only when verified
+- Current metrics, only when verified and clearly separated from intentions or product activity signals
 - Methodology, boundaries, reporting periods, data owners, and limitations
 - Learning, challenges, and planned improvements
 - Downloadable reports when substantive reports exist
 
-Chokro currently has defensible conceptual alignment with SDG Targets 8.3, 11.6, 12.5, and 13.3. These must be described as contribution signals, not official UN indicators, audited outcomes, a certification, or a progress score. Overlapping indicators must not be added together.
+Chokro currently has defensible conceptual alignment with SDG Targets 8.3, 11.6, 12.5, and 13.3. These product-level contribution signals must remain separate from organization-level Impact Sol. outcomes and must not be inherited by the parent business. They are not official UN indicators, audited outcomes, a certification, or a progress score. Overlapping indicators must not be added together.
+
+If current application counters are reused publicly, disclose that they are lifetime activity totals; may include cached or bounded values; do not establish trends or baselines; and cannot be summed across overlapping SDG mappings.
 
 Every displayed impact metric must include a definition, value, unit, reporting period, geographic and program scope, method, source or data owner, last-updated date, and limitation where relevant.
 
@@ -364,7 +389,7 @@ Provide distinct routes for:
 - Mentor, advisor, volunteer, or community contributor
 - Candidate responding to a real opportunity
 
-Each route must describe eligibility, what support may be available, what Impact Sol. expects, the process, likely response time, privacy, and the appropriate form. Do not imply grants or free services unless a funded program exists.
+Each route must describe eligibility, what support may be available, what Impact Sol. expects, the process, likely response time, privacy, and the appropriate form. Use **Tell us about your work** until a formal application program, decision rules, capacity, and funded support offer exist. Do not imply grants or free services unless a funded program exists.
 
 ### 6.9 Contact
 
@@ -385,7 +410,7 @@ Do not expose personal addresses or unmonitored channels. Do not rely solely on 
 
 ### 7.1 CMS requirements
 
-The content management system must allow authorized Impact Sol. staff to manage the following without code changes:
+The content management system must allow authorized Impact Sol. staff to manage the following without code changes. It may be headless, integrated, open-source, or managed SaaS if the vendor demonstrates that the complete quality, workflow, ownership, cost, and exit requirements are met:
 
 - Pages and reusable page sections
 - Navigation and footer
@@ -442,7 +467,7 @@ Environmental claims must state what was measured, how, where, and over what per
 | FR-01 | Responsive public website | All approved pages work from 320 CSS pixels through large desktop screens without loss of content or function. |
 | FR-02 | Structured CMS | Authorized staff can create, review, preview, publish, revise, unpublish, and restore content without developer assistance. |
 | FR-03 | Product portfolio | Staff can add future products using a reusable template without rebuilding navigation or layouts. |
-| FR-04 | English and Bangla | Each language has a stable URL, equivalent navigation, editable metadata, and a switcher that retains page context. |
+| FR-04 | Localization | The P0 architecture supports English and Bangla. If the bilingual option is selected, each language has a stable URL, equivalent navigation and content, editable metadata, and a switcher that retains page context. If not, no Bangla URL or switcher is published. |
 | FR-05 | Audience routing | Visitors can identify their pathway and reach an appropriate page and action within two or three choices. |
 | FR-06 | Inquiry forms | Forms validate on client and server, prevent spam, show accessible status, send acknowledgement, route correctly, and store only approved data. |
 | FR-07 | Search | Add only when content volume justifies it; results must support both languages and keyboard access. |
@@ -451,25 +476,26 @@ Environmental claims must state what was measured, how, where, and over what per
 | FR-10 | Media management | Responsive derivatives, focal point, captions, rights, credit, and alternative text are supported. |
 | FR-11 | SEO controls | Editors can manage page title, description, index status, canonical, social metadata, and redirects within safe defaults. |
 | FR-12 | Consent control | Non-essential technologies remain blocked until valid consent where consent is required; preferences can be changed later. |
-| FR-13 | Error handling | Branded 404, 500, form-error, offline, and maintenance states provide a useful recovery route. |
+| FR-13 | Error handling | Branded 404 and form-error states are required. Branded 500 and maintenance states are required where the platform can serve them. Offline behavior is added only if separately justified and approved. |
 | FR-14 | Monitoring | Uptime, availability, error, form-delivery, and performance regressions generate alerts to an Impact Sol.-owned channel. |
 | FR-15 | Ownership and export | Content and media can be exported in usable form; source and production accounts remain under Impact Sol. control. |
 
 ### 8.1 Required forms
 
-**General contact:** Name, email, organization if applicable, country or location if relevant, inquiry category, message, and required privacy acknowledgement. Phone should be optional.
+**General contact:** Name, email, organization if applicable, country or location if relevant, inquiry category, message, and a concise inline privacy notice. Phone should be optional.
 
-**Partnership inquiry:** Contact details, organization, organization type, website or profile, location, proposed collaboration, intended participants, desired outcome, stage or timing, and privacy acknowledgement. Budget may be optional and should include "not yet known."
+**Partnership inquiry:** Contact details, organization, organization type, website or profile, location, proposed collaboration, intended participants, desired outcome, stage or timing, and a concise inline privacy notice. Budget may be optional and should include "not yet known."
 
-**Maker or initiative support inquiry:** Contact details, business or initiative name, location, type of work, current stage, product or service link, primary challenge, support requested, and privacy acknowledgement.
+**Maker or initiative support inquiry:** Contact details, business or initiative name, location, type of work, current stage, product or service link, primary challenge, support requested, and a concise inline privacy notice.
 
-Optional marketing consent must be separate, unchecked, and unnecessary for submitting an inquiry. Do not collect national ID, financial credentials, precise home address, or other sensitive information through launch forms. Avoid file uploads at launch unless there is a documented business need, malware scanning, file-type and size limits, private storage, and deletion policy.
+Viewing or acknowledging a privacy notice is not consent and is not automatically the lawful basis for processing an inquiry. Do not require a privacy checkbox unless qualified counsel identifies a specific need. Optional marketing consent must be separate, unchecked, and unnecessary for submitting an inquiry. Do not collect national ID, financial credentials, precise home address, or other sensitive information through launch forms. Avoid file uploads at launch unless there is a documented business need, malware scanning, file-type and size limits, private storage, and deletion policy.
 
 ### 8.2 Form operations
 
 - Server-side validation, rate limiting, request-size limits, CSRF protection where applicable, and accessible anti-spam controls
 - Acknowledgement to the sender without echoing sensitive message content
 - Routing by inquiry type to an Impact Sol.-owned mailbox or approved CRM
+- Authenticated email delivery with SPF and DKIM, an Impact Sol.-approved DMARC policy, monitored bounces or failures, and protection against open-relay or sender-spoofing behavior
 - Delivery-failure alert and a queue or retriable record so valid inquiries are not silently lost
 - Defined owner, response target, retention period, and deletion process for every form
 - Export and deletion capability for privacy requests
@@ -525,21 +551,25 @@ WCAG 2.2 Level AA conformance is a contractual requirement for every public page
 Minimum requirements include:
 
 - Semantic HTML, correct landmarks, logical headings, skip link, meaningful link text, and unique page titles
-- Complete keyboard access, logical focus order, visible focus, no traps, and no focused content hidden by overlays or sticky headers
+- Complete keyboard access, logical focus order, visible focus, no traps, and focused components not entirely hidden by author-created overlays or sticky headers
 - Text contrast of at least 4.5 to 1; large text and meaningful controls or graphics at least 3 to 1
 - Programmatically associated labels, instructions, descriptions, errors, and status messages
-- Meaningful alternative text, decorative empty alternative text, video captions, audio or video transcripts, and audio description where needed
+- Meaningful alternative text, decorative empty alternative text, captions for prerecorded synchronized media, and audio description where visual information is otherwise unavailable
 - No instructions or meaning that depend solely on color, position, shape, sound, or sensory characteristics
 - Usability at 200 percent text zoom and reflow at 320 CSS pixels without two-dimensional scrolling except for genuinely two-dimensional content
 - Respect for reduced motion and protection against flashing content
 - Correct page and content language attributes for English and Bangla
 - Authentication, if added later, that does not require memory puzzles or inaccessible cognitive tests
 
-Acceptance testing must combine automated tools with manual keyboard, screen-reader, zoom, reflow, contrast, and form testing. The vendor must use the WCAG Evaluation Methodology, document the representative sample, and correct every applicable Level A and AA failure before acceptance. Automated scores alone do not prove conformance.
+Impact Sol. also requires two enhancements beyond the minimum wording of WCAG 2.2 AA: focused controls should remain fully visible where reasonably possible, and every published audio or video item should include a useful transcript.
+
+Acceptance testing must combine automated tools with manual keyboard, screen-reader, zoom, reflow, contrast, and form testing. The entire declared scope must conform. The vendor must use the WCAG Evaluation Methodology as the audit method, document the representative sample, include every complete process and known high-risk variation, test all unique components, and correct every applicable Level A and AA failure before acceptance. Automated scores alone do not prove conformance.
 
 Recommended manual coverage includes VoiceOver with Safari on iOS or macOS and NVDA with Firefox or Chrome on Windows, plus keyboard-only testing.
 
 ## 11 Localization
+
+The following requirements apply when the bilingual launch or later Bangla release is selected. An English-only launch must still use content models, typography, and layouts that can add Bangla without a rebuild, but it must not expose empty Bangla routes or a nonfunctional switcher.
 
 - Use separate stable URLs, preferably `/en/` and `/bn/`, for each language.
 - Provide reciprocal `hreflang` annotations and an `x-default` fallback.
@@ -561,16 +591,18 @@ The vendor may propose a stack, but must explain how it meets every requirement,
 
 - Static-first generation or server rendering for public content, with crawlable semantic HTML present without waiting for client-side application code
 - A mature component-based implementation with typed interfaces and automated testing
-- A structured CMS separated from presentation, with preview and safe publishing workflows
-- Global CDN, automatic HTTPS, compression, caching, image transformation, and dependable rollback
+- A structured CMS with preview and safe publishing workflows; separation from presentation is optional when an integrated platform meets the requirements
+- CDN or edge delivery when audience distribution, performance, resilience, and environmental evidence justify it, plus automatic HTTPS, compression, caching, image optimization, and dependable rollback
 - Development, preview or staging, and production environments with staging excluded from search indexes
 - Automated build, test, security, and deployment checks
 - Environment-specific configuration and secrets management
-- Impact Sol.-owned source repository, deployment account, domain, DNS, analytics, CMS, and monitoring
+- Impact Sol.-owned deployment account, domain, DNS, analytics, CMS tenant or account, and monitoring. Custom code must live in an Impact Sol.-owned source repository; a managed platform's own proprietary source is excluded but custom assets, configuration, content, and usable exports remain under Impact Sol. control
 - Exportable content and media, documented schema, and a tested restore process
 - No coupling to Chokro authentication, database, or QR routing unless a separately approved integration requires it
 
 The corporate site should not be built as a Flutter Web marketing shell unless the vendor demonstrates equivalent semantic rendering, crawlability, accessibility, page weight, metadata, and Core Web Vitals. The existing Chokro Flutter application may remain linked as a separate product experience.
+
+Impact Sol. must decide before procurement whether managed SaaS platforms, WordPress, custom or open-source builds, or all compliant options are acceptable. The vendor must identify platform intellectual property, custom work, data ownership, export formats, migration effort, and every lock-in risk rather than promising transfer of source code it does not own.
 
 ### 12.2 Environments and release process
 
@@ -579,7 +611,7 @@ The corporate site should not be built as a Flutter Web marketing shell unless t
 - Protected staging with realistic content and integrations
 - Production with approval gate and rollback
 - Repeatable deployments from version control, not manual server edits
-- Staging must use `noindex`, access control where appropriate, test destinations, and non-production credentials
+- Staging must use authentication or network restriction in addition to `noindex`, together with test destinations and non-production credentials; `noindex` alone is not a confidentiality control
 - Production launch must explicitly remove staging controls, validate canonical URLs, and run smoke tests
 
 ### 12.3 Browser and device support
@@ -588,27 +620,31 @@ Support the latest two stable versions available at launch of Chrome, Safari, Fi
 
 Testing must cover at least a small 320-pixel viewport, common mobile widths, tablet, laptop, and large desktop, in portrait and landscape where relevant. Test on real iOS and Android devices in addition to emulation.
 
+At test-plan approval, record the exact operating-system, browser, browser-engine, assistive-technology, and physical-device versions. That frozen matrix is the reproducible acceptance baseline; later maintenance testing should update it deliberately.
+
 ## 13 Performance and web sustainability
 
 ### 13.1 Core Web Vitals
 
-Each key template must target Google's **good** thresholds at the 75th percentile, measured separately for mobile and desktop:
+Post-launch real-user monitoring for each key template must target Google's **good** thresholds at the 75th percentile, measured separately for mobile and desktop:
 
-| Metric | Launch and field target |
+| Metric | Post-launch field target |
 | --- | --- |
 | Largest Contentful Paint | 2.5 seconds or less |
 | Interaction to Next Paint | 200 milliseconds or less |
 | Cumulative Layout Shift | 0.1 or less |
 
-Before launch, use repeatable laboratory tests on production-like infrastructure and representative mobile conditions. After sufficient traffic exists, monitor real-user field data. A Lighthouse score is useful evidence but is not a substitute for field measurement.
+Genuine Interaction to Next Paint field performance cannot be established by a pre-launch Lighthouse run. Pre-launch acceptance therefore uses repeatable laboratory LCP and CLS tests plus Total Blocking Time or another approved interaction proxy. The default laboratory targets are LCP no more than 2.5 seconds, CLS no more than 0.1, and Total Blocking Time no more than 200 milliseconds under the frozen project test profile. These are project gates, not a claim that post-launch field thresholds have already been met.
+
+After launch, use field data. Where traffic is too low for the Chrome User Experience Report, use a privacy-reviewed first-party real-user monitoring implementation or an agreed synthetic monitoring plan and label the source correctly. A Lighthouse score is useful evidence but is not a substitute for field measurement.
 
 ### 13.2 Project performance budgets
 
-These are project targets and must be finalized during technical design:
+These are default contractual project targets. Any different budget must be approved in the technical design before full development:
 
-- Ordinary content page initial transfer: no more than 1.0 MB where feasible
+- Ordinary content page initial transfer: no more than 1.0 MB
 - Homepage initial transfer: no more than 1.5 MB excluding user-initiated media
-- Compressed first-load JavaScript: approximately 200 KB or less on marketing pages
+- Compressed first-load JavaScript: no more than 200 KB on public marketing pages
 - No automatically downloaded background video on mobile
 - Responsive AVIF or WebP images with explicit dimensions and appropriate source sets
 - Lazy-load below-the-fold media; never lazy-load the main hero image when it is the Largest Contentful Paint element
@@ -617,6 +653,8 @@ These are project targets and must be finalized during technical design:
 - Click-to-load maps, video players, social feeds, and other heavy third-party embeds
 - A third-party script may be added only with a documented purpose, privacy owner, performance cost, and removal plan
 - Automated performance-budget checks must fail a release or require an explicit approval when exceeded
+
+The approved test protocol must name representative URLs, exact test-tool and browser versions, device and network profile, test region, production-like environment, number of runs, aggregation method, cache state, permitted variance, and exception process. At minimum, perform five cold-cache runs per key template and report every result plus the median. Transferred-byte budgets include compressed HTML, CSS, JavaScript, fonts, images, and third-party requests loaded before the page becomes idle; they exclude media loaded only after a genuine user action. Warm-cache results should be reported separately. The same protocol must be automated in release checks where practical.
 
 ### 13.3 Sustainable web guidance
 
@@ -645,6 +683,7 @@ The site itself must not be described as carbon-neutral or green without a publi
 Implement valid JSON-LD that describes visible, truthful content:
 
 - `Organization` on the homepage using the confirmed name, URL, logo, legal contact data, and verified social profiles
+- `WebSite` on the homepage with the confirmed site name, alternate name where appropriate, and canonical URL
 - `BreadcrumbList` on hierarchical internal pages
 - `Article` or the appropriate subtype for eligible stories
 - Relevant product or software markup for Chokro only when the visible page and current status satisfy the applicable guidance
@@ -655,25 +694,25 @@ Validate structured data before launch. Structured data creates eligibility for 
 
 ### 15.1 Security baseline
 
-Use OWASP ASVS 5.0.0 as the verification checklist: Level 1 minimum for the public informational surface and Level 2 for CMS administration, authentication, APIs, forms that process personal data, and related back-office functions. Address every applicable category in the OWASP Top 10 current at launch.
+Freeze OWASP ASVS version 5.0.0 as the testable verification baseline: Level 1 minimum for the public informational surface and Level 2 for vendor-built CMS administration, authentication, APIs, forms that process personal data, and related back-office functions. Define the application boundaries and record evidence or a reasoned not-applicable decision for each control. For opaque managed services, the vendor must provide available assurance reports, configuration evidence, and shared-responsibility boundaries rather than claim access to controls it cannot inspect. Use OWASP Top 10:2025 as a threat-model cross-check, not as a replacement verification checklist.
 
 Minimum controls:
 
 - HTTPS everywhere, automatic certificate renewal, TLS 1.3 by default, and TLS 1.2 only for necessary compatibility
-- Permanent HTTP-to-HTTPS redirect and HSTS after every required subdomain is HTTPS-ready
-- Strict Content Security Policy using nonces or hashes where applicable, with restrictive object, base, frame, and connection rules
-- Appropriate content-type, referrer, permissions, and clickjacking protections
+- Permanent HTTP-to-HTTPS redirect and HSTS with `max-age` of at least 31,536,000 seconds; add `includeSubDomains` for the Level 2 scope only after every required subdomain is HTTPS-ready
+- Strict Content Security Policy with at least `object-src 'none'`, `base-uri 'none'`, and an explicit `frame-ancestors` rule; use nonces, hashes, or tightly controlled allowlists for scripts and styles
+- `X-Content-Type-Options: nosniff`, an approved `Referrer-Policy`, an approved `Permissions-Policy`, and clickjacking protection
 - Tightly allowlisted CORS; never wildcard credentials
 - Server-side validation, contextual output encoding, parameterized data access, CSRF controls, size limits, rate limiting, and anti-spam protections
-- Secure, HttpOnly, appropriately SameSite session cookies and host-only cookies where possible
+- Secure, HttpOnly, appropriately SameSite session cookies; use the `__Host-` prefix unless cross-host sharing is documented and required, otherwise use `__Secure-` where applicable
 - Multi-factor authentication, least privilege, protected recovery, session expiration, and audit events for administrators
 - No secrets, private keys, mail credentials, or privileged endpoints exposed in source control or client bundles
 - Locked dependencies, automated dependency and secret scanning, timely patching, backup protection, and tested restore
 - Security logs without passwords, tokens, message content, or unnecessary personal information
 - Generic public error responses with detailed errors restricted to authorized logs
-- Independent security testing before launch
+- Independent security testing before launch covering the public site, authenticated administration paths within scope, APIs, forms, configuration, dependency review, and retesting; the assessor must be independent from the people who implemented the tested controls
 
-All critical and high vulnerabilities and all exploitable medium findings must be resolved before acceptance. Any residual exception requires a named owner, documented risk acceptance, compensating control, and deadline.
+The test plan must define the severity method and version, who determines exploitability, false-positive evidence, and retesting. All confirmed critical and high vulnerabilities and all confirmed exploitable medium findings must be resolved before acceptance. Non-exploitable medium and low residual findings may pass only with written acceptance from a named Impact Sol. risk owner, a compensating control where appropriate, and a deadline.
 
 ### 15.2 Privacy
 
@@ -682,7 +721,7 @@ The website team must maintain a data inventory recording each data item, purpos
 Requirements include:
 
 - Collect only information required for the stated purpose.
-- Publish a clear, versioned privacy notice and contextual notice at each form.
+- Publish a clear, versioned privacy notice identifying the controller and contact, data categories, purposes and counsel-approved bases, recipients and processors, international transfers, retention periods or criteria, applicable individual rights, complaint route, effective date and version, and the position on children's data; show a concise contextual notice at each form.
 - Separate service-related acknowledgement from optional marketing consent.
 - Provide a documented process for access, correction, deletion, withdrawal, and complaints as legally applicable.
 - Sign suitable processor and confidentiality terms with hosting, CMS, analytics, email, anti-spam, and form vendors.
@@ -691,13 +730,17 @@ Requirements include:
 - Keep production personal data out of development and test environments.
 - Provide breach-response contacts and a documented escalation process.
 
-A qualified Bangladesh privacy lawyer must review the final data flows, consent language, privacy notice, processor arrangements, and launch configuration against the Personal Data Protection Act 2026 and every other law applicable to Impact Sol.'s audiences and operations. The vendor's template policy is not legal approval.
+A qualified Bangladesh privacy lawyer must review the final data flows, consent language, privacy notice, processor arrangements, and launch configuration against the Personal Data Protection Act 2026 and every other law applicable to Impact Sol.'s audiences and operations. Counsel must confirm commencement, implementing rules, territorial scope, and transition requirements current at launch. The vendor's template policy is not legal approval.
+
+The corporate-site privacy notice does not automatically cover Chokro. Before the corporate site links to unrestricted registration or use, Chokro requires a separate product-specific privacy and terms review covering its controller, processors, identity data, photographs, precise location, screening services, reward ledger, marketplace functions, retention, user rights, age rules, security, support, and prototype status. Until that is ready, link only to approved product information or a controlled demonstration and use **Register interest** as the public action.
 
 ### 15.3 Cookies and similar technology
 
 Load only strictly necessary storage by default. When valid consent is legally required, block analytics, advertising, session replay, nonessential embeds, fingerprinting, and similar technologies until the visitor makes a choice.
 
 Consent controls must offer equally clear **Accept all**, **Reject all**, and **Customize** choices; use no preselected optional categories; explain purposes and providers; record consent version, categories, and time without unnecessary identity data; and provide a permanent way to change or withdraw a choice.
+
+Maintain a cookie and similar-technology register containing the technology or name, provider, purpose, category, duration, data shared, and conditions under which it loads.
 
 Test consent in a clean browser using network inspection. If the production site uses no nonessential technologies, do not add an unnecessary banner.
 
@@ -745,6 +788,8 @@ Recommended launch events include `primary_cta_click`, `chokro_outbound_click`, 
 
 Alerts must reach a monitored Impact Sol.-owned channel, not only a vendor account.
 
+Default service objectives are 99.9 percent monthly public-site availability excluding approved maintenance; availability checks at least every five minutes from two independent locations; alerting after two consecutive failures; and escalation to the named owner within fifteen minutes during the contracted support window. Backups containing content or form records must be encrypted, run at least daily, retain at least thirty days, and be restored in a documented test at least quarterly. Default recovery objectives are an RPO of twenty-four hours for CMS content and an RTO of four hours for the public site. The vendor may propose different objectives with the cost and risk stated explicitly. The final contract must define support hours, incident severity, response and update times, patch deadlines, backup scope, retention, RPO, RTO, and responsible parties.
+
 ## 17 Quality assurance and acceptance
 
 ### 17.1 Required test evidence
@@ -762,15 +807,16 @@ The vendor must provide:
 - Backup and restore evidence
 - Content, claims, links, legal details, and asset-rights sign-off
 - Production smoke-test and rollback record
+- Two representative-user validation rounds: one on wireframes and one on the near-final site, including at least a maker or seller, an institutional or partnership audience, and a Chokro user; cover mobile use, slow connectivity, and Bangla when in launch scope
 
 ### 17.2 Launch acceptance criteria
 
 The work is accepted only when:
 
 1. All P0 pages and components are complete, approved, and free of placeholder content.
-2. Every public page and form meets WCAG 2.2 Level AA in the agreed WCAG-EM sample, with no known applicable A or AA failure.
+2. The entire declared public scope meets WCAG 2.2 Level AA, with no known applicable A or AA failure; the agreed WCAG-EM representative sample, complete processes, high-risk variations, and unique components provide the audit evidence.
 3. Key templates meet the agreed laboratory performance budget, with a field-measurement plan active.
-4. All critical and high security findings and exploitable medium findings are closed.
+4. All confirmed critical and high security findings and confirmed exploitable medium findings are closed; any accepted non-exploitable medium or low residual risk follows the documented exception process.
 5. Every form routes correctly, acknowledges the sender, handles errors accessibly, and alerts on delivery failure.
 6. No optional tracking or embed loads before valid consent where consent is required.
 7. English copy is professionally edited; every published Bangla page is human-reviewed and complete.
@@ -801,6 +847,8 @@ The work is accepted only when:
 
 Impact Sol. must approve the sitemap and content direction before full visual design, and must approve responsive designs and content models before full development. Approval of desktop screenshots alone is insufficient.
 
+The vendor must document each user-validation session, major finding, design decision, and unresolved issue. Recruitment and incentives, accessibility accommodations, consent, and whether testing is moderated or remote must be agreed during discovery.
+
 ### 18.2 Handover package
 
 - Editable strategy, sitemap, content matrix, wireframes, and design files
@@ -827,6 +875,25 @@ The proposal must separate one-time cost, optional scope, recurring platform cos
 
 The contract should confirm ownership or an appropriate perpetual license for custom code, designs, copy, and commissioned media; transfer of editable source files; warranty terms; confidentiality; data protection; subcontractors; open-source obligations; termination assistance; and access to all user-owned accounts. Legal counsel should approve the final agreement.
 
+### 18.4 Content responsibility baseline
+
+The final statement of work must replace this baseline with named people, quantities, review rounds, and approval deadlines.
+
+| Work item | Impact Sol. accountable for | Vendor responsible for |
+| --- | --- | --- |
+| Positioning and services | Business truth, capacity, commercial model, and final approval | Facilitation, structure, and editorial recommendation |
+| Copywriting | Facts, evidence, interviews, and approval | Agreed page copy, revisions, and CMS-ready formatting if included |
+| Legal and privacy | Qualified counsel and final legal approval | Data-flow inventory, implementation details, and policy placement |
+| Chokro claims | Capability matrix, ownership or licence, status, evidence, and approvals | Safe presentation and current-versus-roadmap separation |
+| Translation | Approved glossary and fluent final reviewer | Translation workflow and implementation; translation itself only if quoted |
+| Photography and consent | Access to people, places, products, and organizational permission | Art direction, production, optimization, rights records if quoted |
+| Impact evidence | Definitions, source records, methods, limitations, and approval | Content model, presentation, and validation rules |
+| CMS entry | Timely approved content and editor availability | Migration or entry quantity stated in proposal, QA, and training |
+| SEO metadata | Final brand and content approval | Research, drafting, implementation, and validation |
+| Launch | Named decision maker and timely approvals | Checklist, deployment, verification, rollback readiness, and handover |
+
+Late or missing content, evidence, translation, or approval must follow an agreed change-control process. The proposal must state included page and content-item quantities, migration volume, copy and design review rounds, feedback turnaround assumed, and cost or schedule impact of additional rounds.
+
 ## 19 Information Impact Sol. must provide
 
 ### 19.1 Company and brand
@@ -842,10 +909,11 @@ The contract should confirm ownership or an appropriate perpetual license for cu
 ### 19.2 Chokro
 
 - Approved public description and exact endorsed phrase
+- Documented IP ownership or licence, any university or course restrictions, prior identity relationships, product-domain control, and authority to place Chokro under Impact Sol.
 - Current status: concept, prototype, pilot, beta, or live
 - Approved app and website URLs
 - Current screenshots and logo files
-- Verified current capabilities versus roadmap
+- Dated capability and launch-readiness matrix covering source implementation, production deployment, operational verification, public availability, privacy readiness, and roadmap
 - Public support and privacy routes
 - Approved numbers, places, partners, and testimonials, if any
 - Written approval for every EPR, 3ZERO, SDG, recycler, sponsor, investor, or government statement
@@ -870,13 +938,24 @@ The contract should confirm ownership or an appropriate perpetual license for cu
 
 ### 19.5 Project decisions
 
-- Launch deadline and budget range
-- English-only or bilingual launch scope
-- Internal approver for strategy, design, content, legal, technology, and launch
-- Number and roles of CMS users
-- Preferred or prohibited technologies and existing accounts
-- Required integrations
-- Post-launch maintenance owner
+Complete this facts sheet before requesting a fixed proposal:
+
+| Project fact | Owner-approved value |
+| --- | --- |
+| Target launch date | To be confirmed |
+| Budget range and currency | To be confirmed |
+| Launch language | Choose English with Bangla-ready architecture, or complete English and Bangla |
+| Confirmed P0 page count | To be confirmed from the approved sitemap |
+| Initial products, offerings, stories, cases, people, partners, FAQs, reports, and metrics | Quantity for each to be confirmed |
+| Expected traffic and campaign peaks | To be confirmed |
+| CMS users and roles | To be confirmed |
+| Strategy, design, content, legal, technical, and launch approvers | Named people to be confirmed |
+| Allowed platform types | Choose managed SaaS, WordPress, custom or open source, or any compliant option |
+| Existing domain, DNS, email, analytics, CMS, hosting, and monitoring accounts | To be confirmed |
+| Required integrations | Form email is P0; CRM, newsletter, booking, and other systems to be confirmed |
+| Content, translation, photography, and legal suppliers | To be confirmed |
+| Post-launch product owner and maintenance provider | To be confirmed |
+| Required support window and recovery objectives | Confirm defaults in Section 16 or approve alternatives |
 
 ## 20 Vendor response instructions
 
@@ -894,6 +973,8 @@ The vendor should respond with:
 10. Warranty, maintenance, incident response, and support options.
 11. Risks, exclusions, alternatives, and decisions required from Impact Sol.
 
+Before contract signature, the vendor and Impact Sol. must convert every agreed P0 statement into a requirements register with a unique ID, priority, accountable owner, delivery stage, acceptance evidence, applicability rule, and status. Conditional or non-applicable requirements must include the trigger or reason. That signed register and the project facts sheet become the contractual scope baseline; educational guidance and provisional copy remain supporting material.
+
 Vague statements such as "SEO-ready," "fully secure," "accessible," or "optimized" are not sufficient. The proposal must state how each quality will be implemented, tested, evidenced, and maintained.
 
 ## 21 Starter messaging for design prototypes
@@ -904,7 +985,7 @@ This copy is provisional and should be edited after stakeholder and audience rev
 
 **Technology and collaboration for a greener, more inclusive economy.**
 
-Impact Sol. builds practical products and partnerships that help eco-conscious makers, small sellers, and sustainability initiatives grow.
+Impact Sol. is building practical products and partnerships intended to help eco-conscious makers, small sellers, and sustainability initiatives grow.
 
 Primary action: **Work with Impact Sol.**  
 Secondary action: **Explore Chokro**
@@ -931,9 +1012,9 @@ Transparent, purpose-led partnerships that connect technology, communities, impl
 
 **Chokro, the first product by Impact Sol.**
 
-Chokro is designed to make responsible disposal and other eco-actions visible and rewarding, while helping people discover products from 3ZERO Greenpreneurs.
+Chokro is a working prototype designed to make responsible disposal and other eco-actions visible and rewarding, while developing a marketplace pathway for small eco-conscious sellers. Its 3ZERO role labels do not by themselves imply formal affiliation.
 
-Action: **See how Chokro works**
+Action: **View the Chokro prototype** or **Register interest**, depending on verified public availability and privacy readiness
 
 ### Impact statement
 
@@ -955,14 +1036,19 @@ Action: **Start a conversation**
 - [Google SEO Starter Guide](https://developers.google.com/search/docs/fundamentals/seo-starter-guide)
 - [Google structured data guidelines](https://developers.google.com/search/docs/appearance/structured-data/sd-policies)
 - [Google Organization structured data](https://developers.google.com/search/docs/appearance/structured-data/organization)
+- [Google site name and WebSite structured data guidance](https://developers.google.com/search/docs/appearance/site-names)
+- [Google canonical URL guidance](https://developers.google.com/search/docs/crawling-indexing/consolidate-duplicate-urls)
+- [Google XML sitemap guidance](https://developers.google.com/search/docs/crawling-indexing/sitemaps/build-sitemap)
 - [Google multilingual and localized page guidance](https://developers.google.com/search/docs/specialty/international/localized-versions)
 - [OWASP Application Security Verification Standard](https://owasp.org/www-project-application-security-verification-standard/)
-- [OWASP Top 10](https://owasp.org/Top10/)
+- [OWASP Top 10 2025](https://owasp.org/Top10/)
 - [OWASP Transport Layer Security guidance](https://cheatsheetseries.owasp.org/cheatsheets/Transport_Layer_Security_Cheat_Sheet.html)
-- [W3C Web Sustainability Guidelines](https://www.w3.org/TR/web-sustainability-guidelines/)
+- [W3C Web Sustainability Guidelines draft Group Note](https://www.w3.org/TR/web-sustainability-guidelines/)
+- [European Data Protection Board consent guidance](https://www.edpb.europa.eu/our-work-tools/our-documents/guidelines/guidelines-052020-consent-under-regulation-2016679_en)
+- [UK Information Commissioner's Office cookie guidance](https://ico.org.uk/media2/kz0doybw/guidance-on-the-use-of-cookies-and-similar-technologies-1-0.pdf)
 - [United Nations Sustainable Development Goals](https://sdgs.un.org/goals)
 - [3ZERO Club vision](https://www.3zero.club/about)
-- [Bangladesh ICT Division Personal Data Protection Act 2026 listing](https://ictd.gov.bd/pages/laws/)
+- [Bangladesh ICT Division Personal Data Protection Act 2026](https://ictd.gov.bd/pages/laws/%E0%A6%AC%E0%A7%8D%E0%A6%AF%E0%A6%95%E0%A7%8D%E0%A6%A4%E0%A6%BF%E0%A6%97%E0%A6%A4-%E0%A6%89%E0%A6%AA%E0%A6%BE%E0%A6%A4%E0%A7%8D%E0%A6%A4-%E0%A6%B8%E0%A7%81%E0%A6%B0%E0%A6%95%E0%A7%8D%E0%A6%B7%E0%A6%BE-%E0%A6%86%E0%A6%87%E0%A6%A8-%E0%A7%A8%E0%A7%A6%E0%A7%A8%E0%A7%AC-70is1t-69df5ba2210b1799cc640412)
 
 ## Final instruction to the vendor
 

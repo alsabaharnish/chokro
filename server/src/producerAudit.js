@@ -119,6 +119,20 @@ const ACTIONS = Object.freeze({
   SKU_MASS_REJECTED: 'sku.massRejected',
   SKU_RETIRED: 'sku.retired',
 
+  // Phase D — the denominator (EPR-24) and the certificate (EPR-28).
+  //
+  // `DECLARATION_SUBMITTED` is the entry a regulator would ask about: it is the
+  // moment a producer attested to the figure every percentage in its reports
+  // divides by, and its summary carries the attester's name.
+  DECLARATION_SAVED: 'declaration.saved',
+  DECLARATION_SUBMITTED: 'declaration.submitted',
+  DECLARATION_CORRECTED: 'declaration.corrected',
+  PASSPORT_ISSUED: 'passport.issued',
+  PASSPORT_SUPERSEDED: 'passport.superseded',
+  PASSPORT_REVOKED: 'passport.revoked',
+  REPORT_GENERATED: 'report.generated',
+  REPORT_DOWNLOADED: 'report.downloaded',
+
   ADMIN_VIEWED_AS_ORG: 'admin.viewedAsOrg',
 });
 

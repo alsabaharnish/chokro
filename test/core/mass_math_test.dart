@@ -307,6 +307,115 @@ void main() {
     });
   });
 
+  group('the rounding claims no precision it does not have', () {
+    /// How many significant figures a rendered figure actually shows.
+    int significantFigures(String rendered) {
+      var digits = rendered.replaceAll(RegExp(r'[^0-9.]'), '');
+      digits = digits.replaceFirst(RegExp(r'^0+'), '');
+      if (digits.startsWith('.')) {
+        digits = digits.substring(1).replaceFirst(RegExp(r'^0+'), '');
+      }
+      digits = digits.replaceAll('.', '').replaceFirst(RegExp(r'0+$'), '');
+      return digits.isEmpty ? 0 : digits.length;
+    }
+
+    test('never shows a fourth significant figure, over the whole range', () {
+      // A property test rather than a handful of examples, because the failure
+      // this guards is a *rendering* that overstates precision — and it would
+      // appear at some magnitude nobody thought to write an example for.
+      // A regulator reading "3941 kg" is being told a fourth digit Chokro's
+      // evidence does not support.
+      //
+      // Deterministic pseudo-random, so a failure is reproducible: a seeded
+      // generator rather than `Random()` means the same 20,000 values every
+      // run, and a counterexample stays a counterexample.
+      var seed = 7;
+      int next(int bound) {
+        seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+        return seed % bound;
+      }
+
+      final values = <int>[];
+
+      // Every power of ten in milligrams, and its immediate neighbours — where
+      // a floor/ceiling error in the exponent arithmetic would show.
+      var power = 1;
+      for (var exponent = 0; exponent <= 12; exponent += 1) {
+        for (final delta in [-2, -1, 0, 1, 2, 5]) {
+          if (power + delta > 0) values.add(power + delta);
+        }
+        values.add(power * 5);
+        power *= 10;
+      }
+
+      for (var i = 0; i < 20000; i += 1) {
+        values.add(1 + next(2000000000));
+      }
+
+      final overstated = <String>[];
+      for (final mg in values) {
+        final rendered = formatKilograms(mg);
+        if (significantFigures(rendered) > 3) {
+          overstated.add('$mg mg -> "$rendered"');
+        }
+      }
+
+      expect(
+        overstated,
+        isEmpty,
+        reason: 'these render a fourth significant figure',
+      );
+    });
+
+    test('grams are held to the same standard', () {
+      var seed = 11;
+      int next(int bound) {
+        seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+        return seed % bound;
+      }
+
+      final overstated = <String>[];
+      for (var i = 0; i < 20000; i += 1) {
+        final mg = 1 + next(5000000);
+        final rendered = formatGrams(mg);
+        if (significantFigures(rendered) > 3) {
+          overstated.add('$mg mg -> "$rendered"');
+        }
+      }
+      expect(overstated, isEmpty);
+    });
+
+    test('an exact power of ten survives rounding unchanged', () {
+      // The case where an exponent computed through a logarithm lands just
+      // below an integer and shifts the whole figure by a decimal place.
+      for (final value in [
+        1000.0,
+        100.0,
+        10.0,
+        1.0,
+        0.1,
+        0.01,
+        0.001,
+        1e6,
+        1e9,
+      ]) {
+        expect(
+          roundToSignificantFigures(value, 3),
+          value,
+          reason: '$value must not move',
+        );
+      }
+    });
+
+    test('the exact-formatter is exempt, and deliberately so', () {
+      // `formatGramsExact` exists to show a discrepancy and must NOT round —
+      // three significant figures turned a one-milligram mismatch into two
+      // equal numbers. It is never used for a reported figure.
+      expect(significantFigures(formatGramsExact(10001)), greaterThan(3));
+      expect(formatGramsExact(10001), '10.001 g');
+    });
+  });
+
   group('formatting grams', () {
     test('reads naturally for a single unit', () {
       expect(formatGrams(9800), '9.8 g');

@@ -868,6 +868,21 @@ function openRevisionInTransaction(
     revision: nextRevision,
     declaredUnitMassMg: sku.declaredUnitMassMg,
     verifiedUnitMassMg,
+    // THE COMPONENT BREAKDOWN IS FROZEN ONTO THE REVISION.
+    //
+    // Per-polymer reporting is the whole reason components exist (EPR-9): one
+    // recognised bottle contributes grams to a PET line and a PP line in the
+    // same report. That split is computed from these masses, so reproducing a
+    // past period needs the breakdown *as it was*, not as it is now.
+    //
+    // Editing components already invalidates a verification and opens a new
+    // revision (EPR-12), so a live revision's breakdown cannot drift. What this
+    // protects is a *closed* revision: September's polymer split must stay
+    // September's after November's re-weighing, and reading the product would
+    // give November's.
+    components: Array.isArray(sku.components) ? sku.components : [],
+    gazetteCategory: sku.gazetteCategory,
+    polymer: sku.polymer,
     reason,
     note: note || null,
     changedBy: actorUid,
@@ -892,7 +907,11 @@ function openRevisionInTransaction(
     status: sku.status === 'retired' ? 'retired' : 'active',
   });
 
-  return { revision: nextRevision, verifiedUnitMassMg };
+  // The organisation, so the caller can supersede the certificates this change
+  // invalidates (EPR-30). A certificate's mass is units multiplied by the unit
+  // mass Chokro established, so establishing a different one makes every
+  // already-certified period state a figure Chokro no longer stands behind.
+  return { revision: nextRevision, verifiedUnitMassMg, orgId: sku.orgId, skuId };
 }
 
 /** Refuses a submitted declaration, with a reason the producer will read. */
@@ -966,6 +985,60 @@ async function listVerificationQueue({ limit = 50 }) {
     .get();
 
   return snap.docs.map((d) => ({ skuId: d.id, ...d.data() }));
+}
+
+/**
+ * The revision that was in force at a given moment (EPR-12).
+ *
+ * THE FUNCTION THAT MAKES A PAST PERIOD REPRODUCIBLE.
+ *
+ * An attribution must multiply by the verified mass that applied on the day the
+ * disposal was decided, not by the current one. Appendix A step 11 is the case:
+ * a November re-weighing finds the bottle light-weighted to 9.1 g, and
+ * September's passport stays correct because September's attributions used
+ * revision 1 at 9.8 g. Reading `producerSkus.verifiedUnitMassMg` instead would
+ * silently rewrite every past report every time a product was re-weighed.
+ *
+ * Returns null when no revision covers the moment — which is the honest answer
+ * for a disposal that happened before the product's mass was ever verified, and
+ * means "not attributable" rather than "use whatever is current".
+ */
+async function revisionActiveAt({ skuId, moment }) {
+  if (!skuId || !(moment instanceof Date) || Number.isNaN(moment.getTime())) {
+    return null;
+  }
+
+  try {
+    // Revisions are few per product and effective-dated in sequence, so the
+    // window test runs in memory over a bounded read rather than as two
+    // inequality filters, which Firestore cannot combine on separate fields.
+    const snap = await db()
+      .collection(REVISIONS)
+      .where('skuId', '==', skuId)
+      .orderBy('revision', 'desc')
+      .limit(50)
+      .get();
+
+    for (const doc of snap.docs) {
+      const revision = doc.data();
+      const from = revision.activeFrom?.toDate?.() ?? null;
+      if (!from || moment < from) continue;
+
+      const to = revision.activeTo?.toDate?.() ?? null;
+      if (to && moment >= to) continue;
+
+      if (!Number.isInteger(revision.verifiedUnitMassMg)) return null;
+      return { id: doc.id, ...revision };
+    }
+
+    return null;
+  } catch (err) {
+    // Null, never a fallback to the current mass. A registry read that failed
+    // must leave the disposal unattributed for a retry, not attribute it
+    // against a figure from the wrong month.
+    console.error(`[skus] revision lookup for ${skuId} failed:`, err.message);
+    return null;
+  }
 }
 
 /** One SKU's full revision history, oldest first. */
@@ -1065,5 +1138,6 @@ module.exports = {
   listVerificationQueue,
   listRevisions,
   listMassAudits,
+  revisionActiveAt,
   revalidationDue,
 };

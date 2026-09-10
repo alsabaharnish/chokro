@@ -34,7 +34,10 @@ import '../views/admin/admin_dashboard_view.dart';
 import '../views/admin/admin_mass_queue_view.dart';
 import '../views/admin/admin_producers_view.dart';
 import '../views/producer/invitation_redeem_view.dart';
+import '../views/producer/declaration_view.dart';
+import '../views/producer/passports_view.dart';
 import '../views/producer/producer_activity_view.dart';
+import '../views/producer/producer_sdg_view.dart';
 import '../views/producer/producer_dashboard_view.dart';
 import '../views/producer/producer_members_view.dart';
 import '../views/producer/producer_skus_view.dart';
@@ -862,6 +865,21 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/producer/skus/import',
         builder: (context, state) => const SkuImportView(),
+        redirect: requireProducerRoute,
+      ),
+      GoRoute(
+        path: '/producer/declaration',
+        builder: (context, state) => const DeclarationView(),
+        redirect: requireProducerRoute,
+      ),
+      GoRoute(
+        path: '/producer/passports',
+        builder: (context, state) => const PassportsView(),
+        redirect: requireProducerRoute,
+      ),
+      GoRoute(
+        path: '/producer/sdg',
+        builder: (context, state) => const ProducerSdgView(),
         redirect: requireProducerRoute,
       ),
       GoRoute(

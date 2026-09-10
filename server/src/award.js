@@ -23,6 +23,7 @@ const { normalizeRejectionReason } = require('./reviewReason');
 // Push on a decision (F7.1). No cycle: award.js -> push.js -> firebase.js, and
 // push.js requires nothing else.
 const pushModule = require('./push');
+const attributeModule = require('./attribute');
 
 /** Valid `source` values for a ledger entry (§6). */
 const SOURCES = Object.freeze({
@@ -367,6 +368,45 @@ async function approveDisposal({
     pointsAwarded: result.pointsAwarded,
     status: result.status,
   });
+
+  // Attribution, after the commit, for the same reason the notification is
+  // (EPR-16, EPR-21, and §6.8's warning).
+  //
+  // WHY IT IS NOT IN THE TRANSACTION ABOVE.
+  // By this line the wallet is credited and the ledger written. Attribution
+  // reads a product registry, resolves an effective-dated mass revision and
+  // writes to two more collections — any of which can fail for reasons that
+  // have nothing to do with this disposal. Inside the transaction, a producer's
+  // incomplete paperwork would roll back a Champion's points; a Firestore retry
+  // would re-run the whole attribution. Neither is acceptable, and EPR-16's
+  // sentence is that a screening outage must degrade attribution, not disposal.
+  //
+  // WHY IT CANNOT AFFECT THE RETURN VALUE.
+  // `attributeDisposal` never throws — every failure comes back as an outcome
+  // string — and nothing it returns is read here. A caller of `approveDisposal`
+  // gets the same shape it always did, so the disposal path is observably
+  // unchanged whether attribution succeeds, fails, or is switched off entirely.
+  //
+  // WHY NO POINTS FIELD IS PASSED TO IT.
+  // EPR-27: SKU attribution changes no points, no wallet balance and no ledger
+  // entry. It is given a disposal id and nothing else, so there is no value in
+  // scope for it to influence. `server/test/attributePointsIsolation.test.js`
+  // pins that.
+  const attributionOutcome = await attributeModule.attributeDisposal({
+    disposalId,
+    actorUid: adminUid,
+  });
+
+  if (
+    attributionOutcome.outcome === 'failed' ||
+    attributionOutcome.outcome === 'recognitionUnavailable'
+  ) {
+    // Logged, not raised. The disposal keeps `attributionStatus: 'pending'`,
+    // which is what a backfill looks for.
+    console.warn(
+      `[award] ${disposalId} approved but not attributed: ${attributionOutcome.outcome}`,
+    );
+  }
 
   return result;
 }

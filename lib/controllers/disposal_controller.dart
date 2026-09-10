@@ -70,6 +70,29 @@ class DisposalDraft {
   final int declaredItemCount;
   final DisposalItemType itemType;
 
+  /// A barcode the Champion scanned off the item, if they scanned one (EPR-18).
+  ///
+  /// ## Why it is held here and sent with verification, not with the document
+  ///
+  /// Two constraints meet at this field.
+  ///
+  /// EPR-6 forbids the `disposals` client create allowlist growing "by a single
+  /// key" — if a client can write a mass, the mass is worthless, and a GTIN is
+  /// one step from a mass. So the scanned digits never go into the create
+  /// payload; they travel with the verification request and the server writes
+  /// them as a server-owned field.
+  ///
+  /// NFR-E-6 forbids the barcode making the disposal flow require another live
+  /// round trip: "a disposal that fails at the bin because a barcode lookup
+  /// timed out is a worse product than no barcode path at all". So nothing is
+  /// looked up while the person is standing at the bin. The digits are held
+  /// locally, sent once, and resolved server-side afterwards.
+  ///
+  /// Null is the ordinary case. Scanning is optional, most items carry no
+  /// readable barcode, and most barcodes belong to products no obligated
+  /// producer has registered.
+  final String? scannedGtin;
+
   /// Submission progress. [submittedId] is set once the pending document exists.
   final bool isSubmitting;
   final String? submittedId;
@@ -97,6 +120,7 @@ class DisposalDraft {
     this.error,
     this.declaredItemCount = 1,
     this.itemType = DisposalItemType.plasticBottle,
+    this.scannedGtin,
     this.isSubmitting = false,
     this.submittedId,
     this.verification,
@@ -159,6 +183,8 @@ class DisposalDraft {
     String? error,
     int? declaredItemCount,
     DisposalItemType? itemType,
+    String? scannedGtin,
+    bool clearScannedGtin = false,
     bool? isSubmitting,
     String? submittedId,
     VerificationOutcome? verification,
@@ -188,6 +214,10 @@ class DisposalDraft {
       error: clearError ? null : (error ?? this.error),
       declaredItemCount: declaredItemCount ?? this.declaredItemCount,
       itemType: itemType ?? this.itemType,
+      // `clearScannedGtin` exists because passing null cannot be distinguished
+      // from omitting it, and a person who scanned the wrong thing must be able
+      // to take the scan back.
+      scannedGtin: clearScannedGtin ? null : (scannedGtin ?? this.scannedGtin),
       isSubmitting: isSubmitting ?? this.isSubmitting,
       submittedId: submittedId ?? this.submittedId,
       verification: clearVerification
@@ -226,6 +256,29 @@ class DisposalDraftController extends Notifier<DisposalDraft> {
 
   void setItemType(DisposalItemType type) {
     state = state.copyWith(itemType: type);
+  }
+
+  /// Records a scanned barcode (EPR-18).
+  ///
+  /// Validated locally to 8–14 digits and then held. NOTHING IS LOOKED UP HERE:
+  /// NFR-E-6 is explicit that the barcode must not make the disposal flow
+  /// require another live round trip, so the resolution happens server-side
+  /// after the submission exists. A scan of an unregistered product therefore
+  /// costs the person nothing and tells them nothing, which is the correct
+  /// trade — the alternative is a spinner at the bin.
+  void setScannedGtin(String? raw) {
+    final digits = (raw ?? '').replaceAll(RegExp(r'\s'), '');
+    if (digits.isEmpty) {
+      state = state.copyWith(clearScannedGtin: true);
+      return;
+    }
+    if (!RegExp(r'^\d{8,14}$').hasMatch(digits)) {
+      // Not an error on the draft. A misread barcode is a common, harmless
+      // event, and blocking the flow for one would make scanning riskier than
+      // not scanning.
+      return;
+    }
+    state = state.copyWith(scannedGtin: digits);
   }
 
   void clearPhoto() {
@@ -426,7 +479,9 @@ class DisposalDraftController extends Notifier<DisposalDraft> {
       // Never throws: a verification that cannot run reports the pending state,
       // which is exactly what the document says. A failed verify is not a
       // failed submission.
-      final outcome = await ref.read(verificationServiceProvider).verify(id);
+      final outcome = await ref
+          .read(verificationServiceProvider)
+          .verify(id, scannedGtin: state.scannedGtin);
 
       state = state.copyWith(isVerifying: false, verification: outcome);
       return id;

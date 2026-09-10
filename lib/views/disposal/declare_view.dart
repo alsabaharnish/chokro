@@ -11,6 +11,7 @@ import '../../models/disposal_model.dart';
 import '../../services/verification_service.dart';
 import '../shared/content_state.dart';
 import '../shared/flow_progress.dart';
+import 'barcode_scan_sheet.dart';
 
 /// Step 4 of the disposal flow (F2.9): declare what is being disposed of, review
 /// the submission, and write it.
@@ -167,6 +168,30 @@ class DisposalDeclareView extends ConsumerWidget {
                       ],
                     ),
                   ),
+                ),
+
+                const SizedBox(height: 24),
+
+                // ── Barcode, optional (EPR-18) ──────────────────────────────
+                //
+                // Offered after the count and before the review, because it is
+                // about the item rather than about the disposal. Presented as
+                // optional in its own words: a Champion's points do not depend
+                // on it in any way (EPR-27), and implying otherwise would send
+                // people hunting for a barcode that is not there.
+                _BarcodeRow(
+                  scannedGtin: draft.scannedGtin,
+                  onScan: () async {
+                    final digits = await BarcodeScanSheet.show(context);
+                    if (digits != null) {
+                      ref
+                          .read(disposalDraftProvider.notifier)
+                          .setScannedGtin(digits);
+                    }
+                  },
+                  onClear: () => ref
+                      .read(disposalDraftProvider.notifier)
+                      .setScannedGtin(null),
                 ),
 
                 const SizedBox(height: 24),
@@ -545,4 +570,51 @@ class _SubmittedView extends StatelessWidget {
       ),
     ),
   ];
+}
+
+/// The optional barcode step, as a single row.
+class _BarcodeRow extends StatelessWidget {
+  const _BarcodeRow({
+    required this.scannedGtin,
+    required this.onScan,
+    required this.onClear,
+  });
+
+  final String? scannedGtin;
+  final VoidCallback onScan;
+  final VoidCallback onClear;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scanned = scannedGtin != null;
+
+    return Card(
+      color: theme.colorScheme.surfaceContainerLowest,
+      child: ListTile(
+        leading: Icon(
+          scanned ? Icons.check_circle_outline : Icons.barcode_reader,
+          color: scanned ? theme.colorScheme.primary : null,
+        ),
+        title: Text(
+          scanned ? 'Barcode scanned' : 'Scan the barcode (optional)',
+          style: theme.textTheme.bodyLarge,
+        ),
+        subtitle: Text(
+          scanned
+              ? scannedGtin!
+              : 'Helps the company that made the packaging report it '
+                    'accurately. Does not change your points.',
+          style: theme.textTheme.bodySmall,
+        ),
+        trailing: scanned
+            ? IconButton(
+                onPressed: onClear,
+                icon: const Icon(Icons.close),
+                tooltip: 'Remove the scan',
+              )
+            : TextButton(onPressed: onScan, child: const Text('Scan')),
+      ),
+    );
+  }
 }

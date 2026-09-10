@@ -26,7 +26,17 @@ class VerificationService {
   VerificationService({http.Client? client})
     : _client = client ?? http.Client();
 
-  Future<VerificationOutcome> verify(String disposalId) async {
+  /// Asks the server to verify a submission.
+  ///
+  /// [scannedGtin] travels here rather than on the disposal document, for two
+  /// reasons stated on `DisposalDraft.scannedGtin`: EPR-6 forbids the client
+  /// create allowlist growing by a key, and NFR-E-6 forbids a live barcode
+  /// lookup at the bin. The server stores it as a server-owned field and
+  /// resolves it afterwards.
+  Future<VerificationOutcome> verify(
+    String disposalId, {
+    String? scannedGtin,
+  }) async {
     final user = FirebaseAuth.instance.currentUser;
     if (user == null) {
       return VerificationOutcome.pending(
@@ -44,6 +54,11 @@ class VerificationService {
               'Content-Type': 'application/json',
               'Authorization': 'Bearer $token',
             },
+            // An empty body when nothing was scanned, so the request is
+            // byte-identical to the one this client has always sent.
+            body: scannedGtin == null
+                ? null
+                : jsonEncode({'scannedGtin': scannedGtin}),
           )
           .timeout(ApiConfig.coldStartTimeout);
 

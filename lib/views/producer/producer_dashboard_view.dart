@@ -16,6 +16,7 @@ import '../shared/app_snackbar.dart';
 import '../shared/content_state.dart';
 import '../shared/error_retry.dart';
 import '../shared/notice_card.dart';
+import 'collected_mass_card.dart';
 
 /// The EPR producer workspace (EPR-1, NFR-E-1).
 ///
@@ -150,6 +151,29 @@ class _Workspace extends ConsumerWidget {
                         tone: ActionTone.primary,
                         onTap: () => context.go('/producer/skus'),
                       ),
+                      // Ahead of members and activity, because it is the
+                      // step that unlocks every collection percentage in the
+                      // portal — and the one a new producer has no reason to
+                      // guess at.
+                      ActionCard(
+                        icon: Icons.assignment_outlined,
+                        title: 'Put on market',
+                        subtitle:
+                            'Declare what your company placed on the market. '
+                            'Without it Chokro can state the mass collected '
+                            'but no collection percentage.',
+                        tone: ActionTone.primary,
+                        onTap: () => context.go('/producer/declaration'),
+                      ),
+                      ActionCard(
+                        icon: Icons.workspace_premium_outlined,
+                        title: 'Plastic Passports',
+                        subtitle:
+                            'Certificates Chokro has issued for your periods, '
+                            'in Bangla and English, with a serial anyone can '
+                            'verify.',
+                        onTap: () => context.go('/producer/passports'),
+                      ),
                       ActionCard(
                         icon: Icons.group_outlined,
                         title: 'People with access',
@@ -158,6 +182,14 @@ class _Workspace extends ConsumerWidget {
                                   'remove access.'
                             : 'See who in your company can use this workspace.',
                         onTap: () => context.go('/producer/members'),
+                      ),
+                      ActionCard(
+                        icon: Icons.public_outlined,
+                        title: 'SDG alignment',
+                        subtitle:
+                            'How this period maps to UN goal targets, with '
+                            'what each figure does not show stated on it.',
+                        onTap: () => context.push('/producer/sdg'),
                       ),
                       ActionCard(
                         icon: Icons.history_outlined,
@@ -301,24 +333,12 @@ class _ReportingPosition extends StatelessWidget {
 
             const Divider(height: AppTheme.gapXl),
 
-            // The two figures a producer opens this screen for, and the honest
-            // reason neither is here yet.
-            NoticeCard(
-              icon: Icons.scale_outlined,
-              tone: NoticeTone.info,
-              title: 'Collected mass is not being attributed yet',
-              message: EprAbsenceReasons.noMassWithoutVerification,
-            ),
-            const SizedBox(height: AppTheme.gapSm),
-            NoticeCard(
-              icon: Icons.percent_outlined,
-              tone: NoticeTone.info,
-              title: 'No percentage without a declaration',
-              message:
-                  EprAbsenceReasons.noPercentageWithoutDeclaration,
-            ),
+            // Collected mass is real from Phase C onward. The card states its
+            // own uncertainty and its own missing denominator; neither is
+            // repeated here.
+            const CollectedMassCard(),
 
-            const SizedBox(height: AppTheme.gapSm),
+            const SizedBox(height: AppTheme.gapMd),
             Text(
               EprAbsenceReasons.recyclingNotCovered,
               style: theme.textTheme.bodySmall?.copyWith(

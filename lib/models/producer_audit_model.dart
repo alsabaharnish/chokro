@@ -38,6 +38,14 @@ class ProducerAuditAction {
   static const String skuMassRejected = 'sku.massRejected';
   static const String skuRetired = 'sku.retired';
 
+  // Phase D — the denominator (EPR-24).
+  static const String declarationSaved = 'declaration.saved';
+
+  /// The moment a producer attested to the figure every percentage in its
+  /// reports divides by (EPR-24). Its summary carries the attester's name.
+  static const String declarationSubmitted = 'declaration.submitted';
+  static const String declarationCorrected = 'declaration.corrected';
+
   /// An Admin looked at the workspace as the organisation sees it (EPR-46).
   ///
   /// Logged because a read of a company's compliance position by someone
@@ -64,6 +72,9 @@ class ProducerAuditAction {
     skuMassVerified => 'Unit mass verified by Chokro',
     skuMassRejected => 'Mass declaration rejected',
     skuRetired => 'Product retired',
+    declarationSaved => 'Put-on-market draft saved',
+    declarationSubmitted => 'Put-on-market declaration filed',
+    declarationCorrected => 'Put-on-market declaration corrected',
     adminViewedAsOrg => 'Admin viewed this workspace',
     // The raw value, not 'Unknown'. See the class comment.
     _ => action,

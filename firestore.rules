@@ -1316,6 +1316,125 @@ service cloud.firestore {
     }
 
     // -------------------------------------------------------------------------
+    // attributions — the atomic evidence record
+    // -------------------------------------------------------------------------
+    //
+    // Every gram a regulator will read traces to a row here, and every row is
+    // written by the trusted service inside the same transaction as the period
+    // rollup it increments (EPR-22). No client writes one, administrators
+    // included — the same sentence that governs `wallets`, and for a sharper
+    // reason: a client that could author an attribution could author a
+    // kilogram.
+    //
+    // A producer READS its own rows, because being able to see the evidence
+    // behind a figure you are certified against is most of what makes the
+    // figure defensible. What it must not see is who threw the item away.
+    //
+    // A PRODUCER CANNOT READ THESE ROWS, AND THE REASON IS SEC-3'S OWN.
+    //
+    // An earlier version granted a producer's members read on their own rows,
+    // with a comment conceding that the product did not render them and that
+    // pseudonymisation would arrive in Phase D. That reasoning was wrong in a
+    // specific way worth recording: "no screen renders it" is a statement about
+    // the product, not a control. A producer holds its own Firebase
+    // credentials, `attributions(orgId, periodId, createdAt)` is a shipped
+    // composite index, and the Firestore SDK is a public API — so a member
+    // could query these rows directly and get, per row, `binId`,
+    // `disposalDecidedAt` at second precision, and the real `disposalId`.
+    //
+    // `bins` is readable by any signed-in account and carries lat/lng, because
+    // the app must resolve a scanned code. Joining the two reconstructs exactly
+    // what SEC-3 names as its failure mode: "a map of who throws what where, to
+    // a commercial party, in a jurisdiction now legislating on personal data".
+    //
+    // Two things SEC-3 requires before a producer may see row-level evidence,
+    // and neither exists yet: a **per-organisation pseudonymous** disposal
+    // reference, so two producers cannot correlate the same event or the same
+    // person across their exports; and a k-anonymity floor on anything narrow
+    // enough to isolate an individual. Both belong to the chain-of-custody
+    // export (Phase D), and rules can do neither — they cannot rewrite a field
+    // on read, and they cannot count.
+    //
+    // So the grant is Admin-only until that export exists. It costs nothing
+    // today: the workspace reads `eprPeriods`, which is projected through an
+    // explicit allowlist with the k floor applied (see `projectForProducer` in
+    // `eprPeriods.js`).
+
+    match /attributions/{attributionId} {
+      allow read: if isAdmin();
+
+      // Including an Admin's. A reversal is a server write with a recorded
+      // reason (EPR-21); it is never a client edit, and never a delete.
+      allow create, update, delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // eprPeriods — the rollup a producer actually reads
+    // -------------------------------------------------------------------------
+    //
+    // Counters incremented in the same transaction that writes each
+    // attribution, because there is no scheduler to build a nightly summary
+    // (§3.3) and an annual report can never be a client query (§3.3 again).
+    //
+    // The document id is `{orgId}_{periodId}`, so a member reads its own
+    // period in one composed lookup — the same shape that makes membership
+    // itself a single read.
+    //
+    // ONE ROLLUP IS NOT AN ORGANISATION'S. `__platform` holds the unattributed
+    // pool (EPR-19): an unrecognised item belongs to nobody, so counting its
+    // absence against a producer would invent the very thing that requirement
+    // forbids. It is Admin-read-only, because it is a platform figure and a
+    // producer reading it would learn how much of every other company's
+    // packaging goes unrecognised.
+
+    match /eprPeriods/{periodDocId} {
+      allow read: if isSignedIn()
+        && (
+          (resource.data.orgId != '__platform'
+            && isOrgMember(resource.data.orgId))
+          || isAdmin()
+        );
+      allow create, update, delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // attributionConfirmations — the human-review queue (EPR-17)
+    // -------------------------------------------------------------------------
+    //
+    // Low-confidence matches that were NOT attributed, and a sample of
+    // high-confidence ones that were, held for a person to confirm.
+    //
+    // Admin-only, in both directions, and the read restriction is deliberate.
+    // A producer seeing "Chokro thinks it saw your bottle but is not sure"
+    // would be seeing a figure that is explicitly not part of its evidence, and
+    // an accuracy sample is a measurement OF Chokro's recognition rather than
+    // of the producer's collection — publishing the queue would let a producer
+    // audit the auditor's working before the accuracy figure is published.
+
+    match /attributionConfirmations/{confirmationId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // binSkuFrequency — a ranking signal, not evidence
+    // -------------------------------------------------------------------------
+    //
+    // How often each registered product has been recognised at each bin, used
+    // to rank the recognition shortlist (EPR-15). Nothing is reported from it
+    // and no figure depends on it — losing an increment costs a little accuracy
+    // on a future shortlist and nothing else.
+    //
+    // Admin-read-only nonetheless: per-bin brand frequencies are a map of what
+    // sells where, which is commercially interesting to exactly the parties who
+    // must not have it.
+
+    match /binSkuFrequency/{binId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
     // orgInvitations — invisible to every client, in both directions
     // -------------------------------------------------------------------------
     //
@@ -1349,6 +1468,95 @@ service cloud.firestore {
 
     match /producerAuditHeads/{orgId} {
       allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // putOnMarketDeclarations — the producer's own figure (EPR-40 to EPR-43)
+    // -------------------------------------------------------------------------
+    //
+    // The denominator of every collection percentage Chokro states, and the one
+    // number on the certificate that the producer supplies.
+    //
+    // WHY THIS IS NOT A CLIENT WRITE PATH, despite §5.1's preference for
+    // enforcing a constraint where it is expressed. §5.1's own test is whether
+    // the governing constraint is expressible in rules, and here it is not,
+    // three times over:
+    //
+    //   Submission has to append an immutable row to `putOnMarketVersions` in
+    //   the same transaction as the status change (EPR-41). Rules cannot make
+    //   one write conditional on another.
+    //
+    //   Submission has to append to `producerAuditLog`, which rules cannot
+    //   write to at all — correctly, since an entry a client could author is an
+    //   entry an attacker could author.
+    //
+    //   A correction has to supersede every passport issued for the period
+    //   (EPR-30). Rules cannot perform that, and a client that could would be a
+    //   client that could choose not to.
+    //
+    // A rule permitting the client write would therefore be checking the shape
+    // of `lines` while the three things that make the filing trustworthy
+    // happened somewhere else, or not at all.
+    //
+    // The document id is `{orgId}_{periodId}`, so a member reads its own filing
+    // in one composed lookup.
+
+    match /putOnMarketDeclarations/{declarationId} {
+      allow read: if isSignedIn()
+        && (isOrgMember(resource.data.orgId) || isAdmin());
+      allow create, update, delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // putOnMarketVersions — every figure ever declared (EPR-41)
+    // -------------------------------------------------------------------------
+    //
+    // `putOnMarketDeclarations` holds the current statement; this holds every
+    // statement ever made. A report issued last quarter has to stay
+    // reproducible after a correction this quarter (NFR-E-8), and a superseded
+    // figure is itself evidence — of what the producer declared at the time,
+    // and of the fact that it later withdrew it.
+    //
+    // Which is exactly why deletion is denied to the client. The same reasoning
+    // as `skuRevisions`: a producer able to remove the version it withdrew
+    // could file a flattering figure, be asked about it, and make the question
+    // unanswerable.
+
+    match /putOnMarketVersions/{versionId} {
+      allow read: if isSignedIn()
+        && (isOrgMember(resource.data.orgId) || isAdmin());
+      allow create, update, delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
+    // plasticPassports — the certificate (EPR-28 to EPR-31, SEC-7)
+    // -------------------------------------------------------------------------
+    //
+    // EPR-31: "a certificate a user's device produced is a certificate a user's
+    // device can alter". The serial, the content hash and the frozen figure
+    // snapshot are all minted by the service, so `create` and `update` are
+    // denied here in the strongest terms available — not because a client write
+    // would be badly shaped, but because a client-authored certificate would
+    // not be a certificate at all.
+    //
+    // Reads are membership-scoped even though the document id is a serial.
+    //
+    // A SERIAL IS UNGUESSABLE BUT NOT SECRET. It is printed on a PDF that gets
+    // emailed to customers and filed with a regulator, so possession of one
+    // must never be authorisation to read the record behind it. A rule of the
+    // form "anyone signed in who knows the serial" would turn every certificate
+    // a producer sends out into a read handle on its own stored figures — the
+    // full snapshot, including the declared denominator and the evidence counts
+    // (SEC-1). Membership, therefore, and not knowledge of the id.
+    //
+    // Third parties verify through `GET /passports/verify/{serial}`, which is
+    // unauthenticated and returns five fields by explicit allowlist (EPR-29).
+    // That endpoint exists precisely so this rule can stay closed.
+
+    match /plasticPassports/{serial} {
+      allow read: if isSignedIn()
+        && (isOrgMember(resource.data.orgId) || isAdmin());
       allow create, update, delete: if false;
     }
 

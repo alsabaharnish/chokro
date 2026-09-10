@@ -6,6 +6,7 @@ import '../../controllers/producer_workspace_controller.dart';
 import '../../controllers/sku_controller.dart';
 import '../../core/constants.dart';
 import '../../core/epr_categories.dart';
+import '../../core/epr_claims.dart';
 import '../../core/mass_math.dart';
 import '../../core/theme.dart';
 import '../../models/producer_sku_model.dart';
@@ -191,9 +192,11 @@ class _CoverageCard extends StatelessWidget {
             Text(
               verified == total
                   ? 'Every registered product has a Chokro-verified unit mass.'
-                  : 'Only a Chokro-verified unit mass is used for reporting. '
-                        'Packaging Chokro has not weighed cannot appear in a '
-                        'collected figure.',
+                  // The shared constant, not a second wording of the same fact.
+                  // This sentence lived on the dashboard until Phase C put real
+                  // collected mass there; it belongs here now, where an
+                  // unverified product is what a producer is looking at.
+                  : EprAbsenceReasons.noMassWithoutVerification,
               style: theme.textTheme.bodySmall,
             ),
 

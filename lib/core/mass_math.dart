@@ -257,6 +257,21 @@ String formatGramsExact(int milligrams) {
 ///
 /// `3.94` and not `3.940`; `394` and not `394.0`. A trailing zero after the
 /// third significant figure claims a fourth.
+/// A double rendered to [figures] significant figures, without trailing zeros.
+///
+/// Rounds and THEN trims, which is the pairing every caller here needs.
+/// [_trim] alone only strips decimals a value does not need — it assumes the
+/// value has already been rounded, which is why [formatKilograms] calls
+/// [roundToSignificantFigures] first. Using [_trim] on its own returns `1024`
+/// where three significant figures is `1020`.
+///
+/// Exported because `carbon_math.dart` needs exactly this pairing and had grown
+/// its own version that returned `1020.0` — and a figure printed as
+/// `1020.0 kg CO₂e` claims a tenth of a kilogram of precision on an indicative
+/// estimate.
+String formatSignificantFigures(double value, {int figures = 3}) =>
+    _trim(roundToSignificantFigures(value, figures), figures);
+
 String _trim(double value, int figures) {
   if (value == 0) return '0';
 

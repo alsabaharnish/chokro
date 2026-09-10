@@ -22,6 +22,7 @@ jest.mock('../src/firebase', () => ({
 
 const firebase = require('../src/firebase');
 const organizations = require('../src/organizations');
+const { fakeFirestore } = require('./helpers/firestoreFake');
 
 // ---------------------------------------------------------------------------
 // The pure half
@@ -104,136 +105,7 @@ describe('pure helpers', () => {
 // The Firestore half
 // ---------------------------------------------------------------------------
 
-/**
- * Firestore's query operators, as far as these tests use them.
- *
- * Timestamps are unwrapped through `toDate()` so a range filter on a stored
- * `Timestamp` compares against a real instant rather than against an object.
- */
-function compare(stored, op, value) {
-  const left = stored?.toDate ? stored.toDate().getTime() : stored;
-  const right = value?.toDate ? value.toDate().getTime() : value;
 
-  switch (op) {
-    case '==':
-      return left === right;
-    case '!=':
-      return left !== right;
-    case '>':
-      return left > right;
-    case '>=':
-      return left >= right;
-    case '<':
-      return left < right;
-    case '<=':
-      return left <= right;
-    case 'in':
-      return Array.isArray(right) && right.includes(left);
-    default:
-      throw new Error(`fake Firestore does not implement operator ${op}`);
-  }
-}
-
-function fakeFirestore() {
-  const store = new Map();
-  const key = (col, id) => `${col}/${id}`;
-
-  function makeRef(col, id) {
-    return {
-      id,
-      path: key(col, id),
-      async get() {
-        const data = store.get(key(col, id));
-        return { exists: data !== undefined, id, data: () => data };
-      },
-    };
-  }
-
-  function collection(col) {
-    const q = { filters: [], max: Infinity, order: null };
-    const api = {
-      doc(id) {
-        return makeRef(col, id || `auto_${store.size}_${Math.random().toString(36).slice(2)}`);
-      },
-      where(field, op, value) {
-        // The operator is honoured, not ignored. A fake that treated every
-        // `where` as equality silently returned nothing for a range filter, so
-        // a query bounded on `expiresAt > now` looked empty and the
-        // invitation ceiling it guards never fired in tests.
-        q.filters.push([field, op, value]);
-        return api;
-      },
-      orderBy(field, direction = 'asc') {
-        q.order = [field, direction];
-        return api;
-      },
-      limit(n) {
-        q.max = n;
-        return api;
-      },
-      async get() {
-        let rows = [...store.entries()]
-          .filter(([k]) => k.startsWith(`${col}/`))
-          .map(([k, v]) => ({ id: k.slice(col.length + 1), data: () => v }));
-        for (const [field, op, value] of q.filters) {
-          rows = rows.filter((r) => compare(r.data()[field], op, value));
-        }
-        rows = rows.slice(0, q.max);
-        return { docs: rows, empty: rows.length === 0, size: rows.length };
-      },
-      _query: q,
-    };
-    return api;
-  }
-
-  // Enforces the one rule a hand-written fake normally lets through:
-  // Firestore requires every read in a transaction to precede every write, and
-  // the Admin SDK throws unconditionally otherwise. Three real read-after-write
-  // bugs shipped past this suite because the fake did not care.
-  let writeIssued = false;
-
-  const txn = {
-    async get(target) {
-      if (writeIssued) {
-        throw new Error(
-          'Firestore transactions require all reads to be executed before all writes.',
-        );
-      }
-      return typeof target.get === 'function' ? target.get() : target;
-    },
-    set(ref, data, options) {
-      writeIssued = true;
-      store.set(
-        ref.path,
-        options?.merge ? { ...store.get(ref.path), ...data } : { ...data },
-      );
-    },
-    update(ref, data) {
-      writeIssued = true;
-      store.set(ref.path, { ...store.get(ref.path), ...data });
-    },
-  };
-
-  return {
-    collection,
-    async runTransaction(fn) {
-      // A fresh transaction starts with no writes issued, exactly as a real
-      // one does — otherwise the second transaction in a test would refuse
-      // every read.
-      writeIssued = false;
-      return fn(txn);
-    },
-    _store: store,
-    _seed(col, id, data) {
-      store.set(key(col, id), data);
-    },
-    _find(col) {
-      return [...store.entries()]
-        .filter(([k]) => k.startsWith(`${col}/`))
-        .map(([k, v]) => ({ id: k.slice(col.length + 1), ...v }));
-    },
-  };
-}
 
 let fs;
 

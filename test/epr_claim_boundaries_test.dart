@@ -25,6 +25,7 @@ const _producerFacingSources = <String>[
   'lib/views/producer/producer_members_view.dart',
   'lib/views/producer/producer_activity_view.dart',
   'lib/views/producer/producer_skus_view.dart',
+  'lib/views/producer/collected_mass_card.dart',
   'lib/views/producer/sku_editor_dialog.dart',
   'lib/views/producer/sku_import_view.dart',
   'lib/views/producer/invitation_redeem_view.dart',
@@ -33,6 +34,14 @@ const _producerFacingSources = <String>[
 ];
 
 String _sourceOf(String path) => File(path).readAsStringSync();
+
+/// A string reduced to its words, so source line breaks do not matter.
+///
+/// Dart concatenates adjacent string literals, so a sentence written across
+/// three source lines is one string at runtime with the line breaks gone. The
+/// constant it should have come from has its own formatting. Comparing the
+/// normalised words is the only way the two are comparable at all.
+String _words(String value) => value.replaceAll(RegExp(r'\s+'), ' ').trim();
 
 /// The string literals a file renders, with adjacent literals joined.
 ///
@@ -261,24 +270,56 @@ void main() {
     });
   });
 
-  group('the dashboard renders the shared statements, not its own copy', () {
-    test('it references the constants rather than retyping the sentences', () {
-      // If a later edit retypes a boundary sentence into the widget, the
-      // constant stops being the single source of truth and the Passport can
-      // drift from the screen.
-      final dashboard = _sourceOf(
-        'lib/views/producer/producer_dashboard_view.dart',
-      );
-      expect(dashboard, contains('for (final line in eprBoundaryStatements)'));
-      expect(dashboard, contains('EprAbsenceReasons.recyclingNotCovered'));
-      expect(
-        dashboard,
-        contains('EprAbsenceReasons.noPercentageWithoutDeclaration'),
-      );
-      expect(
-        dashboard,
-        contains('EprAbsenceReasons.noMassWithoutVerification'),
-      );
+  group('the shared statements stay the single source of truth', () {
+    // Asserted as an invariant over the whole producer surface rather than
+    // against one file's contents: these sentences move between screens as
+    // phases land — the collected-mass figures moved from the dashboard to
+    // their own card in Phase C — and a test pinned to a location would fail
+    // for the wrong reason and be "fixed" by pointing it somewhere new.
+    //
+    // What must stay true is that nothing retypes them.
+
+    test('no producer surface retypes a boundary sentence', () {
+      // A retyped sentence stops the constant being the single source of truth,
+      // and the Plastic Passport can then drift from the screen (EPR-28).
+      final rendered = _producerFacingSources
+          .map(_renderedStringsIn)
+          .join('\n');
+
+      for (final statement in eprBoundaryStatements) {
+        // Compared on the words, not the source formatting: Dart concatenates
+        // adjacent literals, so the sentence in a widget would appear with
+        // different line breaks from the constant.
+        expect(
+          _words(rendered),
+          isNot(contains(_words(statement))),
+          reason: 'a producer surface retypes: "$statement"',
+        );
+      }
+    });
+
+    test('every boundary statement is rendered somewhere', () {
+      // The other half. A constant nobody renders is a promise nobody keeps.
+      final sources = _producerFacingSources.map(_sourceOf).join('\n');
+      expect(sources, contains('eprBoundaryStatements'));
+    });
+
+    test('every absence reason is referenced by name, not retyped', () {
+      final sources = _producerFacingSources.map(_sourceOf).join('\n');
+      const referenced = <String>[
+        'EprAbsenceReasons.recyclingNotCovered',
+        'EprAbsenceReasons.noPercentageWithoutDeclaration',
+        'EprAbsenceReasons.noMassWithoutVerification',
+        'EprAbsenceReasons.targetIsNotAnAssessment',
+      ];
+
+      for (final reference in referenced) {
+        expect(
+          sources,
+          contains(reference),
+          reason: '$reference is no longer rendered anywhere',
+        );
+      }
     });
   });
 

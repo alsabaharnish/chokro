@@ -23,6 +23,9 @@ const policyModule = require('./pointsPolicy');
 const { findDuplicate, hashImage } = require('./phash');
 const { decide, hasCompletedVerification } = require('./decide');
 const { screenImage, isValidItemType } = require('./screen');
+const skuShortlist = require('./skuShortlist');
+const eprPolicy = require('./eprPolicy');
+const attribute = require('./attribute');
 const { isTrustedImageReference } = require('./cloudinary');
 const { approveDisposal, readNonNegativeCounter } = require('./award');
 
@@ -48,6 +51,64 @@ async function previousHashes(uid, excludeId) {
     .filter((doc) => doc.id !== excludeId)
     .map((doc) => doc.data().photoHash)
     .filter((hash) => typeof hash === 'string' && hash.length > 0);
+}
+
+/**
+ * A scanned barcode, or null (EPR-18).
+ *
+ * Digits only, 8 to 14 of them — the GTIN-8, GTIN-12, GTIN-13 and GTIN-14
+ * lengths. Anything else is null rather than an error: a misread barcode is a
+ * common, harmless event at a bin, and failing a submission over one would make
+ * scanning riskier than not scanning, which would defeat the whole point of
+ * preferring the barcode path.
+ *
+ * The check digit is deliberately not verified. A GTIN that does not resolve to
+ * a registered product is simply not an attribution, so an invalid one costs
+ * nothing — and rejecting a valid barcode because of a check-digit
+ * implementation disagreement would cost an accurate attribution.
+ */
+function normalizeGtin(value) {
+  if (typeof value !== 'string') return null;
+  const digits = value.replace(/\s/g, '');
+  return /^\d{8,14}$/.test(digits) ? digits : null;
+}
+
+/**
+ * Builds the recognition shortlist for one disposal (EPR-15, SEC-11).
+ *
+ * NEVER THROWS AND NEVER PARTIALLY SUCCEEDS. An empty shortlist makes the
+ * prompt exactly the one this service sent before Phase C existed, so every
+ * failure mode here is "no recognition this time" rather than "a different
+ * disposal decision this time".
+ *
+ * THE SPEND CEILING'S DEGRADATION IS DEFINED HERE.
+ * SEC-11 requires the recognition path to have a per-period spend ceiling with
+ * a defined degradation, and states the direction: "fall back to no
+ * attribution, never to invented attribution". Above the ceiling the shortlist
+ * is empty, the model is not asked the second question, nothing is attributed,
+ * and the disposal is decided on exactly the evidence it would have had anyway.
+ */
+async function buildRecognitionShortlist({ disposal, bin }) {
+  try {
+    if (!skuShortlist.couldContainRegisteredProduct(disposal.itemType)) {
+      // Glass, metal, paper, e-waste and organic cannot contain a registered
+      // plastic product, so there is nothing to ask about and no reason to
+      // spend the tokens.
+      return [];
+    }
+
+    const policy = await eprPolicy.readPolicy();
+
+    return await skuShortlist.buildShortlist({
+      declaredItemType: disposal.itemType,
+      district: bin?.district || null,
+      binId: disposal.binId || null,
+      cap: policy.skuShortlistCap,
+    });
+  } catch (err) {
+    console.error('[verify] shortlist build failed:', err.message);
+    return [];
+  }
 }
 
 /**
@@ -202,7 +263,7 @@ async function committedVerificationOutcome({
  * @param {string} args.callerUid  must own the submission
  * @returns {Promise<object>} the outcome, safe to return to the client
  */
-async function verifyDisposal({ disposalId, callerUid }) {
+async function verifyDisposal({ disposalId, callerUid, scannedGtin = null }) {
   const firestore = db();
   const disposalRef = firestore.collection('disposals').doc(disposalId);
   const snap = await disposalRef.get();
@@ -315,11 +376,29 @@ async function verifyDisposal({ disposalId, callerUid }) {
   // way: not checked, so flagged rather than assumed clean.
 
   // ---- 3. Screening ----
+  //
+  // The SKU shortlist rides along on the call that already happens (EPR-15,
+  // NFR-E-7): "Attribution adds one model call per approved disposal (or
+  // extends the existing one)". Extending it is the cheaper half of that
+  // choice, and it is also the only one that works for a manual approval — a
+  // disposal routed to review carries its recognition evidence forward, so an
+  // Admin approving three days later attributes against what was screened at
+  // the time rather than re-screening a bin that has since been emptied.
+  //
+  // Every failure in the builder yields an empty shortlist, which makes the
+  // prompt byte-identical to the one this service sent before this phase
+  // existed. A registry outage therefore degrades attribution and leaves the
+  // disposal decision untouched (EPR-16).
+  const shortlist = attribute.isEnabled()
+    ? await buildRecognitionShortlist({ disposal, bin })
+    : [];
+
   const screening = photoTrusted && declarationValid
     ? await screenImage({
         imageUrl: disposal.photoUrl,
         declaredItemType: disposal.itemType,
         declaredItemCount: disposal.declaredItemCount,
+        shortlist,
       })
     : null;
 
@@ -354,6 +433,12 @@ async function verifyDisposal({ disposalId, callerUid }) {
         screenBinVisible: screening.binVisible ?? null,
         screenWasteInBin: screening.wasteInBin ?? null,
         screenNotes: screening.notes ?? null,
+        // The recognition block (EPR-15). `undefined` is not a Firestore value,
+        // so an absent block is stored as null — and null is a *different fact*
+        // from an empty array: null means recognition did not run, empty means
+        // it ran and recognised nothing. The attribution path treats them
+        // differently, so the distinction has to survive the write (EPR-19).
+        skuMatches: screening.skuMatches ?? null,
       }
     : {
         screenConfidence: null,
@@ -361,6 +446,7 @@ async function verifyDisposal({ disposalId, callerUid }) {
         screenBinVisible: null,
         screenWasteInBin: null,
         screenNotes: null,
+        skuMatches: null,
       };
 
   if (outcome.decision === 'autoApprove') {
@@ -372,6 +458,10 @@ async function verifyDisposal({ disposalId, callerUid }) {
       distanceMeters,
       verificationCompleted: true,
       ...screeningFields,
+      // Validated at the trust boundary, then stored server-side. A GTIN is
+      // one step from a mass, so an unvalidated one must never reach the
+      // registry lookup (EPR-18).
+      scannedGtin: normalizeGtin(scannedGtin),
     };
 
     let result;
@@ -418,6 +508,7 @@ async function verifyDisposal({ disposalId, callerUid }) {
     verificationCompleted: true,
     flags: outcome.flags,
     ...screeningFields,
+    scannedGtin: normalizeGtin(scannedGtin),
   };
 
   const persistence = await persistReviewEvidence({

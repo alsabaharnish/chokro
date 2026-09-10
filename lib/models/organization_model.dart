@@ -6,6 +6,7 @@ library;
 
 import '../core/constants.dart';
 import '../core/epr_categories.dart';
+import '../core/epr_period.dart';
 
 /// A company obligated under the 2026 EPR guidelines, or applying to be
 /// onboarded as one.
@@ -160,6 +161,60 @@ class OrganizationModel {
     final year = obligationYearAt(now);
     if (year == null) return null;
     return GazetteTargets.recyclingRateForYear(year);
+  }
+
+  /// Which obligation year the reporting period [periodId] falls in.
+  ///
+  /// ## Why this is not [obligationYearAt] with the period's start date
+  ///
+  /// [obligationYearAt] answers "which year are we in at this instant", and it
+  /// is right for that. This answers "which year does this reporting month
+  /// belong to", which is a different question with a different failure mode.
+  ///
+  /// A reporting period is a calendar month in Asia/Dhaka, so `periodStartUtc`
+  /// of `2026-07` is `2026-06-30T18:00:00Z`. [obligationStartDate] is a
+  /// calendar DAY, stored as UTC midnight. Comparing those two as instants says
+  /// July 2026 precedes an obligation that began on 1 July 2026 — by six hours
+  /// — and a null obligation year means no target is shown at all (EPR-26).
+  ///
+  /// So both sides are reduced to a Dhaka calendar year-and-month first.
+  /// Day-of-month is deliberately ignored: a reporting period cannot be half in
+  /// one obligation year and half in the next, and month granularity is the
+  /// finest the scheme has.
+  ///
+  /// ## This must agree with the server, exactly
+  ///
+  /// `passports.js` computes the same figure to decide the applicable target
+  /// printed on a Plastic Passport, and this decides the one shown on the
+  /// dashboard. A producer comparing the two would be comparing the same period
+  /// against two different laws. §5.3's rule for a deliberate duplicate applies:
+  /// `test/models/organization_model_test.dart` asserts the same cases the
+  /// server's `passports.test.js` does, so a change to one side fails the other.
+  int? obligationYearForPeriod(String periodId) {
+    final start = obligationStartDate;
+    if (start == null) return null;
+    if (!isValidPeriodId(periodId)) return null;
+
+    // The Dhaka calendar month the obligation started in.
+    final startDhaka = start.toUtc().add(dhakaOffset);
+    final periodYear = int.parse(periodId.substring(0, 4));
+    final periodMonth = int.parse(periodId.substring(5));
+
+    final monthsElapsed =
+        (periodYear - startDhaka.year) * 12 + (periodMonth - startDhaka.month);
+
+    if (monthsElapsed < 0) return null;
+    return (monthsElapsed ~/ 12) + 1;
+  }
+
+  /// The gazette collection target for a reporting period, or null.
+  ///
+  /// Null when the obligation year is not established. EPR-26 forbids
+  /// presenting a target as though it had been established when it has not, so
+  /// a caller renders nothing rather than a placeholder.
+  double? collectionTargetForPeriod(String periodId) {
+    final year = obligationYearForPeriod(periodId);
+    return year == null ? null : GazetteTargets.collectionRateForYear(year);
   }
 
   /// The name to show. Trade name where there is one, since that is what the

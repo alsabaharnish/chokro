@@ -60,6 +60,41 @@ const DEFAULTS = Object.freeze({
   // much as for accuracy.
   skuShortlistCap: 40,
 
+  /// SEC-3's k-anonymity floor.
+  ///
+  /// "Any producer-facing aggregate broken down finely enough to isolate
+  /// individuals (a single bin, a single day) is suppressed below a policy
+  /// k-anonymity floor (default k = 5)."
+  ///
+  /// The unit is disposals, because a disposal is one person's act. A district
+  /// row built from a single disposal says where one identifiable person threw
+  /// something away, and that is the disclosure the floor exists to prevent.
+  kAnonymityFloor: 5,
+
+  /// EPR-39's ceiling on uncertainty before a carbon figure is refused.
+  ///
+  /// "any carbon figure at all for a period whose `estimatedShare` exceeds a
+  /// policy ceiling". A carbon estimate is already an indicative figure from a
+  /// UK-derived factor; building it on a mass that is itself a quarter
+  /// uncertain compounds two uncertainties into one number that reads as
+  /// precise.
+  carbonUncertaintyCeiling: 0.25,
+
+  /// EPR-30's materiality threshold for reversal-driven supersession.
+  ///
+  /// "a reversed attribution above a policy materiality threshold" must
+  /// supersede every affected passport. A threshold rather than any reversal at
+  /// all, because a single mis-recognised bottle removed from a period does not
+  /// make a certificate wrong, and superseding on every correction would train
+  /// producers and their customers to ignore the status entirely — which is
+  /// the one thing that would make supersession useless.
+  ///
+  /// Expressed as a fraction of the period's certified collected mass, so it
+  /// scales: 1% of a large producer's month is a lot of material, and 1% of a
+  /// small one's is not much, and in both cases it is the same distortion to
+  /// the percentage on the certificate.
+  reversalMaterialityFraction: 0.01,
+
   // EPR-19: category-average estimates for unmatched mass. Open decision 4,
   // whose recommendation is "not in v1" — a defensible smaller number is the
   // product. Present as a flag so turning it on is a deliberate act with a
@@ -121,6 +156,26 @@ function normalize(raw) {
     skuShortlistCap: Math.round(
       readNumber(raw, 'skuShortlistCap', { min: 5, max: 200 }),
     ),
+    // A floor of 1 would suppress nothing, which is the same as not having the
+    // control; above about fifty a producer with a modest programme would see
+    // no geography at all and the figure would stop being useful.
+    kAnonymityFloor: Math.round(
+      readNumber(raw, 'kAnonymityFloor', { min: 2, max: 50 }),
+    ),
+    // A ceiling of 1 would never refuse, which is the same as not having the
+    // control. Zero would refuse every period with any uncertainty at all,
+    // including the ordinary case.
+    carbonUncertaintyCeiling: readNumber(raw, 'carbonUncertaintyCeiling', {
+      min: 0.01,
+      max: 0.9,
+    }),
+    // A threshold of zero would supersede on every reversal, and one of 1
+    // would never supersede at all — each is the same as not having the
+    // control.
+    reversalMaterialityFraction: readNumber(raw, 'reversalMaterialityFraction', {
+      min: 0.0001,
+      max: 0.5,
+    }),
     estimateUnmatchedMass: readBoolean(raw, 'estimateUnmatchedMass'),
   };
 }
