@@ -124,8 +124,9 @@
  *     certificate that silently prints a different name than the company's is
  *     not a lesser version of a correct certificate — it is a false one.
  *
- * (This is also why `CO2e` is written with an ASCII 2 rather than the subscript
- * `₂`: neither face has that glyph.)
+ * (`CO₂e` is written with the real subscript. It used to be an ASCII 2, because
+ * neither Helvetica nor the Bengali face had U+2082 — Noto Sans does, and
+ * `splitRuns` routes the character to it in both editions.)
  */
 
 const fs = require('fs');
@@ -138,6 +139,38 @@ const fontkitNullAnchorFix = require('./fontkitNullAnchorFix');
 const FONT_DIR = path.join(__dirname, '..', 'assets', 'fonts');
 const BENGALI_FONT = path.join(FONT_DIR, 'NotoSansBengali-Regular.ttf');
 const BENGALI_FONT_BOLD = path.join(FONT_DIR, 'NotoSansBengali-Bold.ttf');
+
+/**
+ * The Latin face, replacing pdfkit's built-in Helvetica.
+ *
+ * ## Why bundle one rather than use a standard-14 font
+ *
+ * Helvetica needs no file, which is why it was the first choice. But it is an
+ * AFM font encoded through WinAnsi — about 220 characters — and a character
+ * outside that set is not substituted or flagged, it is reinterpreted. That is
+ * what printed `中国可乐有限公司` as `N-VýSiNPg –PQlSø`, and it is also what
+ * made `Coca‐Cola` (with the U+2010 hyphen a word processor substitutes) a
+ * problem, and `Кока-Кола`, and a name with `₹` in it.
+ *
+ * Noto Sans covers 3,748 glyphs: Latin, Latin Extended, Greek, Cyrillic, the
+ * general punctuation a paste out of Word produces, and the subscript digits.
+ * pdfkit subsets an embedded TrueType face, so a Latin-only certificate carries
+ * only the glyphs it actually uses — a few kilobytes, not the 569 KB on disk.
+ *
+ * The practical effect: a producer with a Cyrillic or accented legal name, or a
+ * name carrying typographic punctuation, now gets a certificate instead of a
+ * refusal.
+ *
+ * ## Helvetica remains the fallback
+ *
+ * If this file is missing, the renderer uses Helvetica rather than refusing.
+ * Refusing would mean no certificates at all for anybody, where the Bengali
+ * case refuses only the Bangla edition — so the trade is different and so is
+ * the answer. Coverage then narrows back to WinAnsi and `splitRuns` refuses
+ * what it cannot draw, which is correct behaviour on a degraded deployment.
+ */
+const LATIN_FONT = path.join(FONT_DIR, 'NotoSans-Regular.ttf');
+const LATIN_FONT_BOLD = path.join(FONT_DIR, 'NotoSans-Bold.ttf');
 
 const MG_PER_KILOGRAM = 1000000;
 
@@ -350,11 +383,7 @@ const ENGLISH_MONTHS = [
 
 /** Whether the Bengali font is present. Checked, never assumed. */
 function bengaliFontAvailable() {
-  try {
-    return fs.statSync(BENGALI_FONT).size > 50000;
-  } catch (_) {
-    return false;
-  }
+  return fontAvailable(BENGALI_FONT, 50000);
 }
 
 /**
@@ -484,33 +513,47 @@ function registerFonts(doc, locale) {
 
     bengali = 'bn';
     bengaliBold = 'bn';
-    try {
-      if (fs.statSync(BENGALI_FONT_BOLD).size > 50000) {
-        doc.registerFont('bn-bold', BENGALI_FONT_BOLD);
-        bengaliBold = 'bn-bold';
-      }
-    } catch (_) {
-      // Regular face for Bengali headings. Noted, not fatal.
+    if (fontAvailable(BENGALI_FONT_BOLD, 50000)) {
+      doc.registerFont('bn-bold', BENGALI_FONT_BOLD);
+      bengaliBold = 'bn-bold';
     }
     coverage = fontkit.openSync(BENGALI_FONT);
+  }
+
+  // The Latin face. Noto Sans where it is bundled, Helvetica where it is not —
+  // see `LATIN_FONT`. `latinCoverage` is the fontkit handle used to answer
+  // "can this face draw that character", and is null on the Helvetica path
+  // because an AFM font has no glyph table to ask; `latinCovers` falls back to
+  // the WinAnsi repertoire there.
+  let latin = 'Helvetica';
+  let latinBold = 'Helvetica-Bold';
+  let latinCoverage = null;
+
+  if (fontAvailable(LATIN_FONT, 200000)) {
+    doc.registerFont('latin', LATIN_FONT);
+    latin = 'latin';
+    latinBold = 'latin';
+    latinCoverage = fontkit.openSync(LATIN_FONT);
+
+    if (fontAvailable(LATIN_FONT_BOLD, 200000)) {
+      doc.registerFont('latin-bold', LATIN_FONT_BOLD);
+      latinBold = 'latin-bold';
+    }
   }
 
   const primaryScript = locale === 'bn' ? 'bengali' : 'latin';
 
   return {
-    // Helvetica needs no file: it is one of the PDF standard 14, present in
-    // every conforming reader. A bundled Latin face would be one more thing to
-    // ship and one more thing to be missing.
-    latin: 'Helvetica',
-    latinBold: 'Helvetica-Bold',
+    latin,
+    latinBold,
+    latinCoverage,
     bengali,
     bengaliBold,
     coverage,
     primaryScript,
     // The primary face, for the few places that set a font directly.
-    regular: primaryScript === 'bengali' && bengali ? bengali : 'Helvetica',
-    bold:
-      primaryScript === 'bengali' && bengaliBold ? bengaliBold : 'Helvetica-Bold',
+    regular: primaryScript === 'bengali' && bengali ? bengali : latin,
+    bold: primaryScript === 'bengali' && bengaliBold ? bengaliBold : latinBold,
   };
 }
 
@@ -582,7 +625,7 @@ function splitRuns(body, text) {
       const bengaliCanDraw = Boolean(
         body.bengali && body.coverage && body.coverage.glyphForCodePoint(cp).id !== 0,
       );
-      const latinCanDraw = helveticaCovers(cp);
+      const latinCanDraw = latinCovers(cp, body.latinCoverage);
 
       if (bengaliCanDraw && latinCanDraw) {
         // Genuinely neutral — a digit, a space, punctuation. Stays with the run
@@ -603,10 +646,9 @@ function splitRuns(body, text) {
         throw unrenderable(
           `Cannot render U+${cp.toString(16).toUpperCase().padStart(4, '0')} `
             + `(${JSON.stringify(String.fromCodePoint(cp))}) in `
-            + `${JSON.stringify(truncate(value))}: neither the bundled Bengali `
-            + 'face nor Helvetica has a glyph for it, so it would print as '
-            + 'mojibake. Refusing to issue a certificate that misspells the '
-            + 'text it certifies.',
+            + `${JSON.stringify(truncate(value))}: neither bundled face has a `
+            + 'glyph for it, so it would print as mojibake. Refusing to issue '
+            + 'a certificate that misspells the text it certifies.',
           { codePoint: cp, text: value },
         );
       }
@@ -661,16 +703,20 @@ function isInvisible(cp) {
 }
 
 /**
- * Whether Helvetica can draw a code point.
+ * Whether the Latin face can draw a code point.
  *
- * Helvetica is one of the PDF standard 14: an AFM font that pdfkit encodes
- * through WinAnsi. A character outside WinAnsi is not substituted or flagged —
- * the byte is reinterpreted, which is what produces mojibake. So coverage is
- * decided against the WinAnsi repertoire rather than by asking pdfkit, which
- * will happily encode anything.
+ * Two answers, because there are two possible faces:
  *
- * The set is Latin-1 minus the C1 range, plus the WinAnsi additions in 0x80–
- * 0x9F's printable slots.
+ *   BUNDLED NOTO SANS — ask the font. This is the honest question and the one
+ *     that cannot drift: the answer is a property of the file on disk rather
+ *     than of a table somebody has to remember to update.
+ *
+ *   HELVETICA FALLBACK — an AFM standard-14 font with no glyph table to ask.
+ *     pdfkit encodes it through WinAnsi and will happily encode anything,
+ *     reinterpreting the bytes rather than reporting a miss, which is what
+ *     produces mojibake. So coverage is decided against the WinAnsi repertoire:
+ *     Latin-1 minus the C1 range, plus the additions in 0x80–0x9F's printable
+ *     slots.
  */
 const WINANSI_EXTRAS = new Set([
   0x20ac, 0x201a, 0x0192, 0x201e, 0x2026, 0x2020, 0x2021, 0x02c6, 0x2030,
@@ -678,10 +724,25 @@ const WINANSI_EXTRAS = new Set([
   0x2013, 0x2014, 0x02dc, 0x2122, 0x0161, 0x203a, 0x0153, 0x017e, 0x0178,
 ]);
 
+function latinCovers(cp, coverage = null) {
+  if (coverage) return coverage.glyphForCodePoint(cp).id !== 0;
+  return helveticaCovers(cp);
+}
+
+/** The WinAnsi repertoire, for the Helvetica fallback path. */
 function helveticaCovers(cp) {
   if (cp >= 0x20 && cp <= 0x7e) return true;          // ASCII printable
   if (cp >= 0x00a0 && cp <= 0x00ff) return true;      // Latin-1 supplement
   return WINANSI_EXTRAS.has(cp);
+}
+
+/** Whether a bundled font file is present and plausibly a font. */
+function fontAvailable(file, minBytes) {
+  try {
+    return fs.statSync(file).size > minBytes;
+  } catch (_) {
+    return false;
+  }
 }
 
 /**
@@ -1152,7 +1213,7 @@ function drawEvidence(ctx) {
       t.carbon,
       // The localised unit, like every other mass on the page. Hardcoding `kg`
       // printed an English unit on the Bangla edition beside Bengali numerals.
-      `${localeNumber(Math.round(f.carbonKgCo2eAvoided), locale)} ${t.kg} CO2e`,
+      `${localeNumber(Math.round(f.carbonKgCo2eAvoided), locale)} ${t.kg} CO₂e`,
     ]);
     rows.push([t.carbonFactor, f.carbonFactorVersion ?? '—']);
   } else {
@@ -1537,6 +1598,8 @@ module.exports = {
   normaliseForRender,
   isInvisible,
   helveticaCovers,
+  latinCovers,
+  LATIN_FONT,
   renderPassportPdf,
   formatKg,
   formatPercent,

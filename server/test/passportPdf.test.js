@@ -326,14 +326,32 @@ describe('the two string tables', () => {
   });
 
   test('never use a glyph neither face has', () => {
-    // The subscript ₂ is the case that caught this: `CO₂e` is the natural
-    // typography and is missing from Noto Sans Bengali and from Helvetica's
-    // WinAnsi encoding alike, so the module writes `CO2e`.
-    const everything = [
-      ...allStrings('en').map(([, v]) => v),
-      ...allStrings('bn').map(([, v]) => v),
-    ].join('');
-    expect(everything).not.toMatch(/[₂²·]/);
+    // Every fixed string, checked through the real routing rule rather than
+    // against a list of characters somebody remembered to forbid. The earlier
+    // version banned `₂` outright, which was right for Helvetica and is now
+    // wrong: Noto Sans has it, so `CO₂e` is written with the real subscript.
+    const body = newBody('bn').body;
+    const offenders = [];
+
+    for (const locale of ['en', 'bn']) {
+      for (const [key, value] of allStrings(locale)) {
+        try {
+          pdf.splitRuns(body, value);
+        } catch (error) {
+          offenders.push(`${locale}/${key}: ${error.message}`);
+        }
+      }
+    }
+
+    expect(offenders).toEqual([]);
+  });
+
+  test('the subscript in CO₂e routes to the face that has it', () => {
+    // Only the Latin face has U+2082, so the Bangla edition splits the run
+    // rather than dropping the character.
+    const runs = pdf.splitRuns(newBody('bn').body, 'কেজি CO₂e');
+    expect(runs.map((r) => r.script)).toEqual(['bengali', 'latin']);
+    expect(runs.map((r) => r.text).join('')).toBe('কেজি CO₂e');
   });
 });
 
@@ -368,14 +386,36 @@ describe('text neither face can draw', () => {
     ['Arabic', 'شركة الكولا'],
     ['Devanagari', 'मेघना पैकेजिंग'],
     ['emoji', 'Green \u{1f331} Packaging Ltd'],
-    ['Cyrillic', 'Кока-Кола'],
     ['Thai', 'บริษัท'],
   ])('is refused rather than printed as mojibake: %s', (_label, name) => {
     for (const locale of ['en', 'bn']) {
       expect(() => pdf.splitRuns(bodyFor(locale), name)).toThrow(
-        /neither the bundled Bengali face nor Helvetica/,
+        /neither bundled face has a glyph/,
       );
     }
+  });
+
+  test.each([
+    ['Cyrillic', 'Кока-Кола Бангладеш'],
+    ['Greek', 'Ελληνικά Συσκευασία'],
+    ['Latin Extended', 'Łódź Šumava Çelik Ltd.'],
+    ['the U+2010 hyphen a word processor substitutes', 'Coca‐Cola Bangladesh Ltd.'],
+    ['the rupee sign', 'Packaging ₹ Holdings'],
+    ['the modifier apostrophe in a transliteration', 'Rahimʼs Agent'],
+  ])('now renders instead of refusing: %s', async (_label, name) => {
+    // What bundling Noto Sans bought. Helvetica's WinAnsi repertoire is about
+    // 220 characters; Noto Sans covers 3,748, including Cyrillic, Greek, Latin
+    // Extended and the typographic punctuation a paste out of Word produces.
+    //
+    // Before, every one of these refused — so a producer with a Cyrillic legal
+    // name, or one whose name carried a U+2010 hyphen, could not be issued a
+    // certificate at all.
+    for (const locale of ['en', 'bn']) {
+      expect(() => pdf.splitRuns(bodyFor(locale), name)).not.toThrow();
+    }
+    await expect(
+      render({ locale: 'en', figures: { organizationLegalName: name } }),
+    ).resolves.toBeInstanceOf(Buffer);
   });
 
   test('the refusal names the character and the text', () => {
@@ -400,7 +440,7 @@ describe('text neither face can draw', () => {
         locale: 'en',
         figures: { organizationLegalName: '中国可乐有限公司' },
       }),
-    ).rejects.toThrow(/neither the bundled Bengali face nor Helvetica/);
+    ).rejects.toThrow(/neither bundled face has a glyph/);
   });
 
   test('every field a producer controls is covered', async () => {
@@ -416,12 +456,12 @@ describe('text neither face can draw', () => {
     ]) {
       await expect(
         render({ locale: 'en', figures: { [field]: '中文' } }),
-      ).rejects.toThrow(/neither the bundled/);
+      ).rejects.toThrow(/neither bundled face/);
     }
 
     await expect(
       render({ locale: 'en', status: 'revoked', revocationReason: '中文' }),
-    ).rejects.toThrow(/neither the bundled/);
+    ).rejects.toThrow(/neither bundled face/);
   });
 });
 
@@ -439,25 +479,54 @@ describe('a character only one face can draw goes to that face', () => {
   /** Code points the Bengali face has, WinAnsi lacks, and that are visible. */
   function bengaliOnlyCodePoints() {
     const font = fontkit.openSync(pdf.BENGALI_FONT);
+    const latin = fontkit.openSync(pdf.LATIN_FONT);
     const out = [];
     for (let cp = 0x20; cp < 0x2100; cp += 1) {
       const inBengaliBlock =
         (cp >= 0x0980 && cp <= 0x09ff) || cp === 0x0964 || cp === 0x0965;
       if (inBengaliBlock || pdf.isInvisible(cp)) continue;
       if (font.glyphForCodePoint(cp).id === 0) continue;
-      if (pdf.helveticaCovers(cp)) continue;
+      // The LATIN face, which is what `splitRuns` asks — not Helvetica, which
+      // is only the fallback when no face is bundled.
+      if (pdf.latinCovers(cp, latin)) continue;
       out.push(cp);
     }
     return out;
   }
 
-  test('there are such code points, so this test is not vacuous', () => {
-    expect(bengaliOnlyCodePoints().length).toBeGreaterThan(10);
+  test('the bundled Latin face closed the part of this gap that mattered', () => {
+    // With Helvetica the set had 17 members, and three of them were the ones a
+    // real producer would hit: U+2010 (the hyphen a word processor
+    // substitutes), U+20B9 (the rupee sign) and U+02BC (common in
+    // transliterated names). Noto Sans covers all three.
+    //
+    // Fourteen remain, and they are all Vedic accent marks — Noto Sans Bengali
+    // carries them because Bengali script is sometimes used to write Sanskrit.
+    // Nobody's legal name contains one, so closing the rest is not worth a
+    // Devanagari face; the routing rule handles them correctly either way.
+    //
+    // Asserted rather than deleted, because this is what keeps the rule below
+    // honest: the set is non-empty, so the rule is still load-bearing.
+    const remaining = bengaliOnlyCodePoints();
+
+    for (const gone of [0x2010, 0x20b9, 0x02bc]) {
+      expect(remaining).not.toContain(gone);
+    }
+
+    // Every survivor is a Vedic or Devanagari combining mark.
+    for (const cp of remaining) {
+      const isVedic = cp >= 0x1cd0 && cp <= 0x1cf7;
+      const isDevanagariMark = cp === 0x0951 || cp === 0x0952;
+      expect(isVedic || isDevanagariMark).toBe(true);
+    }
   });
 
   test.each(['en', 'bn'])(
-    'every one goes to the Bengali face mid-Latin-run (%s edition)',
+    'every one goes to the face that can draw it (%s edition)',
     (locale) => {
+      // The real set, not a synthetic case. Each of these is a character only
+      // the Bengali face has, appearing mid-Latin-run — which is precisely the
+      // arrangement that routed to Helvetica and printed as mojibake.
       const body = bodyFor(locale);
       const misrouted = [];
 
@@ -471,22 +540,22 @@ describe('a character only one face can draw goes to that face', () => {
       }
 
       expect(misrouted).toEqual([]);
+
+      // And the reverse: a Latin letter goes to the Latin face even in the
+      // Bangla edition.
+      const runs = pdf.splitRuns(body, 'Coca Cola Ltd.');
+      expect(runs[0].script).toBe('latin');
     },
   );
 
-  test('U+2010, the hyphen a word processor substitutes', () => {
+  test('U+2010 now renders on the Latin face', () => {
+    // It used to route to the Bengali face, because Helvetica lacked it and
+    // Noto Sans Bengali happened to have it. Noto Sans has it properly, so the
+    // name stays in one face and one run.
     const runs = pdf.splitRuns(bodyFor('en'), 'Coca‐Cola Ltd.');
-    expect(runs.map((r) => r.script)).toEqual(['latin', 'bengali', 'latin']);
-    expect(runs.map((r) => r.text).join('')).toBe('Coca‐Cola Ltd.');
-  });
-
-  test('renders rather than refusing', async () => {
-    await expect(
-      render({
-        locale: 'en',
-        figures: { organizationLegalName: 'Coca‐Cola Bangladesh Ltd.' },
-      }),
-    ).resolves.toBeInstanceOf(Buffer);
+    expect(runs).toHaveLength(1);
+    expect(runs[0].script).toBe('latin');
+    expect(runs[0].text).toBe('Coca‐Cola Ltd.');
   });
 });
 
@@ -556,15 +625,31 @@ describe('normalisation', () => {
   });
 });
 
-describe('Helvetica coverage', () => {
-  test('is decided against WinAnsi, not by asking pdfkit', () => {
-    // pdfkit encodes anything without complaint, which is what produces
-    // mojibake — so coverage is a property of the WinAnsi repertoire.
-    for (const cp of [0x41, 0x7e, 0x20, 0xe9, 0xff, 0x20ac, 0x2013, 0x2122]) {
-      expect(pdf.helveticaCovers(cp)).toBe(true);
+describe('Latin coverage', () => {
+  test('is answered by the bundled face, not by a hardcoded table', () => {
+    // The honest question, and the one that cannot drift: the answer is a
+    // property of the file on disk rather than of a list somebody has to
+    // remember to update.
+    const noto = fontkit.openSync(pdf.LATIN_FONT);
+
+    for (const cp of [0x41, 0xe9, 0x0416, 0x03bb, 0x2010, 0x20b9, 0x02bc, 0x2082]) {
+      expect(pdf.latinCovers(cp, noto)).toBe(true);
     }
-    for (const cp of [0x4e2d, 0x0627, 0x0915, 0x1f600, 0x2192, 0x0995, 0x2082]) {
-      expect(pdf.helveticaCovers(cp)).toBe(false);
+    for (const cp of [0x4e2d, 0x0627, 0x0915, 0x1f600, 0x0995, 0x0e1a]) {
+      expect(pdf.latinCovers(cp, noto)).toBe(false);
+    }
+  });
+
+  test('falls back to the WinAnsi repertoire without a bundled face', () => {
+    // Helvetica is an AFM standard-14 font with no glyph table to ask, and
+    // pdfkit will encode anything against it — reinterpreting the bytes rather
+    // than reporting a miss. So the fallback path decides coverage against
+    // WinAnsi, and refuses what is outside it.
+    for (const cp of [0x41, 0x7e, 0x20, 0xe9, 0xff, 0x20ac, 0x2013, 0x2122]) {
+      expect(pdf.latinCovers(cp, null)).toBe(true);
+    }
+    for (const cp of [0x4e2d, 0x0416, 0x2010, 0x20b9, 0x2192, 0x0995]) {
+      expect(pdf.latinCovers(cp, null)).toBe(false);
     }
   });
 

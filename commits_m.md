@@ -17,6 +17,85 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-09-16 03:25 (+06) — Two omissions closed, and a wider font
+
+Clearing my own gaps before Phase E.
+
+**EPR-43's threshold was never in config.** I had reported the variance and
+left the highlighting to a console that does not exist yet, which is not what
+the requirement asks for: "a declaration that moves 60% against the previous
+period **without a note** is either a business change or a manipulation and
+either way an Admin should see it." 60% is the spec's own number, not an
+engineering default — I had simply not added it.
+
+`listForReview` now returns `flagged` and `flagReasons` alongside the raw
+variance. Three details that follow from reading EPR-43 rather than skimming it:
+
+  The threshold is in policy, not in code. The right figure is a judgement
+  about Bangladeshi seasonality that will be revised once there is a year of
+  filings — Ramadan and the monsoon move beverage volumes a long way, and a
+  threshold that flags every producer every year is one an Admin learns to
+  ignore.
+
+  "Without a note" is part of the test. A producer that explained a real
+  business change has already answered the question the flag exists to ask.
+
+  A note suppresses the FLAG, not the FIGURE. The variance and its reasons are
+  still reported, so a reviewer can see the move and disagree.
+
+**A wider Latin face, which turns refusals into certificates.** Bundled Noto
+Sans (569 KB) in place of pdfkit's built-in Helvetica.
+
+Helvetica is an AFM font encoded through WinAnsi — about 220 characters — and a
+character outside that set is not substituted or flagged, it is reinterpreted.
+That was the root of the mojibake found three times in this module. Noto Sans
+covers 3,748 glyphs, and pdfkit subsets an embedded face, so a Latin-only
+certificate carries only the glyphs it uses.
+
+What now renders that previously REFUSED OUTRIGHT — the producer could not be
+issued a certificate at all:
+
+  Cyrillic and Greek legal names.
+  Latin Extended: `Łódź`, `Šumava`, `Çelik`.
+  U+2010, the hyphen a word processor substitutes for `-`. `Coca‐Cola
+  Bangladesh Ltd.` pasted out of Word was affected, which is not an exotic case.
+  U+20B9, the rupee sign. U+02BC, common in transliterated names.
+
+Coverage is now answered by asking the font rather than by a hardcoded WinAnsi
+table — a property of the file on disk rather than of a list somebody has to
+remember to update. Helvetica remains the fallback if the file is missing, with
+the table for that path, because refusing would mean no certificates for anybody
+where the Bengali case refuses only one edition.
+
+`CO₂e` is written with the real subscript again. It had been an ASCII 2 because
+neither face had U+2082; Noto Sans does, and `splitRuns` routes the character to
+it even mid-Bengali-run. The test that banned `₂` outright was pinning a
+limitation that no longer exists, and now checks every fixed string through the
+real routing rule instead.
+
+Also bundled `NotoSansBengali-Bold.ttf`, which the renderer had always looked
+for and never found — Bengali headings were set in the regular face.
+
+**Still refused, and now a smaller list:** CJK, Arabic, Devanagari and Thai.
+Each needs its own multi-megabyte face and none is worth it until a real
+producer needs one.
+
+**One assertion corrected to the measured truth.** I wrote a test asserting the
+Bengali-only coverage gap was now empty. It is not: 14 Vedic accent marks
+remain, which Noto Sans Bengali carries because Bengali script is sometimes used
+to write Sanskrit. The three that mattered — U+2010, U+20B9, U+02BC — are gone.
+The test now asserts that, and that every survivor is a Vedic mark, which keeps
+the routing rule honestly load-bearing rather than decorative.
+
+Files: server/src/{eprPolicy,declarations,passportPdf}.js,
+server/assets/fonts/{NotoSans-Regular,NotoSans-Bold,NotoSansBengali-Bold}.ttf,
+server/test/{declarations,passportPdf}.test.js
+Checks: 894 server tests (up from 882), 1035 Flutter, analyze clean. Both
+editions rendered and inspected: a U+2010 legal name, a Cyrillic trade name, a
+U+02BC attester and a subscript CO₂e all print correctly.
+
+---
+
 ## 2026-09-10 07:20 (+06) — Third audit pass: nine more findings, two of them in the fix
 
 The third pass hit the session limit hard — 13 of 16 agents errored and NO

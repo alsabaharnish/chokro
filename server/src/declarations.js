@@ -29,6 +29,7 @@
 const { db, admin, serverTimestamp } = require('./firebase');
 const audit = require('./producerAudit');
 const eprPeriod = require('./eprPeriod');
+const eprPolicy = require('./eprPolicy');
 
 const DECLARATIONS = 'putOnMarketDeclarations';
 const VERSIONS = 'putOnMarketVersions';
@@ -571,6 +572,11 @@ async function declaredMassByCategory({ orgId, periodId }) {
  * without having to compute it.
  */
 async function listForReview({ limit = 50 }) {
+  // The threshold the queue flags against (EPR-43). Read rather than hardcoded
+  // so it can be revised once there is a year of filings to look at.
+  const policy = await eprPolicy.readPolicy();
+  const threshold = policy.declarationVarianceThreshold;
+
   const snap = await db()
     .collection(DECLARATIONS)
     .where('status', '==', 'submitted')
@@ -625,6 +631,31 @@ async function listForReview({ limit = 50 }) {
           ? (currentMassMg - priorVersionMassMg) / priorVersionMassMg
           : null;
 
+      // Flagged or not, and WHY — rather than leaving each console to
+      // re-derive it from the raw variance and drift apart. EPR-43 asks for
+      // variance "highlighted"; a number with no threshold beside it is not
+      // highlighted, it is just a number.
+      const reasons = [];
+      if (variance !== null && Math.abs(variance) >= threshold) {
+        reasons.push(
+          `Moved ${(variance * 100).toFixed(0)}% against ${previousPeriod}.`,
+        );
+      }
+      if (
+        correctionVariance !== null
+        && Math.abs(correctionVariance) >= threshold
+      ) {
+        reasons.push(
+          `Withdrawn and refiled ${(correctionVariance * 100).toFixed(0)}% `
+            + `from version ${declaration.version - 1}.`,
+        );
+      }
+      // "without a note" is part of EPR-43's own test: a producer that
+      // explained a real business change has already answered the question the
+      // flag exists to ask.
+      const hasNote =
+        typeof declaration.note === 'string' && declaration.note.trim().length >= 10;
+
       return {
         ...declaration,
         previousPeriod,
@@ -632,6 +663,10 @@ async function listForReview({ limit = 50 }) {
         variance,
         priorVersionMassMg,
         correctionVariance,
+        varianceThreshold: threshold,
+        flagged: reasons.length > 0 && !hasNote,
+        flagReasons: reasons,
+        hasNote,
       };
     }),
   );

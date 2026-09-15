@@ -95,6 +95,19 @@ const DEFAULTS = Object.freeze({
   /// the percentage on the certificate.
   reversalMaterialityFraction: 0.01,
 
+  /// EPR-43's period-over-period variance threshold.
+  ///
+  /// The spec's own number, not an engineering default: "A declaration that
+  /// moves 60% against the previous period without a note is either a business
+  /// change or a manipulation and either way an Admin should see it."
+  ///
+  /// In config rather than as a constant because the right figure is a
+  /// judgement about Bangladeshi seasonality that will be revised once there is
+  /// a year of filings to look at — Ramadan and the monsoon move beverage
+  /// volumes a long way, and a threshold that flags every producer every year
+  /// is one an Admin learns to ignore.
+  declarationVarianceThreshold: 0.60,
+
   // EPR-19: category-average estimates for unmatched mass. Open decision 4,
   // whose recommendation is "not in v1" — a defensible smaller number is the
   // product. Present as a flag so turning it on is a deliberate act with a
@@ -175,6 +188,12 @@ function normalize(raw) {
     reversalMaterialityFraction: readNumber(raw, 'reversalMaterialityFraction', {
       min: 0.0001,
       max: 0.5,
+    }),
+    // A threshold of 0 flags every filing and one of 5 flags none; both are the
+    // same as not having the control.
+    declarationVarianceThreshold: readNumber(raw, 'declarationVarianceThreshold', {
+      min: 0.05,
+      max: 5,
     }),
     estimateUnmatchedMass: readBoolean(raw, 'estimateUnmatchedMass'),
   };

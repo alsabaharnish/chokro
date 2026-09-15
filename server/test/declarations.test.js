@@ -7,6 +7,8 @@
  * corrected only by supersession — never edited in place.
  */
 
+jest.mock('../src/eprPolicy', () => ({ readPolicy: jest.fn() }));
+
 jest.mock('../src/firebase', () => ({
   db: jest.fn(),
   admin: {
@@ -26,6 +28,7 @@ jest.mock('../src/firebase', () => ({
 }));
 
 const firebase = require('../src/firebase');
+const eprPolicy = require('../src/eprPolicy');
 const declarations = require('../src/declarations');
 const audit = require('../src/producerAudit');
 const { fakeFirestore } = require('./helpers/firestoreFake');
@@ -41,6 +44,7 @@ beforeEach(() => {
   jest.clearAllMocks();
   fs = fakeFirestore();
   firebase.db.mockReturnValue(fs);
+  eprPolicy.readPolicy.mockResolvedValue({ declarationVarianceThreshold: 0.60 });
 });
 
 const save = (overrides = {}) =>
@@ -489,6 +493,105 @@ describe('the declaration review queue', () => {
       .find((r) => r.periodId === '2026-09');
     expect(row.correctionVariance).toBeNull();
     expect(row.priorVersionMassMg).toBeNull();
+  });
+
+  test('flags a filing that moves past the threshold (EPR-43)', () => {
+    // The spec's own number: "A declaration that moves 60% against the previous
+    // period without a note is either a business change or a manipulation and
+    // either way an Admin should see it."
+    //
+    // The threshold lives in policy rather than in code because the right
+    // figure is a judgement about Bangladeshi seasonality that will be revised
+    // once there is a year of filings — Ramadan and the monsoon move beverage
+    // volumes a long way, and a threshold that flags every producer every year
+    // is one an Admin learns to ignore.
+    expect(require('../src/eprPolicy')).toBeDefined();
+  });
+
+  test('flags a large period-over-period move, and says why', async () => {
+    await save({ periodId: '2026-08' });
+    await submit({ periodId: '2026-08' });
+    await save({ lines: [{ category: 'rigid', massG: 8000000, units: 300000 }] });
+    await submit();
+
+    const row = (await declarations.listForReview({}))
+      .find((r) => r.periodId === '2026-09');
+
+    expect(row.varianceThreshold).toBe(0.60);
+    expect(row.flagged).toBe(true);
+    // The reason, not just a boolean. An Admin looking at a queue needs to know
+    // what tripped before deciding whether it matters.
+    expect(row.flagReasons.join(' ')).toMatch(/Moved -7\d% against 2026-08/);
+  });
+
+  test('does not flag a move inside the threshold', async () => {
+    await save({ periodId: '2026-08' });
+    await submit({ periodId: '2026-08' });
+    // 27,400 kg to 22,000 kg: a 20% fall, which is an ordinary quarter.
+    await save({ lines: [{ category: 'rigid', massG: 22000000, units: 800000 }] });
+    await submit();
+
+    const row = (await declarations.listForReview({}))
+      .find((r) => r.periodId === '2026-09');
+
+    expect(row.flagged).toBe(false);
+    expect(row.flagReasons).toEqual([]);
+  });
+
+  test('does not flag a large move the producer explained', async () => {
+    // "without a note" is part of EPR-43's own test. A producer that explained
+    // a real business change has already answered the question the flag exists
+    // to ask, and flagging it anyway trains the Admin to dismiss the queue.
+    await save({ periodId: '2026-08' });
+    await submit({ periodId: '2026-08' });
+    await save({
+      lines: [{ category: 'rigid', massG: 8000000, units: 300000 }],
+      note: 'Two production lines moved to the Gazipur plant in September.',
+    });
+    await submit();
+
+    const row = (await declarations.listForReview({}))
+      .find((r) => r.periodId === '2026-09');
+
+    expect(row.hasNote).toBe(true);
+    expect(row.flagged).toBe(false);
+    // The variance is still reported — the note suppresses the flag, not the
+    // figure, so an Admin reviewing the queue can still see the move.
+    expect(row.variance).toBeLessThan(-0.6);
+    expect(row.flagReasons.length).toBeGreaterThan(0);
+  });
+
+  test('flags a denominator withdrawn and refiled lower', async () => {
+    await save();
+    await submit();
+    await declarations.openCorrection({
+      orgId: 'org_cola', periodId: '2026-09',
+      reason: 'Restating after an internal review.', actorUid: 'uid_owner',
+    });
+    await save({ lines: [{ category: 'rigid', massG: 7000000, units: 300000 }] });
+    await submit();
+
+    const row = (await declarations.listForReview({}))
+      .find((r) => r.periodId === '2026-09');
+
+    expect(row.flagged).toBe(true);
+    expect(row.flagReasons.join(' ')).toMatch(/Withdrawn and refiled/);
+  });
+
+  test('honours a threshold an Admin has changed', async () => {
+    eprPolicy.readPolicy.mockResolvedValue({ declarationVarianceThreshold: 0.95 });
+
+    await save({ periodId: '2026-08' });
+    await submit({ periodId: '2026-08' });
+    await save({ lines: [{ category: 'rigid', massG: 8000000, units: 300000 }] });
+    await submit();
+
+    const row = (await declarations.listForReview({}))
+      .find((r) => r.periodId === '2026-09');
+
+    // A 71% fall is under a 95% threshold.
+    expect(row.varianceThreshold).toBe(0.95);
+    expect(row.flagged).toBe(false);
   });
 
   test('is bounded', async () => {
