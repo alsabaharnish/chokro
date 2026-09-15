@@ -56,6 +56,7 @@ const passportPdf = require('./passportPdf');
 const reportJobs = require('./reportJobs');
 const anomalies = require('./anomalies');
 const reconciliation = require('./reconciliation');
+const viewAsOrganization = require('./viewAsOrganization');
 const attribute = require('./attribute');
 const { uploadImage, MAX_BYTES } = require('./cloudinary');
 const { uploadAndSaveProfilePhoto } = require('./profilePhoto');
@@ -2796,24 +2797,30 @@ app.post(
   '/epr/admin/organizations/:orgId/view',
   requireAuth,
   requireAdmin,
+  // A write limit rather than a read one, and deliberately: each call appends
+  // to the audit chain, so it is a side-effecting action however much it looks
+  // like a fetch.
   writeLimit,
   async (req, res) => {
     try {
-      await producerAudit.append({
+      // EPR-46. Reads only, through `requireAdmin` rather than through
+      // `requireOrgRole` — which refuses administrators on purpose, so that no
+      // Admin action can ever be taken under a producer's identity. The audit
+      // entry is written inside `viewAs` BEFORE the data is assembled.
+      const view = await viewAsOrganization.viewAs({
         orgId: req.params.orgId,
-        action: producerAudit.ACTIONS.ADMIN_VIEWED_AS_ORG,
-        actorUid: req.user.uid,
-        actorName: req.user.name,
-        actorRole: 'admin',
-        targetType: 'organization',
-        targetId: req.params.orgId,
-        summary: 'Admin opened the read-only organisation view.',
+        periodId: req.query.periodId || null,
+        adminUid: req.user.uid,
+        adminName: req.user.name || '',
         ip: req.ip,
         userAgent: req.get('User-Agent'),
       });
-      return res.json({ ok: true });
+      return res.json({ ok: true, ...view });
     } catch (err) {
-      console.error('View-as logging failed:', err.message);
+      if (err.code === 'bad_request') {
+        return eprFailure(res, err, 400);
+      }
+      console.error('View-as failed:', err.message);
       // A view that could not be logged is a view that did not happen, as far
       // as this system is concerned. Refusing is the honest outcome — the
       // alternative is an unrecorded read of a customer's compliance data.
@@ -2821,6 +2828,33 @@ app.post(
         error: 'view_not_recorded',
         message: 'The view could not be recorded, so it was not opened.',
       });
+    }
+  },
+);
+
+/**
+ * One organisation's chronological activity, exportable (EPR-44).
+ *
+ * "This *is* the 'track each company and their activities' requirement."
+ *
+ * The verified variant walks the whole hash chain, which a list refreshing on
+ * screen should not pay for and an export should — so it is a separate call
+ * rather than a flag nobody sets.
+ */
+app.get(
+  '/epr/admin/organizations/:orgId/timeline',
+  requireAuth,
+  requireAdmin,
+  readLimit,
+  async (req, res) => {
+    try {
+      const verify = req.query.verify === 'true';
+      const timeline = verify
+        ? await viewAsOrganization.verifiedTimeline({ orgId: req.params.orgId })
+        : await viewAsOrganization.activityTimeline({ orgId: req.params.orgId });
+      return res.json({ ok: true, ...timeline });
+    } catch (err) {
+      return eprFailure(res, err, 400);
     }
   },
 );

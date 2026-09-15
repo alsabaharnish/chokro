@@ -58,6 +58,7 @@ const audit = require('./producerAudit');
 const eprPeriod = require('./eprPeriod');
 const declarations = require('./declarations');
 const passports = require('./passports');
+const zip = require('./zip');
 const eprPeriods = require('./eprPeriods');
 const eprPolicy = require('./eprPolicy');
 const organizations = require('./organizations');
@@ -148,6 +149,18 @@ const REPORT_TYPES = Object.freeze({
     needsPeriod: true,
     minRole: 'orgOwner',
   },
+  auditPack: {
+    label: 'Audit pack',
+    // A ZIP of the other reports plus the evidence behind them. See
+    // `auditPack` for what goes in and why.
+    formats: ['zip'],
+    needsPeriod: true,
+    // The most complete export Chokro produces: row-level attributions, SKU
+    // revision history, mass-audit records and the passport register in one
+    // file. SEC-11's "org member exfiltrates data" row is about exactly this.
+    minRole: 'orgOwner',
+  },
+
   surplusMass: {
     // §15 decision 7: report surplus mass, call it surplus, do NOT call it
     // credits until the framework is understood. The report type is named for
@@ -326,14 +339,20 @@ async function runJob(jobId) {
     await ref.update({ status: 'running', startedAt: serverTimestamp(), error: null });
 
     const body = await buildReport(job);
-    const artefact = assembleArtefact(job, body);
+
+    // A report that produced BYTES stores them as they are. Prepending the
+    // text header to a ZIP would corrupt the archive, and the header's content
+    // lives inside it — in `manifest.json` — where a recipient who extracts one
+    // file can still find it.
+    const artefact = body.binary ?? Buffer.from(assembleArtefact(job, body), 'utf8');
 
     const path =
       `epr-reports/${job.orgId}/${job.reportType}/`
       + `${job.periodId || job.year || 'all'}/${jobId}.${job.format}`;
 
-    await bucket().file(path).save(Buffer.from(artefact, 'utf8'), {
-      contentType: job.format === 'csv' ? 'text/csv; charset=utf-8' : 'application/json',
+    await bucket().file(path).save(artefact, {
+      contentType: body.contentType
+        ?? (job.format === 'csv' ? 'text/csv; charset=utf-8' : 'application/json'),
       // No public read, ever (SEC-6): "No public bucket, no guessable path, no
       // permanent URL."
       resumable: false,
@@ -356,7 +375,7 @@ async function runJob(jobId) {
       // period must compare equal for an auditor (EPR-34), and the header
       // carries the generation timestamp and the requester by design.
       contentHash: body.contentHash,
-      byteSize: Buffer.byteLength(artefact, 'utf8'),
+      byteSize: artefact.length,
       rowsRead: body.rowsRead ?? 0,
     });
   } catch (err) {
@@ -489,6 +508,8 @@ async function buildReport(job) {
       return reconciliationVariance(job);
     case 'surplusMass':
       return surplusMass(job);
+    case 'auditPack':
+      return auditPack(job);
     default:
       throw badRequest(`"${job.reportType}" has no builder.`);
   }
@@ -891,6 +912,222 @@ async function surplusMass(job) {
  * the one measured at generation time rather than whatever the queue says when
  * somebody re-reads the artefact.
  */
+/**
+ * The audit pack (EPR-33): one file a DoE inspector can be handed.
+ *
+ * EPR-33's contents: "The above plus mass-audit records, SKU revision history,
+ * accuracy-audit results, recompute reconciliation, passport register".
+ *
+ * ## Why a ZIP rather than one large JSON
+ *
+ * An inspector opens this on a laptop and wants to look at one thing. A single
+ * 40 MB JSON document is technically the same information and is not the same
+ * artefact — it cannot be opened in a spreadsheet, skimmed, or handed to a
+ * colleague in part. The entries are separate files because that is how the
+ * person receiving it will use them.
+ *
+ * ## Every entry carries its own hash
+ *
+ * `manifest.json` lists each file with its SHA-256. A pack is the artefact most
+ * likely to be forwarded, split up and re-sent, so a recipient holding three of
+ * its files needs a way to confirm they are the three Chokro produced. The
+ * manifest is also what makes the pack's own content hash meaningful: it covers
+ * the manifest, and the manifest covers everything else.
+ */
+async function auditPack(job) {
+  const scope = { orgId: job.orgId, periodId: job.periodId, format: 'json' };
+
+  // The constituent reports, each built by the same function that builds it
+  // standalone — so a figure in the pack and the same figure in a separate
+  // report cannot disagree.
+  const [collection, skuPerf, geography, custody, variance, surplus] =
+    await Promise.all([
+      periodCollectionStatement({ ...job, ...scope, label: 'Period collection statement' }),
+      skuPerformance({ ...job, ...scope, label: 'SKU performance report' }),
+      geographicRecovery({ ...job, ...scope, label: 'Geographic recovery report' }),
+      chainOfCustody({ ...job, ...scope, label: 'Chain-of-custody export' }),
+      reconciliationVariance({ ...job, ...scope, label: 'Reconciliation report' }),
+      surplusMass({ ...job, ...scope, label: 'Surplus mass statement' }),
+    ]);
+
+  // The evidence EPR-33 names beyond the reports themselves.
+  const [revisions, massAudits, accuracy, register] = await Promise.all([
+    readSkuRevisions(job.orgId),
+    readMassAudits(job.orgId),
+    readAccuracy(job.periodId),
+    readPassportRegister(job.orgId, job.periodId),
+  ]);
+
+  const files = [
+    ['period-collection-statement.json', collection.text],
+    ['sku-performance.json', skuPerf.text],
+    ['geographic-recovery.json', geography.text],
+    ['chain-of-custody.json', custody.text],
+    ['reconciliation.json', variance.text],
+    ['surplus-mass.json', surplus.text],
+    ['sku-revision-history.json', JSON.stringify(revisions, null, 2)],
+    ['mass-audit-records.json', JSON.stringify(massAudits, null, 2)],
+    ['accuracy-audit.json', JSON.stringify(accuracy, null, 2)],
+    ['passport-register.json', JSON.stringify(register, null, 2)],
+    ['methodology.json', JSON.stringify(methodologyStatement(accuracy), null, 2)],
+    ['boundary-statements.txt', `${BOUNDARY_STATEMENTS.join('\n\n')}\n`],
+  ];
+
+  const manifest = {
+    pack: 'Chokro EPR audit pack',
+    organisation: job.orgId,
+    period: job.periodId,
+    timezone: 'Asia/Dhaka (UTC+06)',
+    generator: `${GENERATOR} ${GENERATOR_VERSION}`,
+    // Each file with its own digest. A recipient holding three of these needs
+    // a way to confirm they are the three Chokro produced.
+    files: files.map(([name, text]) => ({
+      name,
+      bytes: Buffer.byteLength(text, 'utf8'),
+      sha256: crypto.createHash('sha256').update(text, 'utf8').digest('hex'),
+    })),
+    boundaries: BOUNDARY_STATEMENTS,
+  };
+
+  const manifestText = JSON.stringify(manifest, null, 2);
+
+  const zipBuffer = zip.createZip(
+    [
+      { name: 'manifest.json', content: manifestText },
+      ...files.map(([name, text]) => ({ name, content: text })),
+    ],
+    // A fixed stamp, not a clock: EPR-34 says two artefacts over the same
+    // evidence differ only in the generation timestamp and requester, and those
+    // live in the manifest rather than in every entry's mtime.
+    { modified: new Date('1980-01-01T00:00:00Z') },
+  );
+
+  return {
+    // The manifest IS the body for hashing purposes: it covers every entry's
+    // digest, so hashing it hashes the pack. Hashing the ZIP bytes directly
+    // would be equivalent today and would break the moment anything about the
+    // container changed — a different writer, a different entry order.
+    text: manifestText,
+    contentHash: crypto.createHash('sha256').update(manifestText, 'utf8').digest('hex'),
+    rowsRead: custody.rowsRead ?? 0,
+    // The bytes the job actually stores.
+    binary: zipBuffer,
+    contentType: 'application/zip',
+  };
+}
+
+/** Every revision of every SKU (EPR-12), so a past period stays explicable. */
+async function readSkuRevisions(orgId) {
+  const skus = await db()
+    .collection(SKUS)
+    .where('orgId', '==', orgId)
+    .limit(200)
+    .get();
+
+  const out = [];
+  for (const doc of skus.docs) {
+    const snap = await db()
+      .collection('skuRevisions')
+      .where('skuId', '==', doc.id)
+      .orderBy('revision', 'asc')
+      .limit(50)
+      .get();
+
+    for (const revision of snap.docs) {
+      const row = revision.data();
+      out.push({
+        skuId: doc.id,
+        revision: row.revision,
+        unitMassMg: row.establishedUnitMassMg ?? row.measuredMeanMg ?? null,
+        gazetteCategory: row.gazetteCategory ?? null,
+        polymer: row.polymer ?? null,
+        effectiveFrom: dhakaDate(row.effectiveFrom ?? row.createdAt),
+        reason: row.reason ?? null,
+      });
+    }
+  }
+
+  return out.sort((a, b) =>
+    a.skuId === b.skuId ? a.revision - b.revision : a.skuId.localeCompare(b.skuId));
+}
+
+/** The weighings behind every verified unit mass (EPR-9, EPR-10). */
+async function readMassAudits(orgId) {
+  const skus = await db()
+    .collection(SKUS)
+    .where('orgId', '==', orgId)
+    .limit(200)
+    .get();
+
+  const out = [];
+  for (const doc of skus.docs) {
+    const snap = await db()
+      .collection('skuMassAudits')
+      .where('skuId', '==', doc.id)
+      .orderBy('createdAt', 'asc')
+      .limit(20)
+      .get();
+
+    for (const audit of snap.docs) {
+      const row = audit.data();
+      out.push({
+        skuId: doc.id,
+        sampleSize: row.sampleSize ?? null,
+        measuredMeanMg: row.measuredMeanMg ?? null,
+        measuredStdDevMg: row.measuredStdDevMg ?? null,
+        declaredUnitMassMg: row.declaredUnitMassMg ?? null,
+        withinTolerance: row.withinTolerance ?? null,
+        weighingLocation: row.weighingLocation ?? '',
+        // The photograph of the scale, which is the evidence. A pack without
+        // it asks the inspector to take the number on trust.
+        scalePhotoUrl: row.scalePhotoUrl ?? null,
+        at: dhakaDate(row.createdAt),
+      });
+    }
+  }
+
+  return out;
+}
+
+/** The measured recognition accuracy (EPR-17), or the reason there is none. */
+async function readAccuracy(periodId) {
+  try {
+    // eslint-disable-next-line global-require
+    const reconciliation = require('./reconciliation');
+    return await reconciliation.accuracySnapshot({ endPeriodId: periodId });
+  } catch (err) {
+    console.error(`[reportJobs] accuracy snapshot failed: ${err.message}`);
+    return null;
+  }
+}
+
+/** Every certificate for the period, standing or withdrawn (EPR-47). */
+async function readPassportRegister(orgId, periodId) {
+  const snap = await db()
+    .collection(passports.PASSPORTS)
+    .where('orgId', '==', orgId)
+    .where('periodId', '==', periodId)
+    .orderBy('issuedAt', 'asc')
+    .limit(50)
+    .get();
+
+  return snap.docs.map((d) => {
+    const row = d.data();
+    return {
+      serial: row.serial,
+      status: row.status,
+      contentHash: row.contentHash,
+      issuedAt: dhakaDate(row.issuedAt),
+      issuedByName: row.issuedByName ?? null,
+      // A withdrawn certificate is part of the record, and the REASON is the
+      // part an inspector asks about.
+      supersededBy: row.supersededBy ?? null,
+      supersededReason: row.supersededReason ?? null,
+      revocationReason: row.revocationReason ?? null,
+    };
+  });
+}
+
 function methodologyStatement(accuracy = null) {
   return {
     attribution:

@@ -622,7 +622,8 @@ describe('the job lifecycle', () => {
   });
 
   test('refuses a report type it does not produce', async () => {
-    await expect(enqueue({ reportType: 'auditPack' })).rejects.toThrow(/not a report/i);
+    await expect(enqueue({ reportType: 'plasticCredits' }))
+      .rejects.toThrow(/not a report/i);
   });
 
   test('refuses a format the report is not produced in', async () => {
@@ -757,13 +758,189 @@ describe('the report catalogue', () => {
   });
 
   test('names no report Chokro cannot produce', () => {
-    // The audit pack is Phase E. Listing it here would let a client enqueue a
-    // job with no builder, which fails after the producer has been told it was
-    // accepted.
+    // Listing a type with no builder would let a client enqueue a job that
+    // fails after the producer has been told it was accepted.
     for (const key of Object.keys(reportJobs.REPORT_TYPES)) {
       expect(() =>
-        reportJobs.buildReport({ reportType: key, orgId: ORG, periodId: PERIOD, format: 'json' }),
+        reportJobs.buildReport({
+          reportType: key, orgId: ORG, periodId: PERIOD, year: 1,
+          format: reportJobs.REPORT_TYPES[key].formats[0],
+          label: reportJobs.REPORT_TYPES[key].label,
+        }),
       ).not.toThrow();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The audit pack (EPR-33)
+// ---------------------------------------------------------------------------
+
+describe('the audit pack', () => {
+  const { execFileSync } = require('child_process');
+  const nodeFs = require('fs');
+  const os = require('os');
+  const nodePath = require('path');
+
+  async function buildPack() {
+    const { jobId } = await enqueue({ reportType: 'auditPack', format: 'zip' });
+    await reportJobs.runJob(jobId);
+    return {
+      job: fs._store.get(`reportJobs/${jobId}`),
+      bytes: [...firebase.__saved.values()].pop(),
+    };
+  }
+
+  test('is a real ZIP the system unzip accepts', async () => {
+    // A compliance artefact a regulator cannot open is a bad failure, and the
+    // writer is hand-rolled — so this extracts with the real binary rather
+    // than asserting anything about bytes.
+    const { bytes } = await buildPack();
+
+    const dir = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'chokro-pack-'));
+    const file = nodePath.join(dir, 'pack.zip');
+    nodeFs.writeFileSync(file, bytes);
+
+    try {
+      expect(execFileSync('unzip', ['-t', file], { encoding: 'utf8' }))
+        .toMatch(/No errors detected/);
+    } finally {
+      nodeFs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('carries every document EPR-33 names', async () => {
+    const { bytes } = await buildPack();
+
+    const dir = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'chokro-pack-'));
+    const file = nodePath.join(dir, 'pack.zip');
+    nodeFs.writeFileSync(file, bytes);
+
+    try {
+      const listed = execFileSync('unzip', ['-Z1', file], { encoding: 'utf8' })
+        .trim().split('\n');
+
+      // "The above plus mass-audit records, SKU revision history,
+      // accuracy-audit results, recompute reconciliation, passport register".
+      for (const name of [
+        'manifest.json',
+        'period-collection-statement.json',
+        'chain-of-custody.json',
+        'reconciliation.json',
+        'sku-revision-history.json',
+        'mass-audit-records.json',
+        'accuracy-audit.json',
+        'passport-register.json',
+        'methodology.json',
+        'boundary-statements.txt',
+      ]) {
+        expect(listed).toContain(name);
+      }
+    } finally {
+      nodeFs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('hashes every entry in its manifest', async () => {
+    // A pack is the artefact most likely to be forwarded, split up and re-sent.
+    // A recipient holding three of its files needs a way to confirm they are
+    // the three Chokro produced.
+    const { bytes } = await buildPack();
+
+    const dir = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'chokro-pack-'));
+    const file = nodePath.join(dir, 'pack.zip');
+    nodeFs.writeFileSync(file, bytes);
+
+    try {
+      execFileSync('unzip', ['-q', file, '-d', nodePath.join(dir, 'out')]);
+      const manifest = JSON.parse(
+        nodeFs.readFileSync(nodePath.join(dir, 'out', 'manifest.json'), 'utf8'),
+      );
+
+      expect(manifest.files.length).toBeGreaterThanOrEqual(10);
+
+      for (const entry of manifest.files) {
+        const content = nodeFs.readFileSync(
+          nodePath.join(dir, 'out', entry.name), 'utf8',
+        );
+        const digest = require('crypto')
+          .createHash('sha256').update(content, 'utf8').digest('hex');
+        expect(digest).toBe(entry.sha256);
+        expect(Buffer.byteLength(content, 'utf8')).toBe(entry.bytes);
+      }
+    } finally {
+      nodeFs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('the job’s content hash covers the manifest, which covers everything', async () => {
+    const { job, bytes } = await buildPack();
+
+    const dir = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'chokro-pack-'));
+    const file = nodePath.join(dir, 'pack.zip');
+    nodeFs.writeFileSync(file, bytes);
+
+    try {
+      execFileSync('unzip', ['-q', file, '-d', nodePath.join(dir, 'out')]);
+      const manifestText = nodeFs.readFileSync(
+        nodePath.join(dir, 'out', 'manifest.json'), 'utf8',
+      );
+
+      // Hashing the ZIP bytes directly would be equivalent today and would
+      // break the moment anything about the container changed — a different
+      // entry order, a different writer.
+      expect(
+        require('crypto').createHash('sha256').update(manifestText, 'utf8').digest('hex'),
+      ).toBe(job.contentHash);
+    } finally {
+      nodeFs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test('is stored as a ZIP, not wrapped in a text header', async () => {
+    // Prepending the `# system:` header to an archive would corrupt it. The
+    // header's content lives inside, in the manifest, where a recipient who
+    // extracts one file can still find it.
+    const { job, bytes } = await buildPack();
+
+    expect(bytes.subarray(0, 4)).toEqual(Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+    expect(job.byteSize).toBe(bytes.length);
+  });
+
+  test('is owner-only', async () => {
+    // The most complete export Chokro produces: row-level attributions, SKU
+    // revision history, mass-audit records and the register in one file.
+    // SEC-11's "org member exfiltrates data" row is about exactly this.
+    expect(reportJobs.REPORT_TYPES.auditPack.minRole).toBe('orgOwner');
+
+    const { jobId } = await enqueue({ reportType: 'auditPack', format: 'zip' });
+    await reportJobs.runJob(jobId);
+
+    await expect(
+      reportJobs.signedUrlFor({
+        jobId, orgId: ORG, actorUid: 'uid_viewer', actorRole: 'orgViewer',
+      }),
+    ).rejects.toThrow(/only be downloaded by an owner/i);
+  });
+
+  test('carries the boundary statements as their own file', async () => {
+    // A pack gets split up. The statements have to survive being separated
+    // from the reports they qualify.
+    const { bytes } = await buildPack();
+
+    const dir = nodeFs.mkdtempSync(nodePath.join(os.tmpdir(), 'chokro-pack-'));
+    const file = nodePath.join(dir, 'pack.zip');
+    nodeFs.writeFileSync(file, bytes);
+
+    try {
+      execFileSync('unzip', ['-q', file, '-d', nodePath.join(dir, 'out')]);
+      const statements = nodeFs.readFileSync(
+        nodePath.join(dir, 'out', 'boundary-statements.txt'), 'utf8',
+      );
+      expect(statements).toMatch(/does not state a recycling rate/i);
+      expect(statements).toMatch(/not a statement of compliance/i);
+    } finally {
+      nodeFs.rmSync(dir, { recursive: true, force: true });
     }
   });
 });

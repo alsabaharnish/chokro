@@ -17,6 +17,87 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-09-16 08:20 (+06) — Phase E server-side complete: view-as, timeline, audit pack
+
+EPR-44, EPR-46 and EPR-33's audit pack. Everything in Phase E except retention,
+which needs counsel.
+
+**EPR-46's whole content is a prohibition.** "There is no impersonation — no
+Admin action is ever taken under a producer's identity, because an audit trail
+that cannot distinguish the two is not an audit trail."
+
+The tempting implementation is a flag on `requireOrgRole` letting an
+administrator through. A dozen lines, and it would destroy the property the
+audit chain exists for: every subsequent write would be indistinguishable from
+the producer's own, and Chokro could no longer answer "did the producer file
+this, or did we?" — the first question anyone asks about a disputed figure.
+`requireOrgRole` refuses administrators on purpose; `viewAsOrganization` is a
+separate path that reads and never writes.
+
+**It shows the producer's view, suppressions included.** Every figure comes
+from `eprPeriods.projectForProducer` — the same projection the producer's own
+route uses, k-anonymity floor and all. An Admin is usually looking because the
+producer phoned about a figure, and a second Admin-flavoured code path would
+drift exactly when it mattered, with the Admin insisting the screen says one
+thing while the producer reads another. An Admin needing the unsuppressed
+districts has the reconciliation console; this view answers a different
+question.
+
+**The audit entry is written before the data is assembled**, and a failure to
+write it refuses the request. Logging on success would mean a failed read of a
+customer's compliance position leaves no trace — which is exactly the read
+somebody would want to leave no trace.
+
+**One real bug, found by its own test.** `verifiedTimeline` checked
+`verification.ok`, and `verifyChain` returns `intact`. So the chain always read
+as broken. Fixed, and the fix carries `producerAudit`'s own point through: an
+unkeyed chain is tamper-evident against anyone WITHOUT write access and is not
+evidence against the insider SEC-12 names, so the export says which it is rather
+than printing "intact" and overstating the control.
+
+**A ZIP writer rather than a dependency.** The audit pack is one artefact
+containing several documents and EPR-33 asks for a ZIP. Stored (uncompressed)
+entries need no deflate, which removes the part of the format that is genuinely
+easy to get wrong; what remains is a CRC-32, three fixed-layout records and
+offset arithmetic.
+
+The argument only holds because it is verified: `zip.test.js` extracts every
+fixture with the real `unzip` binary rather than asserting byte patterns, and
+has a canary that fails if `unzip` is unavailable — a silently skipped
+verification reads as one that happened. It round-trips Bengali and binary
+content, and refuses beyond ZIP64's bounds rather than emitting a file that
+looks fine and is silently truncated.
+
+One bug found immediately: `0o100644 << 16` for the Unix permission bits
+overflows to a NEGATIVE number, because JavaScript's `<<` is a signed 32-bit
+shift. `writeUInt32LE` refused it outright, which is the good outcome — a
+writer that had silently accepted it would have produced files an extractor
+creates unreadable.
+
+**Every entry in the pack carries its own SHA-256, in the manifest.** A pack is
+the artefact most likely to be forwarded, split up and re-sent, so a recipient
+holding three of its files needs a way to confirm they are the three Chokro
+produced. The job's content hash covers the manifest, and the manifest covers
+everything else — hashing the ZIP bytes directly would be equivalent today and
+would break the moment the container changed.
+
+The boundary statements are their own file for the same reason: a pack gets
+split up, and the statements have to survive being separated from the reports
+they qualify.
+
+**Phase E's remaining item is retention (SEC-13), which needs legal counsel.**
+The spec says so and names the question: what does a Champion's deletion request
+mean for a producer's already-issued certificate. Everything else in Phase E is
+built server-side; none of it has a screen yet.
+
+Files: server/src/{viewAsOrganization,zip,reportJobs,index}.js,
+server/test/{viewAsOrganization,zip,reportJobs}.test.js,
+firestore.indexes.json
+Checks: 1047 server tests (up from 1002), 346 rules, 65 indexes validate,
+analyze clean. Every ZIP fixture extracted with the system `unzip`.
+
+---
+
 ## 2026-09-16 06:50 (+06) — The reconciliation console and the issuance register
 
 EPR-48 and EPR-47. Both turned out to be mostly assembly over engines that
