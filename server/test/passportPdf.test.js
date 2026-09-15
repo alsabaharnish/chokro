@@ -25,6 +25,8 @@
  */
 
 const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const PDFDocument = require('pdfkit');
 const fontkit = require('fontkit');
 
@@ -140,6 +142,47 @@ describe('the bundled Bengali font', () => {
 // ---------------------------------------------------------------------------
 // The fontkit NULL-anchor fix
 // ---------------------------------------------------------------------------
+
+describe('a font file that is present but broken', () => {
+  // A truncated `NotoSansBengali-Regular.ttf` — 60,000 bytes, comfortably over
+  // the 50,000 size floor the first version checked — made BOTH editions fail,
+  // including the pure-Latin English one, with
+  // `Cannot read properties of undefined (reading 'offsets')`. That names
+  // nothing an operator can act on, and a partial upload or a truncated deploy
+  // is exactly how a font file goes wrong.
+  const BROKEN = path.join(os.tmpdir(), 'chokro-broken-font.ttf');
+
+  beforeAll(() => {
+    fs.writeFileSync(BROKEN, fs.readFileSync(pdf.BENGALI_FONT).subarray(0, 60000));
+  });
+
+  afterAll(() => {
+    try { fs.unlinkSync(BROKEN); } catch (_) { /* already gone */ }
+  });
+
+  test('is over the size floor, so a size check alone would accept it', () => {
+    // The canary for this whole block: if the fixture stopped being large
+    // enough, every assertion below would pass for the wrong reason.
+    expect(fs.statSync(BROKEN).size).toBeGreaterThan(50000);
+  });
+
+  test('opens without complaint, and fails on first real use', () => {
+    // Why neither a size check NOR a bare `openSync` is enough: fontkit's
+    // `openSync` is lazy and succeeds on the truncated file. The failure
+    // arrives when something reads a table — which, before the fix, was
+    // mid-render. `loadFont` therefore reads `numGlyphs`, which comes from
+    // `maxp` and so proves the table directory actually parsed.
+    const font = fontkit.openSync(BROKEN);
+    expect(() => font.numGlyphs).toThrow();
+  });
+
+  test('the real bundled fonts parse and have glyphs', () => {
+    for (const file of [pdf.BENGALI_FONT, pdf.LATIN_FONT]) {
+      const font = fontkit.openSync(file);
+      expect(font.numGlyphs).toBeGreaterThan(100);
+    }
+  });
+});
 
 describe('the fontkit NULL-anchor fix', () => {
   test('lets ordinary Bangla shape at all', () => {
@@ -576,9 +619,6 @@ describe('characters that are dropped rather than refused', () => {
   });
 
   test.each([
-    ['tab', '\u0009'],
-    ['newline', '\u000a'],
-    ['carriage return', '\u000d'],
     ['NUL', '\u0000'],
     ['DEL', '\u007f'],
     ['zero-width space', '​'],
@@ -586,9 +626,41 @@ describe('characters that are dropped rather than refused', () => {
     ['BOM', '﻿'],
     ['soft hyphen', '­'],
     ['word joiner', '⁠'],
-  ])('%s is treated as invisible', (_label, ch) => {
+  ])('%s is dropped entirely', (_label, ch) => {
     expect(pdf.isInvisible(ch.codePointAt(0))).toBe(true);
     expect(pdf.splitRuns(newBody('en').body, `a${ch}b`)[0].text).toBe('ab');
+  });
+
+  test.each([
+    ['tab', '\u0009'],
+    ['newline', '\u000a'],
+    ['carriage return', '\u000d'],
+    ['vertical tab', '\u000b'],
+    ['form feed', '\u000c'],
+  ])('%s becomes a space, because it separates words', (_label, ch) => {
+    // Dropped outright, these ran sentences together: a revocation reason of
+    // "…the September batch.\nSee case 4417." printed as "batch.See case".
+    // They are still not drawn — this renderer lays text out itself — but a
+    // word boundary is information and a zero-width space is not.
+    expect(pdf.splitRuns(newBody('en').body, `a${ch}b`)[0].text).toBe('a b');
+  });
+
+  test('a multi-line revocation reason keeps its sentence breaks', async () => {
+    const reason =
+      'An accuracy audit invalidated the September batch.\nSee case 4417.';
+
+    expect(pdf.normaliseForRender(reason))
+      .toBe('An accuracy audit invalidated the September batch. See case 4417.');
+
+    await expect(
+      render({ locale: 'en', status: 'revoked', revocationReason: reason }),
+    ).resolves.toBeInstanceOf(Buffer);
+  });
+
+  test('a blank line does not print as a gap', () => {
+    // A reason typed with a paragraph break collapses to one space rather than
+    // leaving a run of them mid-sentence.
+    expect(pdf.normaliseForRender('First.\n\n\nSecond.')).toBe('First. Second.');
   });
 
   test('a string of nothing but invisibles yields an empty run', () => {
@@ -609,6 +681,47 @@ describe('normalisation', () => {
     expect(pdf.splitRuns(newBody('en').body, decomposed)[0].text).toBe(
       'André Packaging',
     );
+  });
+
+  test('height is an upper bound, never an under-measure', () => {
+    // `drawStatusBanner` draws a coloured rectangle of exactly this height and
+    // writes the text into it, so an under-measurement draws the border SHORT
+    // and a revocation reason spills past it — on the one element of the
+    // certificate whose job is to be impossible to miss.
+    //
+    // Measured before the fix: a mostly-Bengali line whose single longest run
+    // was a Latin serial measured 41.7pt where the Bengali face gives 57.2pt.
+    const PDFDoc = require('pdfkit');
+    const doc = new PDFDoc({ size: 'A4', margins: { top: 56, bottom: 64, left: 56, right: 56 } });
+    const body = pdf.registerFonts(doc, 'bn');
+    const inner = doc.page.width - 112 - 20;
+
+    const mixed =
+      'প্রতিস্থাপিত '.repeat(12)
+      + 'CHKR-PP-M4XT-2W7B-SUPERSEDED-BY-A-VERY-LONG-SERIAL-TOKEN';
+
+    const measured = pdf.heightOfFlow(doc, body, mixed, inner, { size: 10.5 });
+
+    let worst = 0;
+    for (const face of [body.bengali, body.latin]) {
+      doc.font(face).fontSize(10.5);
+      worst = Math.max(worst, doc.heightOfString(mixed, { width: inner }));
+    }
+
+    expect(measured).toBeGreaterThanOrEqual(worst);
+  });
+
+  test('a single-face string measures exactly', () => {
+    // The common case, and it must not pay for the mixed one.
+    const PDFDoc = require('pdfkit');
+    const doc = new PDFDoc({ size: 'A4' });
+    const body = pdf.registerFonts(doc, 'en');
+
+    const latinOnly = 'Coca-Cola Bangladesh Beverages Limited';
+    doc.font(body.latin).fontSize(9.5);
+    const direct = doc.heightOfString(latinOnly, { width: 200 });
+
+    expect(pdf.heightOfFlow(doc, body, latinOnly, 200, { size: 9.5 })).toBe(direct);
   });
 
   test('a non-breaking space becomes a plain one', () => {

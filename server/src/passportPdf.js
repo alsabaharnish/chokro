@@ -486,7 +486,32 @@ function registerFonts(doc, locale) {
   if (bengaliFontAvailable()) {
     // Before the font is registered, and so before pdfkit can shape anything
     // with it. `registerFont` is lazy, but `heightOfString` is not.
-    fontkitNullAnchorFix.install(BENGALI_FONT);
+    //
+    // A failure here means BENGALI SHAPING is broken, which is not a reason to
+    // refuse a Latin-only English certificate. Caught and treated as "no
+    // Bengali face", which is the path that already has a correct answer: the
+    // Bangla edition refuses by name, and the English edition refuses only if
+    // the producer's own data contains Bengali.
+    try {
+      fontkitNullAnchorFix.install(BENGALI_FONT);
+    } catch (err) {
+      console.error(
+        `[passportPdf] the fontkit NULL-anchor fix failed: ${err.message} `
+          + 'Bengali is unavailable in this process; Latin-only certificates '
+          + 'are unaffected.',
+      );
+      return {
+        latin,
+        latinBold,
+        latinCoverage,
+        bengali: null,
+        bengaliBold: null,
+        coverage: null,
+        primaryScript: locale === 'bn' ? 'bengali' : 'latin',
+        regular: latin,
+        bold: latinBold,
+      };
+    }
 
     doc.registerFont('bn', BENGALI_FONT);
 
@@ -517,7 +542,7 @@ function registerFonts(doc, locale) {
       doc.registerFont('bn-bold', BENGALI_FONT_BOLD);
       bengaliBold = 'bn-bold';
     }
-    coverage = fontkit.openSync(BENGALI_FONT);
+    coverage = loadFont(BENGALI_FONT, 50000);
   }
 
   // The Latin face. Noto Sans where it is bundled, Helvetica where it is not —
@@ -533,7 +558,7 @@ function registerFonts(doc, locale) {
     doc.registerFont('latin', LATIN_FONT);
     latin = 'latin';
     latinBold = 'latin';
-    latinCoverage = fontkit.openSync(LATIN_FONT);
+    latinCoverage = loadFont(LATIN_FONT, 200000);
 
     if (fontAvailable(LATIN_FONT_BOLD, 200000)) {
       doc.registerFont('latin-bold', LATIN_FONT_BOLD);
@@ -676,7 +701,22 @@ function splitRuns(body, text) {
  * NBSPs would overflow its column rather than wrap.
  */
 function normaliseForRender(text) {
-  return text.normalize('NFC').replace(/\u00a0/g, ' ');
+  return (
+    text
+      .normalize('NFC')
+      // Line breaks and tabs become spaces rather than being dropped. They are
+      // still not drawn — this renderer lays text out itself — but they SEPARATE
+      // WORDS, and stripping them outright ran the sentences of a multi-line
+      // revocation reason together: "…the September batch.See case 4417."
+      .replace(/[\r\n\t\v\f]+/g, ' ')
+      // A non-breaking space: both faces have it, but pdfkit will not break a
+      // line on one, so a long name held together by pasted NBSPs would
+      // overflow its column instead of wrapping.
+      .replace(/\u00a0/g, ' ')
+      // Collapse the runs those substitutions can create, so a reason typed
+      // with a blank line between paragraphs does not print a gap.
+      .replace(/ {2,}/g, ' ')
+  );
 }
 
 /**
@@ -685,9 +725,12 @@ function normaliseForRender(text) {
  * Controls, the zero-width family, bidi overrides, the BOM, soft hyphens and
  * interlinear annotation marks. None of these draws anything, all of them
  * arrive by accident from a paste, and refusing a certificate over one would
- * block real work for no gain. Tab and newline are included: this renderer
- * lays text out itself, and a raw newline inside a producer's trade name is a
- * paste artefact rather than an intended line break.
+ * block real work for no gain.
+ *
+ * Tab and newline are in the range this covers, but `normaliseForRender` turns
+ * them into spaces before `splitRuns` ever asks — because they separate words,
+ * and dropping them ran the sentences of a multi-line revocation reason
+ * together.
  */
 function isInvisible(cp) {
   return (
@@ -736,13 +779,59 @@ function helveticaCovers(cp) {
   return WINANSI_EXTRAS.has(cp);
 }
 
-/** Whether a bundled font file is present and plausibly a font. */
-function fontAvailable(file, minBytes) {
+/**
+ * Whether a bundled font file is present AND usable.
+ *
+ * ## Why a size check was not enough
+ *
+ * The first version compared `statSync(...).size` against a floor, on the
+ * reasoning that a file of the right size is probably a font. It is not:
+ * truncating `NotoSansBengali-Regular.ttf` to 60,000 bytes — comfortably over
+ * the 50,000 floor — made BOTH editions fail, including the pure-Latin English
+ * one, with `Cannot read properties of undefined (reading 'offsets')`. That
+ * error names nothing an operator can act on, and a partial upload or a
+ * truncated deploy is exactly how a font file goes wrong.
+ *
+ * So the file is opened and asked for its glyph count. A font that cannot be
+ * parsed is treated as absent, which puts it on the path that already has a
+ * clear answer: the Bangla edition refuses by name, and the English edition
+ * carries on unless the data itself contains Bengali.
+ *
+ * ## Cached, because parsing is not free
+ *
+ * `openSync` parses the whole table directory, and `registerFonts` runs once
+ * per document. The cache is keyed by path and holds the parsed handle, which
+ * `splitRuns` needs anyway — so the common path parses each face once per
+ * process rather than once per certificate.
+ */
+const FONT_CACHE = new Map();
+
+function loadFont(file, minBytes) {
+  if (FONT_CACHE.has(file)) return FONT_CACHE.get(file);
+
+  let handle = null;
   try {
-    return fs.statSync(file).size > minBytes;
-  } catch (_) {
-    return false;
+    if (fs.statSync(file).size > minBytes) {
+      const font = fontkit.openSync(file);
+      // A parsed font with no glyphs is not a font. `numGlyphs` is read from
+      // the `maxp` table, so reaching it at all proves the table directory
+      // parsed.
+      if (font && font.numGlyphs > 0) handle = font;
+    }
+  } catch (err) {
+    console.error(
+      `[passportPdf] ${path.basename(file)} is present but unusable: `
+        + `${err.message}. Treating it as absent.`,
+    );
+    handle = null;
   }
+
+  FONT_CACHE.set(file, handle);
+  return handle;
+}
+
+function fontAvailable(file, minBytes) {
+  return loadFont(file, minBytes) !== null;
 }
 
 /**
@@ -856,21 +945,43 @@ function writeLine(doc, body, text, x, y, width, opts = {}) {
 }
 
 /**
- * The height mixed text will occupy.
+ * The height mixed text will occupy — an upper bound, never an estimate.
  *
- * Measured with the face that carries the most characters. Bengali and
- * Helvetica have different line heights, so for genuinely mixed text this is an
- * estimate — used only to decide page breaks, and only ever generous by a
- * line rather than short by one, because `drawBoundaries` adds slack.
+ * ## Why the maximum over the faces rather than the dominant one
+ *
+ * The two faces have different metrics, so a string spanning both has no single
+ * correct measurement short of laying it out. An earlier version measured in
+ * whichever face carried the most characters and called the result an estimate
+ * that would be "generous by a line rather than short by one".
+ *
+ * That was wrong, and measurably: a mostly-Bengali status line whose single
+ * longest run happened to be a Latin serial measured 41.7pt where the Bengali
+ * face gives 57.2pt — short by more than a line.
+ *
+ * The consequence is not a page break in the wrong place. `drawStatusBanner`
+ * draws a coloured rectangle of exactly this height and then writes the text
+ * into it, so an under-measurement draws the border SHORT and the revocation
+ * reason spills out past it — on the one element of the certificate whose job
+ * is to be impossible to miss.
+ *
+ * Taking the maximum cannot be short. Over-measuring costs a slightly tall box
+ * and a slightly early page break, and neither is a defect a reader would
+ * notice, let alone one that misstates anything.
  */
 function heightOfFlow(doc, body, text, width, { size = 9.5, bold = false } = {}) {
-  const runs = splitRuns(body, text);
-  const dominant = runs.reduce(
-    (best, run) => (run.text.length > best.text.length ? run : best),
-    runs[0],
-  );
-  doc.font(faceFor(body, dominant, bold)).fontSize(size);
-  return doc.heightOfString(String(text ?? ''), { width });
+  const value = String(text ?? '');
+  const runs = splitRuns(body, value);
+
+  // The distinct faces this string actually uses. A single-face string
+  // measures exactly, which is the common case and costs one call.
+  const faces = [...new Set(runs.map((run) => faceFor(body, run, bold)))];
+
+  let height = 0;
+  for (const face of faces) {
+    doc.font(face).fontSize(size);
+    height = Math.max(height, doc.heightOfString(value, { width }));
+  }
+  return height;
 }
 
 function drawHeader(ctx) {
@@ -1595,6 +1706,7 @@ module.exports = {
   bengaliFontAvailable,
   splitRuns,
   registerFonts,
+  heightOfFlow,
   normaliseForRender,
   isInvisible,
   helveticaCovers,

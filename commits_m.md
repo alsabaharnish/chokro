@@ -17,6 +17,71 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-09-16 04:15 (+06) — The audit backlog, verified by testing rather than reading
+
+The six findings the third pass raised and never verified, checked empirically.
+Four were real. Two of them were availability bugs that would have taken down
+certificate generation entirely.
+
+**A status banner drawn shorter than its own text.** `heightOfFlow` measured
+mixed-script text in whichever face carried the most characters and described
+the result as an estimate "generous by a line rather than short by one". That
+was wrong and measurably so: a mostly-Bengali status line whose single longest
+run happened to be a Latin serial measured 41.7pt where the Bengali face gives
+57.2pt — short by more than a line.
+
+The consequence is not a page break in the wrong place. `drawStatusBanner`
+draws a coloured rectangle of exactly that height and writes into it, so the
+border came up short and a revocation reason spilled past it — on the one
+element of the certificate whose job is to be impossible to miss. It now takes
+the maximum over the faces the string actually uses, which cannot be short. A
+single-face string still measures exactly, which is the common case.
+
+**A truncated font file broke every certificate, including Latin-only ones.**
+`fontAvailable` compared file size against a floor. Truncating
+`NotoSansBengali-Regular.ttf` to 60,000 bytes — comfortably over the 50,000
+floor — made BOTH editions fail with
+`Cannot read properties of undefined (reading 'offsets')`, which names nothing
+an operator can act on. A partial upload or a truncated deploy is exactly how a
+font file goes wrong.
+
+Worth recording why a bare `openSync` would not have caught it either: fontkit's
+open is lazy and succeeds on the truncated file. The failure arrives when
+something reads a table, which was mid-render. `loadFont` now reads `numGlyphs`
+— which comes from `maxp`, so reaching it proves the table directory parsed —
+and caches the handle, so each face is parsed once per process rather than once
+per certificate.
+
+A face that fails this is treated as ABSENT, which puts it on the path that
+already has a correct answer: the English edition renders, the Bangla edition
+refuses by name, and an English edition whose producer data contains Bengali
+refuses with the message that already existed for that case.
+
+**A shim failure took down English certificates that needed no Bengali.**
+`fontkitNullAnchorFix.install` throwing meant Bengali shaping was broken, which
+is not a reason to refuse a Latin-only certificate. Caught, logged, and treated
+as "no Bengali face".
+
+**A revocation reason with its sentences run together.** Newline and tab were
+stripped outright, so `"…the September batch.\nSee case 4417."` printed as
+`"batch.See case"`. They are still not drawn — this renderer lays text out
+itself — but a word boundary is information where a zero-width space is not, so
+they become spaces, and runs collapse so a paragraph break does not print a gap.
+
+**Two findings did not survive.** The claim that `install()` verifies only
+structure was already addressed by the functional self-test added in the
+previous pass. The claim about fontkit's `applyLookup` returning true and
+skipping remaining subtables is true of the code but unreachable with the
+bundled faces, whose `abvm` lookup has a single subtable — worth revisiting only
+if a face with more is ever bundled.
+
+Files: server/src/passportPdf.js, server/test/passportPdf.test.js
+Checks: 903 server tests (up from 894), 1035 Flutter, analyze clean. The banner
+under-measurement, the truncated-font failure and the run-together sentences
+were each reproduced before the fix and verified after it.
+
+---
+
 ## 2026-09-16 03:25 (+06) — Two omissions closed, and a wider font
 
 Clearing my own gaps before Phase E.
