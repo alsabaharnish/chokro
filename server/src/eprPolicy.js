@@ -108,6 +108,46 @@ const DEFAULTS = Object.freeze({
   /// is one an Admin learns to ignore.
   declarationVarianceThreshold: 0.60,
 
+  // -------------------------------------------------------------------------
+  // Anomaly detection (EPR-45)
+  // -------------------------------------------------------------------------
+  //
+  // "with the policy thresholds stored in config" is part of the requirement,
+  // and for a reason these numbers make obvious: every one of them is a guess
+  // until there is a year of Bangladeshi data behind it. A threshold in code is
+  // a threshold that needs a deploy to tune, and an untuned anomaly queue is
+  // one an Admin learns to clear without reading — at which point Chokro
+  // believes it is watching and is not.
+  //
+  // The defaults below are deliberately LOOSE. A queue that starts quiet and is
+  // tightened is usable from day one; a queue that starts noisy has already
+  // taught its reader to ignore it by the time anyone tunes it.
+
+  /// A SKU's attributed mass against the multiple of its trailing average.
+  anomalySkuMassMultiple: 4,
+
+  /// One bin's share of one producer's attributed mass.
+  anomalyBinShare: 0.5,
+
+  /// One account's share of one producer's attributed mass. Lower than the bin
+  /// threshold: a bin serving a campus legitimately concentrates mass, and a
+  /// single person collecting half a national brand does not.
+  anomalyAccountShare: 0.3,
+
+  /// Rise in a SKU's medium-confidence share against its own baseline, in
+  /// points. Usually a packaging redesign the producer has not declared.
+  anomalyConfidenceDrift: 0.20,
+
+  /// Interquartile-range multiple for the unit-mass outlier fence. 1.5 is the
+  /// conventional Tukey fence and is a reasonable place to start.
+  anomalyUnitMassIqrMultiple: 1.5,
+
+  /// How narrowly a collection percentage may clear its gazette target, and how
+  /// close to the period close the declaration may be filed, before the
+  /// coincidence is worth a look.
+  anomalyTargetMargin: 0.02,
+  anomalyTargetFilingDays: 3,
+
   // EPR-19: category-average estimates for unmatched mass. Open decision 4,
   // whose recommendation is "not in v1" — a defensible smaller number is the
   // product. Present as a flag so turning it on is a deliberate act with a
@@ -195,6 +235,33 @@ function normalize(raw) {
       min: 0.05,
       max: 5,
     }),
+
+    // Each bound rules out the two settings that are the same as having no
+    // detector: one that never fires, and one that fires on everything.
+    anomalySkuMassMultiple: readNumber(raw, 'anomalySkuMassMultiple', {
+      min: 1.5,
+      max: 100,
+    }),
+    anomalyBinShare: readNumber(raw, 'anomalyBinShare', { min: 0.1, max: 1 }),
+    anomalyAccountShare: readNumber(raw, 'anomalyAccountShare', {
+      min: 0.05,
+      max: 1,
+    }),
+    anomalyConfidenceDrift: readNumber(raw, 'anomalyConfidenceDrift', {
+      min: 0.02,
+      max: 0.9,
+    }),
+    anomalyUnitMassIqrMultiple: readNumber(raw, 'anomalyUnitMassIqrMultiple', {
+      min: 0.5,
+      max: 10,
+    }),
+    anomalyTargetMargin: readNumber(raw, 'anomalyTargetMargin', {
+      min: 0.001,
+      max: 0.2,
+    }),
+    anomalyTargetFilingDays: Math.round(
+      readNumber(raw, 'anomalyTargetFilingDays', { min: 0, max: 28 }),
+    ),
     estimateUnmatchedMass: readBoolean(raw, 'estimateUnmatchedMass'),
   };
 }

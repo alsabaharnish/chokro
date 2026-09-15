@@ -132,6 +132,8 @@ const ACTIONS = Object.freeze({
   PASSPORT_REVOKED: 'passport.revoked',
   REPORT_GENERATED: 'report.generated',
   REPORT_DOWNLOADED: 'report.downloaded',
+  ANOMALY_SCAN: 'anomaly.scan',
+  ANOMALY_DISMISSED: 'anomaly.dismissed',
 
   ADMIN_VIEWED_AS_ORG: 'admin.viewedAsOrg',
 });

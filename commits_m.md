@@ -17,6 +17,90 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-09-16 05:40 (+06) — Phase E begins: the anomaly queue
+
+EPR-45's six detectors, as an Admin queue. Nothing here blocks anything — the
+requirement says "an Admin queue rather than an automatic block", and a scan
+writes findings that a person reads.
+
+**The queue's failure mode is noise, not error.** A queue that fills with
+findings that have an ordinary explanation is one the reader clears without
+looking, and at that point Chokro believes it is watching and is not. So most of
+the design — and most of the test file — is about what does NOT fire:
+
+  A SKU needs three periods of history. With one prior period the "trailing
+  average" is that period, so any growth reads as a multiple of it, and a
+  product whose first month was a pilot and second was a launch would fire every
+  time. That is the most ordinary event in the dataset.
+
+  A brand needs four bins before a bin's share means anything. With two, the
+  leading bin has half the mass by arithmetic.
+
+  Confidence drift is measured against a SKU's OWN baseline. Recognition is
+  genuinely harder for a transparent wrapper than a printed bottle, so a SKU
+  that has always been 60% medium-confidence is not drifting — it is a hard
+  SKU, and flagging it every period would be noise forever. The detector is also
+  one-sided: recognition improving is not an anomaly.
+
+  The target-edge detector needs BOTH a narrow clearance and a late filing. A
+  producer that meets its target comfortably is doing the thing the scheme
+  exists to encourage, and flagging success would be perverse. The signal is the
+  coincidence: the denominator is the producer's own figure, and filing it once
+  the numerator is nearly known is the one moment a small change to it decides
+  whether the target is met.
+
+**Median and IQR, not mean and standard deviation.** The unit-mass comparison
+set is a whole gazette category, which contains genuine extremes — a 20-litre
+water jar sits beside a 250 ml bottle. A mean and a standard deviation are both
+dragged by exactly those outliers, so the test would weaken the more skewed the
+category is. A test asserts the two disagree on real data.
+
+**The thresholds start loose, deliberately.** All seven are in `config/eprPolicy`
+per the requirement, and every one is a guess until there is a year of
+Bangladeshi data. A queue that starts quiet and is tightened is usable from day
+one; a queue that starts noisy has taught its reader to ignore it by the time
+anyone tunes it.
+
+**Two behaviours the queue lives or dies on.** A finding's id is a digest of
+what it IS — organisation, period, detector, subject — so a re-scan updates it
+in place rather than duplicating it, and a dismissal survives. An Admin who
+decided a concentration was a bottling plant should not have to decide it again
+every time somebody triggers a scan. The threshold is deliberately excluded from
+the digest, so tuning policy does not resurrect every dismissal.
+
+**One detector names a person, and that shapes the access rules.**
+`accountConcentration` reports a Champion's uid, because a single account
+farming one brand is a real pattern and catching it requires looking at
+accounts. So `eprAnomalies` is Admin-only in `firestore.rules`, with the READ
+denial mattering more than the write denial — and for two reasons. SEC-3,
+because the finding names an individual. And because telling the subject of an
+investigation what triggered it is how the next attempt avoids it: a producer
+who learns Chokro flags a filing within three days of close simply files on the
+fourth.
+
+Writes are denied to administrators too. A finding is written by the scan in the
+same breath as the audit entry recording that the scan ran; one a client could
+author is one an insider could author to manufacture a pretext.
+
+**A closed finding is dismissed or actioned, never just closed.** Collapsing
+them would make the queue's own history useless for the question an auditor
+actually asks — how many of these turned out to be real. A reason is required
+either way (SEC-12).
+
+**The comparison set crosses a tenancy boundary, deliberately.** Unit masses are
+compared against the whole gazette category across producers, because one
+producer's catalogue is not a distribution. It is read Admin-side, never
+projected, and only a median and two quartiles reach a finding — no producer
+learns another's unit masses.
+
+Files: server/src/{anomalyMath,anomalies,eprPolicy,producerAudit,index}.js,
+server/test/{anomalyMath,anomalies,firestoreIndexes}.test.js, firestore.rules,
+firestore.indexes.json, rules_test/epr_passports.rules.test.js
+Checks: 968 server tests (up from 903), 346 rules tests (up from 337), 58
+indexes validate, analyze clean.
+
+---
+
 ## 2026-09-16 04:15 (+06) — The audit backlog, verified by testing rather than reading
 
 The six findings the third pass raised and never verified, checked empirically.

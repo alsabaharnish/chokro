@@ -479,3 +479,107 @@ describe('plasticPassports', () => {
     await assertSucceeds(getDoc(doc(db(COLA_OWNER), 'plasticPassports', COLA_SERIAL)));
   });
 });
+
+// ===========================================================================
+// eprAnomalies — Chokro's own working notes (EPR-45, SEC-3)
+// ===========================================================================
+
+describe('eprAnomalies', () => {
+  async function seedAnomaly(id, orgId, over = {}) {
+    await testEnv.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'eprAnomalies', id), {
+        id,
+        orgId,
+        periodId: PERIOD,
+        type: 'accountConcentration',
+        subjectType: 'account',
+        // A Champion's uid. This is why the read denial matters more than the
+        // write denial.
+        subjectId: 'uid_champion',
+        severity: 'high',
+        figures: { share: 0.62, accountMassMg: 620000000 },
+        summary: '62% of this brand came from one account.',
+        status: 'open',
+        firstSeenAt: new Date(),
+        ...over,
+      });
+    });
+  }
+
+  beforeEach(async () => {
+    await seedAnomaly('anom_cola', COLA);
+    await seedAnomaly('anom_pran', PRAN);
+  });
+
+  test('an administrator reads the queue', async () => {
+    await assertSucceeds(getDoc(doc(db(ADMIN), 'eprAnomalies', 'anom_cola')));
+  });
+
+  test('the producer it concerns cannot read it', async () => {
+    // THE DENIAL THIS RULE EXISTS FOR, and it holds for two separate reasons.
+    //
+    // SEC-3: this finding names an individual Champion's uid, and a producer
+    // must never learn anything about a specific person's disposal behaviour.
+    //
+    // And even a finding that names nobody must not reach its subject. Telling
+    // the subject of an investigation what triggered it is how the next attempt
+    // avoids the trigger — a producer that learns Chokro flags a declaration
+    // filed within three days of a period close files on the fourth day.
+    for (const uid of [COLA_OWNER, COLA_VIEWER]) {
+      await assertFails(getDoc(doc(db(uid), 'eprAnomalies', 'anom_cola')));
+    }
+  });
+
+  test('another producer cannot read it either', async () => {
+    await assertFails(getDoc(doc(db(PRAN_OWNER), 'eprAnomalies', 'anom_cola')));
+  });
+
+  test('a Champion cannot read a finding about themselves', async () => {
+    await assertFails(getDoc(doc(db(CHAMPION), 'eprAnomalies', 'anom_cola')));
+  });
+
+  test('nobody signed out can read it', async () => {
+    await assertFails(getDoc(doc(anon(), 'eprAnomalies', 'anom_cola')));
+  });
+
+  test('a producer cannot enumerate the queue for itself', async () => {
+    await assertFails(
+      getDocs(query(collection(db(COLA_OWNER), 'eprAnomalies'), where('orgId', '==', COLA))),
+    );
+  });
+
+  test('an administrator can list the open queue', async () => {
+    await assertSucceeds(
+      getDocs(query(collection(db(ADMIN), 'eprAnomalies'), where('status', '==', 'open'))),
+    );
+  });
+
+  test('nobody writes a finding from a client, including an administrator', async () => {
+    // A finding is written by the scan, in the same breath as the audit entry
+    // recording that the scan ran. A finding a client could author would be a
+    // finding an attacker could author — and one an insider could author to
+    // manufacture a pretext.
+    for (const uid of [COLA_OWNER, ADMIN]) {
+      await assertFails(
+        setDoc(doc(db(uid), 'eprAnomalies', 'anom_forged'), {
+          orgId: COLA, periodId: PERIOD, type: 'skuMassSpike', status: 'open',
+        }),
+      );
+      await assertFails(
+        updateDoc(doc(db(uid), 'eprAnomalies', 'anom_cola'), { status: 'dismissed' }),
+      );
+      await assertFails(deleteDoc(doc(db(uid), 'eprAnomalies', 'anom_cola')));
+    }
+  });
+
+  test('a producer cannot clear a finding about itself', async () => {
+    // The specific abuse the write denial prevents: a producer that could
+    // dismiss its own anomalies would be marking its own homework.
+    await assertFails(
+      updateDoc(doc(db(COLA_OWNER), 'eprAnomalies', 'anom_cola'), {
+        status: 'dismissed',
+        dismissedReason: 'Nothing to see here.',
+      }),
+    );
+  });
+});

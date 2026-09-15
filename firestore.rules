@@ -1472,6 +1472,36 @@ service cloud.firestore {
     }
 
     // -------------------------------------------------------------------------
+    // eprAnomalies — Chokro's own working notes (EPR-45, SEC-3)
+    // -------------------------------------------------------------------------
+    //
+    // ADMIN-ONLY IN BOTH DIRECTIONS, and the read denial matters more than the
+    // write denial.
+    //
+    // A finding can name an individual Champion: `accountConcentration` reports
+    // the uid of an account attributed a disproportionate share of one brand,
+    // because a single account farming a brand is a real fraud pattern and
+    // catching it requires looking at accounts. A producer reading that would
+    // learn about a specific person's disposal behaviour, which is exactly what
+    // SEC-3 forbids.
+    //
+    // And even the findings that name nobody must not reach the producer they
+    // concern. Telling the subject of an investigation what triggered it is how
+    // the next attempt avoids the trigger — a producer that learns Chokro flags
+    // a declaration filed within three days of a period close simply files on
+    // the fourth day.
+    //
+    // Writes are denied to everyone including administrators: a finding is
+    // written by the scan, in the same breath as the audit entry that records
+    // the scan ran, and a finding a client could author would be a finding an
+    // attacker could author.
+
+    match /eprAnomalies/{findingId} {
+      allow read: if isAdmin();
+      allow create, update, delete: if false;
+    }
+
+    // -------------------------------------------------------------------------
     // putOnMarketDeclarations — the producer's own figure (EPR-40 to EPR-43)
     // -------------------------------------------------------------------------
     //

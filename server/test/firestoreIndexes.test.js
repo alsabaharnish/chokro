@@ -110,6 +110,7 @@ const CONSTANTS = {
   MEMBERS: 'organizationMembers',
   INVITATIONS: 'orgInvitations',
   CONFIRMATIONS: 'attributionConfirmations',
+  ANOMALIES: 'eprAnomalies',
   PERIODS: 'eprPeriods',
   COLLECTION: 'producerAuditLog',
   HEAD_COLLECTION: 'auditChainHeads',

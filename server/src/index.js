@@ -54,6 +54,7 @@ const declarations = require('./declarations');
 const passports = require('./passports');
 const passportPdf = require('./passportPdf');
 const reportJobs = require('./reportJobs');
+const anomalies = require('./anomalies');
 const attribute = require('./attribute');
 const { uploadImage, MAX_BYTES } = require('./cloudinary');
 const { uploadAndSaveProfilePhoto } = require('./profilePhoto');
@@ -2109,6 +2110,80 @@ app.post(
       res.status(202).json({ ok: true, status: 'running' });
       reportJobs.runJob(req.params.jobId);
       return undefined;
+    } catch (err) {
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// The anomaly queue (EPR-45)
+// ---------------------------------------------------------------------------
+//
+// Admin-only in every direction, and not merely because these are Chokro's
+// working notes. A finding can name an individual Champion (SEC-3), and telling
+// the subject of an investigation what triggered it is how the next attempt
+// avoids the trigger.
+//
+// Nothing here blocks anything. EPR-45 asks for "an Admin queue rather than an
+// automatic block", and a scan writes findings that a person reads.
+
+app.post(
+  '/epr/admin/anomalies/:orgId/:periodId/scan',
+  requireAuth,
+  requireAdmin,
+  writeLimit,
+  async (req, res) => {
+    try {
+      const result = await anomalies.scanPeriod({
+        orgId: req.params.orgId,
+        periodId: req.params.periodId,
+        adminUid: req.user.uid,
+        adminName: req.user.name || '',
+      });
+      return res.json({ ok: true, ...result });
+    } catch (err) {
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+app.get(
+  '/epr/admin/anomalies',
+  requireAuth,
+  requireAdmin,
+  readLimit,
+  async (req, res) => {
+    try {
+      const queue = await anomalies.listQueue({
+        status: req.query.status || 'open',
+        orgId: req.query.orgId || null,
+      });
+      return res.json({ ok: true, anomalies: queue });
+    } catch (err) {
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+app.post(
+  '/epr/admin/anomalies/:id/close',
+  requireAuth,
+  requireAdmin,
+  writeLimit,
+  async (req, res) => {
+    try {
+      // A reason is required, and the outcome distinguishes "this had an
+      // innocent explanation" from "this was real and something was done" —
+      // which is the question an auditor asks of the queue's own history.
+      const result = await anomalies.dismiss({
+        id: req.params.id,
+        reason: req.body?.reason,
+        outcome: req.body?.outcome || 'dismissed',
+        adminUid: req.user.uid,
+        adminName: req.user.name || '',
+      });
+      return res.json({ ok: true, ...result });
     } catch (err) {
       return eprFailure(res, err, 400);
     }
