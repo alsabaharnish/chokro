@@ -134,6 +134,7 @@ const ACTIONS = Object.freeze({
   REPORT_DOWNLOADED: 'report.downloaded',
   ANOMALY_SCAN: 'anomaly.scan',
   ANOMALY_DISMISSED: 'anomaly.dismissed',
+  ACCURACY_REVIEWED: 'accuracy.reviewed',
 
   ADMIN_VIEWED_AS_ORG: 'admin.viewedAsOrg',
 });

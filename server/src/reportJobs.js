@@ -708,6 +708,21 @@ async function doeAnnualProgress(job) {
 
   const issued = await passports.listPassports({ orgId: job.orgId, limit: 50 });
 
+  // The measured recognition accuracy over the same window the report covers
+  // (EPR-17). Never allowed to fail the report: a methodology section without a
+  // figure is honest, and a report that would not generate because the accuracy
+  // read timed out is not.
+  let accuracy = null;
+  try {
+    // eslint-disable-next-line global-require
+    const reconciliation = require('./reconciliation');
+    accuracy = await reconciliation.accuracySnapshot({
+      endPeriodId: periodIds[periodIds.length - 1],
+    });
+  } catch (err) {
+    console.error(`[reportJobs] accuracy snapshot failed: ${err.message}`);
+  }
+
   return serialise(job, {
     registration: {
       legalName: organization.legalName ?? '',
@@ -749,7 +764,7 @@ async function doeAnnualProgress(job) {
       status: p.status,
       contentHash: p.contentHash,
     })),
-    methodology: methodologyStatement(),
+    methodology: methodologyStatement(accuracy),
   });
 }
 
@@ -862,7 +877,21 @@ async function surplusMass(job) {
   });
 }
 
-function methodologyStatement() {
+/**
+ * The methodology section, with the measured accuracy where there is one
+ * (EPR-17, EPR-34).
+ *
+ * EPR-17: "the measured precision/recall is published in report methodology".
+ * Until the accuracy queue could be resolved there was no measurement to
+ * publish, and this section said only that recognition is imperfect — which is
+ * true and is not a figure.
+ *
+ * `accuracy` is passed in rather than read here, so a report stays a pure
+ * function of what its caller assembled — and so the figure printed on it is
+ * the one measured at generation time rather than whatever the queue says when
+ * somebody re-reads the artefact.
+ */
+function methodologyStatement(accuracy = null) {
   return {
     attribution:
       'Packaging is attributed to a producer when Chokro recognises a '
@@ -877,6 +906,34 @@ function methodologyStatement() {
     period:
       'Reporting periods are calendar months in Asia/Dhaka (UTC+06), assigned '
       + 'server-side from the disposal decision time.',
+    // The measured figure, or the honest absence of one. Never a placeholder:
+    // a methodology section is exactly where an unsupported number does the
+    // most damage, because it is the section a reader turns to in order to
+    // decide how much to trust everything else.
+    measuredAccuracy: accuracy
+      ? {
+        precision: accuracy.precision,
+        precisionAbsenceReason: accuracy.precisionAbsenceReason,
+        sampledMatchesReviewed: accuracy.reviewed,
+        sampledMatchesJudged: accuracy.judged,
+        unclearShare: accuracy.unclearShare,
+        windowPeriods: accuracy.windowPeriods,
+        // EPR-17 names precision AND recall. Only one is observable from a
+        // sample drawn from what the model claimed, and stating why is more
+        // useful to an auditor than omitting the field.
+        recall: null,
+        recallAbsenceReason: accuracy.recallAbsenceReason,
+      }
+      : {
+        precision: null,
+        precisionAbsenceReason:
+            'No standing accuracy audit has been resolved for this period '
+            + 'range, so no measured precision is stated.',
+        recall: null,
+        recallAbsenceReason:
+            'Recall is not measurable from Chokro\u2019s accuracy sample.',
+      },
+
     knownLimits: [
       'Recognition is imperfect. Medium-confidence matches are attributed and '
         + 'reported separately as an estimated share; low-confidence matches '

@@ -17,6 +17,82 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-09-16 06:50 (+06) — The reconciliation console and the issuance register
+
+EPR-48 and EPR-47. Both turned out to be mostly assembly over engines that
+already existed — with one real gap underneath.
+
+**The accuracy audit has been filling since Phase C and nothing ever resolved
+one.** `attribute.js` has been sampling high-confidence matches into
+`attributionConfirmations` for EPR-17's standing audit since Phase C. There has
+never been a path to review one, so the precision figure EPR-17 says to publish
+in report methodology has never been measurable — and the methodology section
+said only that recognition is imperfect, which is true and is not a figure.
+
+`resolveConfirmation` closes that. Three decisions inside it:
+
+  A VERDICT IS NOT A CORRECTION. Marking a high-confidence match incorrect does
+  not reverse the attribution. Reversing on one reviewer's read would make the
+  accuracy audit a second, unaccountable attribution path — removing mass with
+  no reason recorded against it. Reversal stays its own act, with its own
+  reason and its own audit entry.
+
+  `unclear` IS A VERDICT, NOT A SKIP. A photograph too dark to judge is a real
+  outcome, and folding it into either bucket would bias precision in whichever
+  direction the reviewer felt generous. It is excluded from the ratio and its
+  share is reported — a high figure there says the photographs are the problem,
+  not the model, and that is a different fix.
+
+  THE LOW-CONFIDENCE QUEUE IS NOT THE SAMPLE. Those matches were never
+  attributed; a reviewer confirming one is describing a near-miss, not the
+  precision of what Chokro reported. Mixing them would measure a different
+  thing and call it the same name.
+
+**Precision is published; recall is refused.** EPR-17 names "precision/recall",
+and only one is observable. The sample is drawn from what the model CLAIMED, so
+the denominator is known and precision is measurable. Nothing in this system
+knows what was in a photograph the model did not report, so recall is not —
+measuring it would need every sampled disposal exhaustively labelled.
+
+`accuracySnapshot` therefore returns precision, the size of the sample it rests
+on, and an explicit `recallAbsenceReason`. It returns NULL precision below a
+30-sample floor: "100% over three reviewed matches" is not a measurement, and a
+methodology section is precisely where an unsupported number does the most
+damage — it is the section a reader turns to in order to decide how much to
+trust everything else.
+
+**The reconciliation console reads flags nothing had ever read.** QA-3 requires
+a recompute mismatch surfaced rather than silently corrected, and
+`storeRecomputeResult` has been recording them faithfully. A recorded mismatch
+nobody looks at is the same as no check at all.
+
+The overview separates matched, mismatched and NEVER-CHECKED, and the third is
+the one that matters: "how much of this has anyone verified?" is the question an
+auditor asks, and it cannot be read off a list sorted by variance. The count and
+the total mass are reported even though the list itself is bounded. A
+never-checked period reports a null variance rather than a zero — zero means
+"checked and agreed", and conflating them is how an unverified year looks clean.
+
+**The issuance register answers Chokro's question rather than a producer's.**
+`listPassports` says what one producer holds. This says what is STANDING, across
+every producer — which is the question the day a systemic fault is found, and
+one that cannot be answered by querying each producer in turn without something
+being missed. It carries the headline figure and the content hash so a fault can
+be scoped without opening every PDF, shows the trade name the certificate
+CARRIES rather than a live read, and says when it has truncated.
+
+The Admin supersede handle is scoped to one organisation and period, requires a
+reason, and supersedes rather than revokes — the distinction is not cosmetic:
+superseding says the figures have moved on, revoking says the certificate should
+never have been relied on, and a model fault is the first.
+
+Files: server/src/{reconciliation,passports,reportJobs,producerAudit,index}.js,
+server/test/{reconciliation,passports}.test.js, firestore.indexes.json
+Checks: 1002 server tests (up from 968), 346 rules, 64 indexes validate, analyze
+clean.
+
+---
+
 ## 2026-09-16 05:40 (+06) — Phase E begins: the anomaly queue
 
 EPR-45's six detectors, as an Admin queue. Nothing here blocks anything — the

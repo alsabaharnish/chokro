@@ -55,6 +55,7 @@ const passports = require('./passports');
 const passportPdf = require('./passportPdf');
 const reportJobs = require('./reportJobs');
 const anomalies = require('./anomalies');
+const reconciliation = require('./reconciliation');
 const attribute = require('./attribute');
 const { uploadImage, MAX_BYTES } = require('./cloudinary');
 const { uploadAndSaveProfilePhoto } = require('./profilePhoto');
@@ -2110,6 +2111,180 @@ app.post(
       res.status(202).json({ ok: true, status: 'running' });
       reportJobs.runJob(req.params.jobId);
       return undefined;
+    } catch (err) {
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// The issuance register (EPR-47)
+// ---------------------------------------------------------------------------
+//
+// Everything Chokro has put its name to, across every producer, with the
+// controls to withdraw one. The per-producer views answer a producer's
+// question; this answers Chokro's — what is standing right now — which is the
+// question the day a systemic fault is found.
+
+app.get(
+  '/epr/admin/issuance',
+  requireAuth,
+  requireAdmin,
+  readLimit,
+  async (req, res) => {
+    try {
+      const register = await passports.issuanceRegister({
+        status: req.query.status || null,
+        periodId: req.query.periodId || null,
+      });
+      return res.json({ ok: true, ...register });
+    } catch (err) {
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+/**
+ * Supersedes every standing certificate for one organisation and period
+ * (EPR-47, EPR-30).
+ *
+ * The handle for a systemic fault. `supersedeForPeriod` already existed for the
+ * reversal and mass-change paths; this is the deliberate, Admin-initiated
+ * version — with a reason, because a certificate withdrawn without one is
+ * indistinguishable from an insider tidying up (SEC-12).
+ *
+ * Supersession rather than revocation, and the distinction is not cosmetic:
+ * superseding says the figures have moved on, revoking says the certificate
+ * should never have been relied on. A model fault is the first.
+ */
+app.post(
+  '/epr/admin/issuance/:orgId/:periodId/supersede',
+  requireAuth,
+  requireAdmin,
+  requireFreshAuth(PRIVILEGED_AUTH_MAX_AGE_SECONDS),
+  writeLimit,
+  async (req, res) => {
+    const reason = req.body?.reason;
+    if (typeof reason !== 'string' || reason.trim().length < 5) {
+      return res.status(400).json({
+        error: 'reason_required',
+        message:
+          'Record why these certificates are being withdrawn. A third party '
+          + 'holding one will be told it no longer stands, and the reason is '
+          + 'what Chokro can point to when asked why.',
+      });
+    }
+
+    try {
+      const result = await passports.supersedeForPeriod({
+        orgId: req.params.orgId,
+        periodId: req.params.periodId,
+        reason: reason.trim(),
+        actorUid: req.user.uid,
+      });
+      return res.json({ ok: true, ...result });
+    } catch (err) {
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+// ---------------------------------------------------------------------------
+// Reconciliation and the standing accuracy audit (EPR-17, EPR-48)
+// ---------------------------------------------------------------------------
+//
+// Admin-only. These are Chokro's own numbers being checked against Chokro's own
+// evidence, and a producer reading the queue would learn which of its periods
+// Chokro has not yet verified.
+
+app.get(
+  '/epr/admin/reconciliation',
+  requireAuth,
+  requireAdmin,
+  readLimit,
+  async (req, res) => {
+    try {
+      // The count of NEVER-RECOMPUTED periods is the figure an auditor asks
+      // about — "how much of this has anyone checked?" — so it is reported as a
+      // total even though the list itself is bounded.
+      const overview = await reconciliation.reconciliationOverview({});
+      return res.json({ ok: true, ...overview });
+    } catch (err) {
+      console.error('Reconciliation overview failed:', err.message);
+      return res.status(503).json({ error: 'reconciliation_unavailable' });
+    }
+  },
+);
+
+app.get(
+  '/epr/admin/reconciliation/:orgId',
+  requireAuth,
+  requireAdmin,
+  readLimit,
+  async (req, res) => {
+    try {
+      const result = await reconciliation.organizationReconciliation({
+        orgId: req.params.orgId,
+      });
+      return res.json({ ok: true, ...result });
+    } catch (err) {
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+app.get(
+  '/epr/admin/accuracy/:periodId',
+  requireAuth,
+  requireAdmin,
+  readLimit,
+  async (req, res) => {
+    try {
+      const snapshot = await reconciliation.accuracySnapshot({
+        endPeriodId: req.params.periodId,
+      });
+      return res.json({ ok: true, ...snapshot });
+    } catch (err) {
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+app.get(
+  '/epr/admin/accuracy-queue',
+  requireAuth,
+  requireAdmin,
+  readLimit,
+  async (req, res) => {
+    try {
+      const pending = await reconciliation.listPendingSample({
+        reason: req.query.reason || null,
+      });
+      return res.json({ ok: true, pending });
+    } catch (err) {
+      return eprFailure(res, err, 400);
+    }
+  },
+);
+
+app.post(
+  '/epr/admin/accuracy-queue/:confirmationId',
+  requireAuth,
+  requireAdmin,
+  writeLimit,
+  async (req, res) => {
+    try {
+      // A verdict is evidence about the model, NOT a correction. Marking a
+      // match incorrect does not reverse the attribution — that is its own act,
+      // through `/epr/admin/attributions/:id/reverse`, with its own reason.
+      const result = await reconciliation.resolveConfirmation({
+        confirmationId: req.params.confirmationId,
+        verdict: req.body?.verdict,
+        note: req.body?.note || '',
+        adminUid: req.user.uid,
+        adminName: req.user.name || '',
+      });
+      return res.json({ ok: true, ...result });
     } catch (err) {
       return eprFailure(res, err, 400);
     }

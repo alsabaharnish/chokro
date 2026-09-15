@@ -1085,3 +1085,134 @@ describe('superseding after a unit mass is re-verified (EPR-30)', () => {
     ).resolves.toMatchObject({ superseded: 0 });
   });
 });
+
+// ---------------------------------------------------------------------------
+// The issuance register (EPR-47)
+// ---------------------------------------------------------------------------
+//
+// `listPassports` answers a producer's question: what have we been issued.
+// This answers Chokro's: what is standing right now, across every producer —
+// which is the question the day a systemic fault is found, and one that cannot
+// be answered by querying each producer in turn without something being missed.
+
+describe('the issuance register', () => {
+  beforeEach(() => {
+    fs._seed('organizations', 'org_pran', {
+      legalName: 'PRAN Foods Ltd', tradeName: 'PRAN', status: 'active',
+      obligationStartDate: { toDate: () => new Date('2026-07-01T00:00:00Z') },
+    });
+    for (const [orgId, periodId] of [
+      ['org_cola', '2026-09'], ['org_cola', '2026-08'], ['org_pran', '2026-09'],
+    ]) {
+      fs._seed('eprPeriods', `${orgId}_${periodId}`, {
+        orgId, periodId, massMgByCategory: { rigid: 1000000 }, skuIds: ['sku_a'],
+      });
+    }
+  });
+
+  async function issueAll() {
+    const out = [];
+    for (const [orgId, periodId] of [
+      ['org_cola', '2026-09'], ['org_cola', '2026-08'], ['org_pran', '2026-09'],
+    ]) {
+      out.push(await passports.issuePassport({ orgId, periodId, adminUid: 'uid_admin' }));
+    }
+    return out;
+  }
+
+  test('spans every producer, not one', async () => {
+    await issueAll();
+
+    const register = await passports.issuanceRegister({});
+
+    expect(register.passports).toHaveLength(3);
+    expect(new Set(register.passports.map((p) => p.orgId)))
+      .toEqual(new Set(['org_cola', 'org_pran']));
+  });
+
+  test('counts what is standing', async () => {
+    const [first] = await issueAll();
+    await passports.revokePassport({
+      serial: first.serial,
+      reason: 'An accuracy audit invalidated the batch.',
+      adminUid: 'uid_admin',
+    });
+
+    const register = await passports.issuanceRegister({});
+    expect(register.counts.revoked).toBe(1);
+    expect(register.counts.issued).toBe(2);
+  });
+
+  test('narrows to a status and to a period', async () => {
+    await issueAll();
+
+    const september = await passports.issuanceRegister({ periodId: '2026-09' });
+    expect(september.passports).toHaveLength(2);
+
+    const issued = await passports.issuanceRegister({ status: 'issued' });
+    expect(issued.passports).toHaveLength(3);
+  });
+
+  test('shows the trade name the certificate CARRIES', async () => {
+    // Off the frozen snapshot, not a live read: a third party holding the
+    // document is comparing against the name printed on it, and a producer that
+    // has since rebranded would make a live read disagree with the artefact.
+    await issueAll();
+    fs._seed('organizations', 'org_cola', {
+      ...fs._store.get('organizations/org_cola'),
+      tradeName: 'Renamed Beverages',
+    });
+
+    const register = await passports.issuanceRegister({});
+    const cola = register.passports.find((p) => p.orgId === 'org_cola');
+    expect(cola.tradeName).toBe('Coca-Cola Bangladesh');
+  });
+
+  test('carries the headline figure, so a fault can be scoped without opening PDFs', async () => {
+    await issueAll();
+    const register = await passports.issuanceRegister({});
+
+    for (const row of register.passports) {
+      expect(row.collectedMassMg).toBeGreaterThan(0);
+      expect(row).toHaveProperty('collectionRate');
+      expect(row.contentHash).toMatch(/^[0-9a-f]{64}$/);
+    }
+  });
+
+  test('says when it has truncated', async () => {
+    // A register that silently truncated would be the worst possible answer to
+    // "which certificates are affected".
+    await issueAll();
+
+    const bounded = await passports.issuanceRegister({ limit: 2 });
+    expect(bounded.passports).toHaveLength(2);
+    expect(bounded.truncated).toBe(true);
+
+    const whole = await passports.issuanceRegister({ limit: 50 });
+    expect(whole.truncated).toBe(false);
+  });
+
+  test('refuses a status or period that is not one', async () => {
+    await expect(passports.issuanceRegister({ status: 'pending' }))
+      .rejects.toThrow(/issued, superseded, revoked/);
+    await expect(passports.issuanceRegister({ periodId: '2026-9' }))
+      .rejects.toThrow(/reporting period/i);
+  });
+
+  test('superseding a period leaves every other period standing', async () => {
+    // The systemic-fault handle. Scoped to one organisation and period, so a
+    // withdrawal cannot quietly take out more than it names.
+    const [september, august, pran] = await issueAll();
+
+    await passports.supersedeForPeriod({
+      orgId: 'org_cola',
+      periodId: '2026-09',
+      reason: 'A recognition model fault affected September attribution.',
+      actorUid: 'uid_admin',
+    });
+
+    expect(fs._store.get(`plasticPassports/${september.serial}`).status).toBe('superseded');
+    expect(fs._store.get(`plasticPassports/${august.serial}`).status).toBe('issued');
+    expect(fs._store.get(`plasticPassports/${pran.serial}`).status).toBe('issued');
+  });
+});

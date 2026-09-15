@@ -810,6 +810,83 @@ async function assertRenderable({ figures, hash, serial, periodId, orgId }) {
   }
 }
 
+/**
+ * The issuance register: everything Chokro has put its name to (EPR-47).
+ *
+ * ## Why this exists separately from `listPassports`
+ *
+ * `listPassports` answers "what has this producer been issued", which is the
+ * producer's question. This answers Chokro's: **what is standing right now,
+ * across every producer?**
+ *
+ * The difference matters the day a systemic fault is found — a recognition
+ * model error affecting a whole month, a policy figure that was wrong. The
+ * question is then "which certificates are affected", and answering it by
+ * querying each producer in turn is how one gets missed.
+ *
+ * Admin-only. A producer reading this would learn which of its competitors hold
+ * certificates and for which periods, which is commercially sensitive and
+ * nobody's business but theirs.
+ */
+async function issuanceRegister({ status = null, periodId = null, limit = 200 }) {
+  let query = db().collection(PASSPORTS);
+
+  if (status) {
+    if (!PASSPORT_STATUSES.includes(status)) {
+      throw badRequest(`A passport is ${PASSPORT_STATUSES.join(', ')}.`);
+    }
+    query = query.where('status', '==', status);
+  }
+  if (periodId) {
+    if (!eprPeriod.isValidPeriodId(periodId)) {
+      throw badRequest('That is not a reporting period.');
+    }
+    query = query.where('periodId', '==', periodId);
+  }
+
+  const snap = await query.orderBy('issuedAt', 'desc').limit(limit).get();
+
+  const rows = snap.docs.map((doc) => {
+    const passport = doc.data();
+    return {
+      serial: passport.serial,
+      orgId: passport.orgId,
+      // The trade name off the frozen snapshot, not a live read: the register
+      // should show the name the certificate CARRIES, which is what a third
+      // party holding it would be comparing against.
+      tradeName: passport.figures?.organizationTradeName ?? '',
+      periodId: passport.periodId,
+      scope: passport.scope ?? 'period',
+      status: passport.status,
+      contentHash: passport.contentHash,
+      issuedAt: passport.issuedAt ?? null,
+      issuedByName: passport.issuedByName ?? null,
+      supersededBy: passport.supersededBy ?? null,
+      supersededReason: passport.supersededReason ?? null,
+      revocationReason: passport.revocationReason ?? null,
+      // The headline figure the certificate states, so a systemic fault can be
+      // scoped without opening every PDF.
+      collectedMassMg: intOr0(passport.figures?.collectedMassMg),
+      collectionRate: passport.figures?.collectionRate ?? null,
+    };
+  });
+
+  const counts = { issued: 0, superseded: 0, revoked: 0 };
+  for (const row of rows) {
+    if (counts[row.status] !== undefined) counts[row.status] += 1;
+  }
+
+  return {
+    passports: rows,
+    counts,
+    // Bounded by construction (QA-10), and said so rather than implied — a
+    // register that silently truncated would be the worst possible answer to
+    // "which certificates are affected".
+    limit,
+    truncated: rows.length === limit,
+  };
+}
+
 /** One organisation's passports, newest first. Bounded (QA-10). */
 async function listPassports({ orgId, limit = 50 }) {
   const snap = await db()
@@ -1039,6 +1116,7 @@ module.exports = {
   revokePassport,
   verifySerial,
   listPassports,
+  issuanceRegister,
   getPassport,
   supersedeForPeriod,
   supersedeForReversal,
