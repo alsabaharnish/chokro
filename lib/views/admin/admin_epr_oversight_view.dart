@@ -1238,11 +1238,38 @@ class _IssuanceTab extends ConsumerWidget {
               onRetry: () => ref.invalidate(issuanceRegisterProvider),
             ),
             data: (data) {
-              if (data.certificates.isEmpty) {
+              // Truncation is checked BEFORE emptiness, and the two must not
+              // be collapsed. A bounded read that returned nothing is not the
+              // same claim as "nothing has been issued" — and on the one
+              // screen whose job is answering "which certificates are affected
+              // by this fault", the bland empty state is the more dangerous of
+              // the two answers.
+              if (data.certificates.isEmpty && data.truncated) {
                 return const _EmptyQueue(
+                  icon: Icons.more_horiz,
+                  title: 'This register is truncated',
+                  message:
+                      'The register stopped short of the whole set and the '
+                      'part it returned is empty. This is NOT a statement '
+                      'that nothing was issued. Narrow by status or period '
+                      'and look again.',
+                );
+              }
+
+              if (data.certificates.isEmpty) {
+                return _EmptyQueue(
                   icon: Icons.workspace_premium_outlined,
-                  title: 'No certificates',
-                  message: 'Nothing has been issued yet.',
+                  // Reflecting the filter, the way the anomaly queue does.
+                  // With `revoked` selected, "Nothing has been issued yet" is
+                  // false whenever anything has been issued — and it is read
+                  // as reassurance about the wrong question.
+                  title: filter == null
+                      ? 'No certificates'
+                      : 'Nothing ${_statusLabel(filter).toLowerCase()}',
+                  message: filter == null
+                      ? 'Nothing has been issued yet.'
+                      : 'No certificate currently has this status. Clear the '
+                            'filter to see the whole register.',
                 );
               }
 

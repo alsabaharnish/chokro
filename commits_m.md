@@ -17,6 +17,45 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-09-16 17:05 (+06) — Widget tests for the Phase E Admin screens, and two bugs they found
+
+The five-tab oversight console and the producer detail screen shipped with no
+widget test at all. `admin_oversight_model_test.dart` covered the models only.
+
+**The tests are all about absence, because that is what these screens are for.**
+A model that faithfully holds `null` and a screen that draws it as `0%` is
+still a screen telling an Admin an unverified year is clean. So: precision
+below the sample floor renders the server's stated reason and never the
+flattering 100%; a platform with no periods renders no percentage rather than
+0%; coverage reports the TOTAL never-checked count rather than the length of a
+bounded list; a mismatch shows both figures with neither presented as the
+truth; an unwalked hash chain reads "not checked" rather than "broken".
+
+**Two real bugs in the issuance register, both found by writing the tests
+rather than by reading the code.**
+
+First: the empty branch ran BEFORE the truncation check and discarded it. A
+bounded read that came back empty told an Admin "Nothing has been issued yet"
+— a positive false claim, on the one screen whose own comment says a silent
+truncation "would be the worst possible answer to which certificates are
+affected by this fault".
+
+Second: the empty state ignored the active filter. With `revoked` selected and
+nothing revoked, the screen said "Nothing has been issued yet", which is false
+whenever anything has been issued, and is reassurance about a question nobody
+asked. The anomaly queue already got this right; this tab did not.
+
+**I checked the assertions rather than trusting them.** Dumping the rendered
+text found that the truncation test had been passing against the non-empty
+branch only — which is how the first bug surfaced. The read-only tint and the
+unchecked-variance row were verified the same way (alpha 0.18 behind the whole
+tab; the row renders "Never checked", not "0 kg").
+
+Files: `test/admin_epr_oversight_view_test.dart` (new, 13 tests),
+`test/admin_producer_detail_view_test.dart` (new, 9 tests),
+`lib/views/admin/admin_epr_oversight_view.dart`
+Checks: 1082 Flutter tests pass (+22), analyze clean, 1084 server tests pass.
+
 ## 2026-09-16 15:20 (+06) — SEC-13: the three deliverables that do not need counsel
 
 SEC-13 names four things required before launch. I had been calling the whole
