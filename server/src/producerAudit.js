@@ -137,6 +137,18 @@ const ACTIONS = Object.freeze({
   ACCURACY_REVIEWED: 'accuracy.reviewed',
 
   ADMIN_VIEWED_AS_ORG: 'admin.viewedAsOrg',
+
+  // Lawful disclosure to the regulator (SEC-13).
+  //
+  // Resolving a pseudonymous disposal reference back to the disposal behind it
+  // is the one operation that deliberately undoes SEC-3's de-identification.
+  // It is therefore the operation that most needs a record: a disclosure path
+  // nobody can audit is indistinguishable from a backdoor, and the difference
+  // between the two is entirely whether it was written down.
+  DISCLOSURE_RESOLVED: 'disclosure.resolved',
+  // A second, separate action, because naming the person is a bigger step than
+  // producing the evidence and must not be inferable from the first entry.
+  DISCLOSURE_IDENTITY_RELEASED: 'disclosure.identityReleased',
 });
 
 const ACTION_VALUES = Object.freeze(Object.values(ACTIONS));

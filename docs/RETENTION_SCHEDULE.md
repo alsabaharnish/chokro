@@ -68,6 +68,40 @@ Severing is why `attributions` and `attributionConfirmations` carry the
 disposition `sever` rather than `purge`. Whether it is *lawful* is counsel Q1;
 whether it is *sufficient for the DoE* is Q2.
 
+## 3.1 Chokro's proposed answer (16 September 2026) — *pending counsel*
+
+Recorded as proposed, not decided. Full statement at
+[DATA_FLOW_MAP.md §5.1](DATA_FLOW_MAP.md).
+
+**Neither of the three options above, but a fourth: refuse.** Chokro's position
+is that a disposal record may not be erased at all, because it is the
+transparency the scheme rests on — while account data (name, email, profile)
+remains erasable, and the pseudonymous mapping is retained solely for lawful
+disclosure to the DoE.
+
+| | Erasure satisfied? | Figures reproducible? | Evidence re-derivable? |
+|---|---|---|---|
+| Purge both | Yes | No | No |
+| Retain both | No | Yes | Yes |
+| Sever | Yes | Yes | No |
+| **Refuse (proposed)** | **Account only** | **Yes** | **Yes** |
+
+What it changes for this schedule, if counsel accepts it:
+
+- **`disposals` stops being contested and becomes `retain`.** It is currently
+  the row that decides the schedule, and this answer decides it.
+- **`attributions` keeps its `sever` disposition anyway**, as the fallback if
+  counsel rejects the position. A schedule that recorded only the preferred
+  answer would have to be rebuilt rather than reconfigured if the answer came
+  back no.
+- **`users` stays `purge`.** Account deletion is still honoured, and under this
+  position it is the *only* thing erasure reaches.
+
+**The schedule has not been changed to match.** The position is Chokro's, the
+determination is counsel's, and writing the preferred answer into the
+dispositions before it is confirmed would be exactly the substitution this
+module exists to prevent.
+
 ## 4. The schedule
 
 `class` — what the record is. `disposition` — what expiry does. `erasure` —
@@ -139,6 +173,7 @@ back. Each is a row counsel must rule on.
 `disposals`, `wallets`, `transactions`, `orders`, `products`, `donations`.
 
 **`disposals` is the one that matters for EPR**, and it decides the schedule.
+Chokro proposes to resolve it by refusing erasure outright — see §3.1.
 It holds the uid, the photograph and the capture geolocation, *and* is the
 primary evidence behind every attribution citing it. Purging satisfies erasure
 and destroys re-derivability. Retaining preserves the audit trail and keeps a
@@ -196,8 +231,9 @@ Reporting a collision is not resolving one.
 Repeated from [DATA_FLOW_MAP.md §5](DATA_FLOW_MAP.md), in the order they
 unblock work:
 
-1. **Q1** — Does severing the `disposalId` link satisfy a PDPA erasure request,
-   given the attribution that survives contains no identifier?
+1. **Q1** *(reframed by §3.1)* — May Chokro refuse erasure of a disposal under
+   a legal-obligation exemption while honouring account deletion? Failing that,
+   does severing the `disposalId` link satisfy the request?
 2. **Q2** — Does the DoE's audit horizon require re-derivability from primary
    evidence (the photograph), or only reproducibility of the figure?
 3. **Q3** — How long is the horizon? NFR-E-8 proposes three years plus margin.

@@ -57,6 +57,7 @@ const reportJobs = require('./reportJobs');
 const anomalies = require('./anomalies');
 const reconciliation = require('./reconciliation');
 const viewAsOrganization = require('./viewAsOrganization');
+const disclosure = require('./disclosure');
 const attribute = require('./attribute');
 const { uploadImage, MAX_BYTES } = require('./cloudinary');
 const { uploadAndSaveProfilePhoto } = require('./profilePhoto');
@@ -2827,6 +2828,92 @@ app.post(
       return res.status(503).json({
         error: 'view_not_recorded',
         message: 'The view could not be recorded, so it was not opened.',
+      });
+    }
+  },
+);
+
+/**
+ * Lawful disclosure to the regulator (SEC-13).
+ *
+ * Resolves a pseudonymous `disposalRef` from a chain-of-custody export back to
+ * the collection evidence behind it. The only path in this service that undoes
+ * SEC-3's de-identification, and therefore the only one that a regulator's
+ * audit of a producer's export can actually run through.
+ *
+ * `writeLimit`, not a read limit: every call appends to the audit chain before
+ * it resolves anything, so it is a side-effecting action however much it looks
+ * like a lookup. Refusing without a regulator reference is in `disclosure.js`,
+ * not here, so no future caller can route around it.
+ *
+ * Returns the evidence and NOT the Champion. Naming a person is
+ * `/identity`, below.
+ */
+app.post(
+  '/epr/admin/disclosure/resolve',
+  requireAuth,
+  requireAdmin,
+  writeLimit,
+  async (req, res) => {
+    try {
+      const result = await disclosure.resolveDisposalRef({
+        orgId: req.body?.orgId,
+        disposalRef: req.body?.disposalRef,
+        doeReference: req.body?.doeReference,
+        periodId: req.body?.periodId || null,
+        adminUid: req.user.uid,
+        adminName: req.user.name || '',
+        ip: req.ip,
+        userAgent: req.get('User-Agent'),
+      });
+      return res.json({ ok: true, ...result });
+    } catch (err) {
+      if (err.code === 'bad_request') return eprFailure(res, err, 400);
+      console.error('Disclosure resolution failed:', err.message);
+      // Same reasoning as view-as: a disclosure that could not be recorded is
+      // a disclosure that did not happen.
+      return res.status(503).json({
+        error: 'disclosure_not_recorded',
+        message:
+          'The disclosure could not be recorded, so the reference was not '
+          + 'resolved.',
+      });
+    }
+  },
+);
+
+/**
+ * Names the Champion behind a resolved disposal (SEC-13).
+ *
+ * Deliberately a second endpoint rather than a flag on the first. Most
+ * regulator questions are about whether a collection happened, and answering
+ * those must not hand over a person as a side effect. The two actions are
+ * separately recorded and permanently distinguishable in the audit log.
+ */
+app.post(
+  '/epr/admin/disclosure/identity',
+  requireAuth,
+  requireAdmin,
+  writeLimit,
+  async (req, res) => {
+    try {
+      const result = await disclosure.releaseIdentity({
+        orgId: req.body?.orgId,
+        disposalId: req.body?.disposalId,
+        doeReference: req.body?.doeReference,
+        adminUid: req.user.uid,
+        adminName: req.user.name || '',
+        ip: req.ip,
+        userAgent: req.get('User-Agent'),
+      });
+      return res.json({ ok: true, ...result });
+    } catch (err) {
+      if (err.code === 'bad_request') return eprFailure(res, err, 400);
+      console.error('Identity release failed:', err.message);
+      return res.status(503).json({
+        error: 'disclosure_not_recorded',
+        message:
+          'The release could not be recorded, so no identity was released.',
       });
     }
   },

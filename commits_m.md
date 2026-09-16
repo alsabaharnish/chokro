@@ -17,6 +17,107 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-09-16 20:15 (+06) — The lawful-disclosure path, and Chokro's proposed answer to decision 9
+
+The producer's chain-of-custody export replaces each disposal id with a
+per-organisation HMAC, which is what makes the export releasable at all. But a
+pseudonym Chokro could not reverse made the export **unauditable**: if the DoE
+pointed at a row and asked for the evidence, nothing in the codebase could
+answer. `server/src/disclosure.js` is that answer and is the only path that
+undoes SEC-3's de-identification on purpose.
+
+Shaped around three refusals. **A regulator reference has no default** — a
+disclosure without a recorded reason is not a disclosure, it is a lookup tool
+over pseudonymised data, which is the thing SEC-3 exists to stop somebody
+building. **The audit entry is written before the resolution runs**, the way
+`viewAs` records a view before assembling one; a test asserts that a resolution
+which cannot be recorded reads nothing at all. **Naming the person is a second
+endpoint with its own audit action**, because most regulator questions are
+"did this collection happen" and answering one must not hand over a person as a
+side effect.
+
+**A bug I wrote and caught before it could matter.** The reverse lookup has to
+try the unkeyed pseudonym too, for exports generated before `AUDIT_CHAIN_KEY`
+was set. I implemented that as a plain SHA-256 — but `reportJobs.pseudonym`
+falls back to an EMPTY STRING key, not to a different algorithm, so the unkeyed
+form is still an HMAC keyed `':<orgId>'`. The two digests differ completely.
+The symptom would have been Chokro telling a regulator that a genuine row is
+unknown. Found by testing the two implementations against each other rather
+than by reading them, and there are now three tests pinning them together
+because drift here is silent and catastrophic.
+
+**The index test caught the new composite query** (`attributions: orgId ==,
+disposalId ==`) before it could become a production FAILED_PRECONDITION. Added.
+
+**Decision 9 now has a proposed answer, recorded as proposed.** Chokro's
+position: refuse erasure of a disposal record outright — it is the transparency
+the scheme rests on — while account data stays erasable and the mapping is kept
+solely for lawful disclosure. That is a fourth option none of the three in the
+retention schedule covered, and it sharpens the question for counsel
+considerably.
+
+Two things stated alongside it rather than glossed. Retaining the mapping makes
+the exported rows **pseudonymised, not anonymised**, so they remain personal
+data in most readings — Q5 becomes more central under this position, not less.
+And the right to erasure is not absolute but is also not Chokro's to disapply:
+a company may rely on an exemption, not declare a right inapplicable. The
+schedule's dispositions were deliberately NOT changed to match, because writing
+the preferred answer in before counsel confirms it is the substitution the
+module exists to prevent.
+
+The consent draft's deletion paragraph promised severing, which was never
+chosen. Rewritten in both languages to say plainly that disposal records stay —
+a less comfortable thing to ask someone to agree to, and the honest description
+of what the system does. Bengali re-verified NFC-clean.
+
+Files: `server/src/disclosure.js`, `server/test/disclosure.test.js` (new, 21
+tests), `server/src/producerAudit.js` (two audit actions),
+`server/src/index.js` (two routes), `firestore.indexes.json`,
+`docs/DATA_FLOW_MAP.md`, `docs/RETENTION_SCHEDULE.md`,
+`docs/CHAMPION_CONSENT_LANGUAGE.md`
+Checks: 1106 server tests pass (41 suites, +22), 66 indexes validate.
+
+## 2026-09-16 18:40 (+06) — Three deployment answers, and the bin/date risk formally accepted
+
+**EPR-33 bin/date floor: declined.** The recommendation in `DATA_FLOW_MAP.md`
+§6.1 was to suppress `binId` on (bin, date) groups below the k-anonymity floor
+in the chain-of-custody export. The answer was no, on the ground that it
+changes the contents of a regulator-facing report.
+
+So the promise came out instead of the gap being closed. The Champion consent
+draft had said *"where very few people have used a bin, we hide the location
+details"*, which was only ever true of the aggregate district breakdown and
+never of the row-level export. **Removed in both English and Bengali**, and
+replaced with a plain statement that bin and date are included. Bengali
+re-verified NFC-normalised with no replacement characters after the edit — the
+third time in this project that check has been worth running.
+
+§6.1 now RECORDS a decision rather than repeating a recommendation, and says
+what was traded: the remaining controls bound who receives the export and how
+often, not what it discloses. Counsel gets a new Q6 — whether the PDPA accepts
+disclosure where minimisation was available and declined is a different
+question from the one a mitigated system would ask.
+
+**PUBLIC_BASE_URL set to `https://chokro.onrender.com`** in `server/.env`, with
+a comment saying why it cannot be wrong. It had been mistaken for a marketing
+domain; it is the address of the service that answers
+`GET /passports/verify/:serial`, printed into a PDF that leaves Chokro. Still
+needs setting in Render's own environment — a local `.env` does not reach
+production.
+
+**AUDIT_CHAIN_KEY was set, and that has a consequence nobody had written
+down.** `computeDigest` switches between plain SHA-256 and HMAC on whether the
+key is present, so every entry written before the key was set now recomputes to
+a different digest. Verified by running both paths against one entry: the
+digests differ. Any chain with pre-key history will now verify as BROKEN — a
+false alarm on the one control that must never cry wolf. Flagged to the user;
+the fix depends on whether production holds real entries yet.
+
+Files: `docs/DATA_FLOW_MAP.md`, `docs/CHAMPION_CONSENT_LANGUAGE.md`,
+`server/.env`
+Checks: no code changed, so no gate run. Bengali verified NFC with the removed
+sentence absent from the whole file.
+
 ## 2026-09-16 17:05 (+06) — Widget tests for the Phase E Admin screens, and two bugs they found
 
 The five-tab oversight console and the producer detail screen shipped with no

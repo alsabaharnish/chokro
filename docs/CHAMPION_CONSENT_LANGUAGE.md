@@ -59,8 +59,9 @@ existing Champion.
 > not on request.
 >
 > **What they do receive** is the packaging: what it was, what it weighed, the
-> district, the bin, and the date. Where very few people have used a bin, we
-> hide the location details so that no single person can be picked out.
+> district, the bin, and the date. Nothing in that list names you, but a bin
+> and a date together are specific, so we tell you plainly that they are
+> included.
 >
 > **Your photographs stay with us.** We use them to check that a disposal
 > really happened. Location and device information is removed from every photo
@@ -73,9 +74,14 @@ existing Champion.
 > them.
 >
 > **You can ask us to delete your account at any time.** We will remove your
-> personal information and your photographs. The packaging measurements already
-> counted towards a company's certificate stay in our records, with nothing
-> left in them that points to you.
+> name, your email address and your profile.
+>
+> **Your disposal records stay.** Once packaging you disposed of has counted
+> towards a company's certificate, that record is the proof the certificate is
+> honest, and we keep it. It holds no name, no email and no account — only what
+> the packaging was, where and when. If the Department of Environment formally
+> asks us to, and only then, we can connect a record back to an account, and we
+> write down every time we do.
 >
 > [ ] I understand and agree.
 
@@ -94,8 +100,8 @@ existing Champion.
 > অ্যাকাউন্ট, পয়েন্ট বা ছবি — কিছুই পায় না। এখনও নয়, চাইলেও নয়।
 >
 > **তারা যা পায়** তা হলো প্যাকেজিংটি: সেটি কী ছিল, কত ওজন, কোন জেলা, কোন বিন,
-> আর কোন তারিখ। যেসব বিন খুব কম মানুষ ব্যবহার করেছেন, সেখানে আমরা অবস্থানের
-> তথ্য লুকিয়ে রাখি, যাতে কোনো একজন ব্যক্তিকে আলাদা করে চেনা না যায়।
+> আর কোন তারিখ। এর কোনোটিতেই আপনার নাম থাকে না, তবে বিন আর তারিখ একসঙ্গে
+> নির্দিষ্ট তথ্য — তাই আমরা স্পষ্ট করেই জানাচ্ছি যে এগুলো অন্তর্ভুক্ত থাকে।
 >
 > **আপনার ছবি আমাদের কাছেই থাকে।** আমরা সেগুলো দিয়ে যাচাই করি যে ফেলার ঘটনাটি
 > সত্যিই ঘটেছে। ছবি তোলার সঙ্গে সঙ্গেই, আপনার ফোন থেকে বের হওয়ার আগেই, অবস্থান
@@ -105,10 +111,15 @@ existing Champion.
 > পেছনে আপনার ফেলা প্যাকেজিংও আছে — আমাদের প্রমাণ করতে হয় সেই সার্টিফিকেট সঠিক
 > ছিল। তাই নিয়ন্ত্রক সংস্থা যতদিন জানতে চাইতে পারে, ততদিন সেই রেকর্ড রাখা হয়।
 >
-> **আপনি যেকোনো সময় অ্যাকাউন্ট মুছে ফেলতে বলতে পারেন।** আমরা আপনার ব্যক্তিগত
-> তথ্য ও ছবি সরিয়ে ফেলব। যে ওজনের হিসাব ইতিমধ্যে কোনো কোম্পানির সার্টিফিকেটে
-> যুক্ত হয়ে গেছে, তা আমাদের রেকর্ডে থেকে যাবে — তবে তাতে আপনাকে চেনার মতো
-> কিছুই আর থাকবে না।
+> **আপনি যেকোনো সময় অ্যাকাউন্ট মুছে ফেলতে বলতে পারেন।** আমরা আপনার নাম,
+> ইমেইল ঠিকানা ও প্রোফাইল সরিয়ে ফেলব।
+>
+> **আপনার ফেলার রেকর্ড থেকে যাবে।** আপনার ফেলা প্যাকেজিং একবার কোনো কোম্পানির
+> সার্টিফিকেটে গণনা হয়ে গেলে, সেই রেকর্ডই প্রমাণ করে সার্টিফিকেটটি সঠিক — তাই
+> আমরা তা রেখে দিই। তাতে কোনো নাম, ইমেইল বা অ্যাকাউন্ট থাকে না — শুধু থাকে
+> প্যাকেজিংটি কী ছিল, কোথায় আর কখন। পরিবেশ অধিদপ্তর আনুষ্ঠানিকভাবে চাইলে, এবং
+> কেবল তখনই, আমরা কোনো রেকর্ডকে অ্যাকাউন্টের সঙ্গে মেলাতে পারি — এবং প্রতিবার
+> তা লিখে রাখি।
 >
 > [ ] আমি বুঝেছি এবং সম্মত আছি।
 
@@ -122,10 +133,12 @@ existing Champion.
 | "never receive your name, email, account, points, photographs" | SEC-3; `projectForProducer` allowlist; no image path in `passportPdf.js` | Yes |
 | "not now, and not on request" | No producer route exposes a Champion identifier under any parameter | Yes |
 | "what it was, what it weighed, the district, the bin, the date" | `chainOfCustody` columns | Yes — **see §4.1** |
-| "where very few people have used a bin, we hide the location" | k-anonymity floor | **Only partly true — §4.1** |
+| "a bin and a date together are specific, so we tell you plainly" | No floor on the row-level export — stated rather than claimed away | Yes — **§4.1** |
 | "removed the moment you take it, before it leaves your phone" | `keepExif: false` at every capture path | Yes |
 | "kept for as long as the regulator may ask" | NFR-E-8 | Deliberately vague — §4.2 |
-| "nothing left in them that points to you" | Severing; attributions hold no uid | **Conditional — §4.3** |
+| "holds no name, no email and no account" | Attributions hold no uid — verified | Yes |
+| "only then... and we write down every time" | `disclosure.js`; refused without a DoE reference; audited before it runs | Yes |
+| "your disposal records stay" | Chokro's proposed position | **Pending counsel — §4.3** |
 
 ---
 
@@ -134,18 +147,34 @@ existing Champion.
 These are the review-critical items. Each is a sentence that is currently
 *aspirational*, and each must either become true or come out.
 
-### 4.1 "we hide the location details" — partly untrue today
+### 4.1 The location promise was removed, because the protection was declined
 
-The k-anonymity floor suppresses the **district breakdown** in aggregate
-figures. It does **not** apply to the chain-of-custody export, which hands a
-producer one row per attribution carrying `binId` and `date` with no floor at
-all — the exact "single bin, single day" shape SEC-3 names as isolating an
-individual. [DATA_FLOW_MAP.md §6.1](DATA_FLOW_MAP.md).
+The draft originally said *"where very few people have used a bin, we hide the
+location details so that no single person can be picked out."*
 
-**Either close the gap or do not make the promise.** The recommendation in the
-map is to apply the same floor per (bin, date) group in that export. Until that
-lands, this sentence overstates the protection, and a consent that overstates
-protection is worse than one that says less.
+That was only partly true. The k-anonymity floor suppresses the **district
+breakdown** in aggregate figures; it does **not** apply to the chain-of-custody
+export, which hands a producer one row per attribution carrying `binId` and
+`date` with no floor at all — the exact "single bin, single day" shape SEC-3
+names as isolating an individual ([DATA_FLOW_MAP.md §6.1](DATA_FLOW_MAP.md)).
+
+**Decision, 16 September 2026: the floor will not be extended to the row-level
+export.** So the promise came out rather than the gap being closed, in both
+languages. The consent now states that bin and date are included and claims no
+protection over them.
+
+This is the honest option of the two available, and it is the weaker one. A
+reviewer should know what was traded: the residual re-identification risk in
+§6.1 of the map is **accepted, not mitigated**, and the controls that remain
+are `orgOwner`-only access, export quotas and audit logging (SEC-6, SEC-11),
+the per-organisation pseudonym on the disposal reference, and reduction of the
+timestamp to a date. Those bound who receives the export and how often. They do
+not bound what it discloses.
+
+**This is the sharpest question for the reviewer**, and §6 repeats it: is
+telling a Champion plainly that their bin and date are shared with a commercial
+third party sufficient under the PDPA, or does the Act require the
+minimisation itself?
 
 ### 4.2 "as long as the regulator may ask" — vague because the number is unknown
 
@@ -155,19 +184,35 @@ whether the PDPA permits a duration stated by reference to a regulatory horizon
 rather than in years. If it does not, this sentence cannot be finalised until
 Q3 is answered — and this consent screen is then blocked on it.
 
-### 4.3 "nothing left in them that points to you" — true only if severing is what happens
+### 4.3 "Your disposal records stay" — Chokro's position, not yet counsel's
 
-This describes the **sever** disposition: purge `disposals`, keep
-`attributions` with the `disposalId` link cut. That is what the schedule
-records as the intent, but no executor exists, and whether severing satisfies
-the PDPA is counsel Q1.
+The draft used to say the retained measurements had *"nothing left in them that
+points to you"*, which described severing — an option that was never chosen.
 
-If the answer is that attributions must be purged too, this sentence stays true
-and NFR-E-8 breaks. If the answer is that both must be retained intact, **this
-sentence becomes false** and the draft needs a harder one — something closer to
-*"measurements already counted towards a company's certificate cannot be
-removed"*, which is a materially less comfortable thing to ask someone to agree
-to, and worth knowing before launch rather than after.
+Chokro's position, recorded 16 September 2026 and set out in full at
+[DATA_FLOW_MAP.md §5.1](DATA_FLOW_MAP.md): **erasure of a disposal record is
+refused**, on the ground that the record is the transparency the scheme rests
+on. Account data — name, email, profile — remains erasable.
+
+The draft now says that plainly rather than implying the comfortable version.
+Two things a reviewer must weigh:
+
+- **It is less comfortable to agree to.** A Champion is being asked to accept
+  that one category of their data is permanent. That is the honest description
+  of what the system does, and a consent that described the pleasant
+  alternative would not be consent to this system.
+- **The right to erasure is not absolute, but it is not Chokro's to
+  disapply.** A legal-obligation exemption is standard and this position may
+  well hold. But a company may *rely on an exemption*; it may not *declare a
+  right inapplicable*. If the exemption does not reach this data, having
+  already told Champions they cannot delete makes the position worse, not
+  better. **This is the single most important thing for the reviewer to
+  confirm or reject.**
+
+The disclosure half is built and behaves as described: `disclosure.js` is
+Admin-only, refuses without a recorded regulator reference, writes to the audit
+chain before resolving anything, and treats naming a person as a separate act
+from producing evidence.
 
 ---
 
@@ -183,12 +228,15 @@ Not a copy change:
    "updated", which means people have already used the app under a basis that
    did not mention producer reporting.
 4. **Bengali in the app**, at least on this screen — §1.2.
-5. **A deletion request path.** The draft promises one. There is no such path
-   today, and promising a right the product cannot exercise is its own problem.
-6. **A decision on §4.1** before the sentence about hiding locations ships.
+5. **An account-deletion path.** The draft promises one, scoped to name,
+   email and profile. There is no such path today, and promising a right the
+   product cannot exercise is its own problem. Unlike before, what it must do
+   is now specified: delete the account, retain the disposals.
+6. ~~A decision on §4.1~~ — taken. The sentence was removed; no work
+   outstanding.
 
-Items 1–3 are ordinary work. Item 5 is blocked on open decision 9 in the same
-way the executor is: what "delete" *does* is the undecided question.
+Items 1–3 are ordinary work. Item 5 is now buildable — §4.3 settles what
+"delete" does, subject to counsel confirming Chokro may scope it that way.
 
 ---
 
@@ -208,8 +256,15 @@ Specific questions, beyond "is this adequate":
    suffice?
 4. Is a single combined consent acceptable, or must producer reporting be
    separable from the disposal-photograph processing it depends on?
-5. Children. The draft assumes an adult reader. Chokro has no age gate.
-6. Does the re-consent in §5.3 need to block app use until answered, or may it
+5. **§4.3 — the priority.** May Chokro refuse erasure of disposal records
+   under a legal-obligation exemption while honouring account deletion? A no
+   means this consent cannot ship as drafted.
+6. **§4.1.** Is disclosing that bin and date are shared sufficient, or does
+   the PDPA require the minimisation regardless of what the consent says?
+   Chokro has chosen disclosure over suppression; this is the decision
+   most likely to need revisiting.
+7. Children. The draft assumes an adult reader. Chokro has no age gate.
+8. Does the re-consent in §5.3 need to block app use until answered, or may it
    be dismissible?
 
 ---

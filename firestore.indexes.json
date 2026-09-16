@@ -1024,6 +1024,24 @@
       ]
     },
     {
+      "collectionGroup": "attributions",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "orgId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "disposalId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "__name__",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "attributionConfirmations",
       "queryScope": "COLLECTION",
       "fields": [

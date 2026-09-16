@@ -120,6 +120,13 @@ it is not entitled to the operator.
 - Packaging facts: SKU id and revision, units, unit mass, total mass, gazette
   category, method, confidence tier, reversal flag.
 
+**Reversible by Chokro, on lawful request only.** `server/src/disclosure.js`
+resolves a `disposalRef` back to its evidence for a regulator. Admin-only,
+refused without a recorded DoE reference, and written to the audit chain before
+it runs. Naming the Champion is a second endpoint with its own audit action,
+because most regulator questions are about whether a collection happened rather
+than who performed it.
+
 > **The pseudonym is only as strong as `AUDIT_CHAIN_KEY`.** Unset, the HMAC is
 > unkeyed and reversible by anyone who can guess disposal ids. The code says so
 > rather than hiding it (line 1462). **This variable is unset in deployment
@@ -236,11 +243,55 @@ So the erasure question is narrower and more tractable than SEC-13 assumes:
    re-derivability or only reproducibility is a question for counsel, and it is
    the question that decides this.
 
+### 5.1 Chokro's proposed position (16 September 2026) — *pending counsel*
+
+Recorded as **proposed**, not decided. It is a position to put to a lawyer, and
+counsel may reject it.
+
+1. **The compliance record carries no identifiers.** Already true, and now
+   permanent by design rather than by accident.
+2. **Every disposal carries a unique pseudonymous reference**, per organisation,
+   from which a regulator can demand the evidence.
+3. **Chokro holds the mapping and discloses it only on lawful request** —
+   implemented in `server/src/disclosure.js`, Admin-only, refused without a
+   regulator reference, and recorded in the audit chain before it runs.
+4. **A producer never sees a person.** Already true, and enforced by a test
+   across all 28 producer-facing routes.
+5. **Erasure of a disposal is refused**, on the ground that the record is the
+   transparency the whole scheme rests on. Account data — name, email, profile
+   — would still be erasable.
+
+**What this changes, and what it does not.**
+
+It sharpens the question considerably. It is no longer "sever or purge"; it is:
+
+> May Chokro refuse erasure of disposal records under a legal-obligation
+> exemption, while honouring account deletion, and retaining the pseudonymous
+> mapping solely for lawful disclosure to the DoE?
+
+That is answerable yes or no, and it separates account deletion (probably
+honourable) from disposal retention (proposed refusal).
+
+**It does not make the data non-personal.** If Chokro retains the mapping, the
+exported rows are **pseudonymised, not anonymised** — and pseudonymised data
+whose key the controller holds is still personal data in most readings. What
+the design achieves is that *no personal data reaches a producer*, which is
+real, valuable, and separate. Q5 becomes more central under this position, not
+less.
+
+**And the right to erasure is not Chokro's to disapply.** It is genuinely not
+absolute, and a legal-obligation exemption is a standard one, so the position
+may well hold. But relying on an exemption and declaring a right inapplicable
+are different things, and only the first is available. If the exemption does
+not cover this, having already told Champions they cannot delete compounds the
+problem rather than avoiding it.
+
 **Questions for counsel, in the order they unblock work:**
 
-- **Q1.** Does severing the `disposalId` link satisfy a PDPA erasure request,
-  given the attribution that survives contains no identifier? *(If yes, the
-  tension SEC-13 describes largely dissolves.)*
+- **Q1.** *(Reframed by §5.1.)* May Chokro refuse erasure of a disposal under
+  a legal-obligation exemption, while honouring account deletion? If not, does
+  severing the `disposalId` link satisfy the request instead? *(Either answer
+  closes this; the first is Chokro's preference.)*
 - **Q2.** Does the DoE's audit horizon require re-derivability from primary
   evidence (the photograph), or only reproducibility of the figure? *(Decides
   whether §5.3 severing is available at all.)*
@@ -251,16 +302,24 @@ So the erasure question is narrower and more tractable than SEC-13 assumes:
   producer under the chain-of-custody export? Chokro cannot delete from a
   producer's downloaded file; the contractual term, if one is needed, is a
   legal instrument, not a technical control.
-- **Q5.** Is the per-organisation pseudonym (§3.2) sufficient de-identification
-  under the PDPA, or is a keyed HMAC of an identifier still personal data in
-  the regulator's reading? *(If the latter, chain-of-custody needs rethinking,
-  not reconfiguring.)*
+- **Q5.** *(Now central — see §5.1.)* Chokro retains the ability to reverse the
+  per-organisation pseudonym, so the exported rows are pseudonymised rather
+  than anonymised. Is that sufficient de-identification under the PDPA, or is a
+  keyed HMAC of an identifier still personal data? *(A "still personal"
+  reading does not break the disclosure design, but it does mean the export
+  itself is a transfer of personal data to a third party and needs its own
+  basis.)*
+- **Q6.** §6.1: the row-level export discloses bin and date with no
+  k-anonymity floor. The available mitigation was considered and declined, and
+  the Champion consent now discloses the disclosure instead. Does the PDPA
+  accept disclosure where minimisation was available? *(A yes closes §6.1. A
+  no makes it release-blocking.)*
 
 ---
 
 ## 6. Residual risks
 
-### 6.1 Bin and date cross row-level with no k-anonymity floor — *recommend changing*
+### 6.1 Bin and date cross row-level with no k-anonymity floor — *risk accepted*
 
 SEC-3 names **"a single bin, a single day"** as precisely the shape that
 isolates an individual. `projectForProducer` applies the floor to the aggregate
@@ -272,17 +331,34 @@ that say *"someone disposed of this brand's packaging at this bin on this
 day"*. With a handful of rows on one bin-day that is a re-identification
 vector, and one a person standing near that bin could resolve by observation.
 
-Mitigations in place: `orgOwner` only; export quota and audit logging (SEC-6,
-SEC-11); the disposal reference is pseudonymous; the time is reduced to a date.
-These bound who gets it and how often, not what it discloses.
+**Decision, 16 September 2026: not mitigated. The risk is accepted.**
 
-**Recommendation:** apply the same k-anonymity floor per (bin, date) group —
-suppress `binId` (keeping `district`) on groups below the floor, and state the
-suppression in the export the way `districtSuppressed` states it in the
-aggregate. This is a contained change. **Flagged for the spec author as a
-change to EPR-33, not made unilaterally** — it alters a report's contents, and
-an auditor who expects a bin column would read a silently absent one as an
-error.
+The recommendation was to apply the same k-anonymity floor per (bin, date)
+group — suppressing `binId` while keeping `district` below the floor, and
+stating the suppression the way `districtSuppressed` states it in the
+aggregate. That was declined, on the ground that it changes the contents of a
+regulator-facing report (EPR-33). This section records the decision rather than
+repeating the recommendation.
+
+What was traded, stated plainly because a data-flow map that recorded only the
+controls would be the wrong document:
+
+- **Remaining controls bound WHO receives the export and how often**, not what
+  it discloses: `orgOwner` only; export quota and audit logging (SEC-6,
+  SEC-11); the disposal reference is pseudonymous per organisation; the
+  timestamp is reduced to a date.
+- **The Champion consent no longer claims otherwise.** The draft had promised
+  that thin bins were hidden. That sentence was removed in both languages
+  rather than left standing as a false assurance — see
+  [CHAMPION_CONSENT_LANGUAGE.md §4.1](CHAMPION_CONSENT_LANGUAGE.md).
+- **Counsel should be told this specifically.** It is now question Q6 in §5:
+  whether disclosure satisfies the PDPA where minimisation was available and
+  declined is a materially different question from the one a mitigated system
+  would ask.
+
+**Revisit if any of these change:** a producer requests an export covering a
+period with very few disposals; the PDPA's guidance on minimisation is
+published; or a Champion asks what a producer can see about them.
 
 ### 6.2 `AUDIT_CHAIN_KEY` unset
 
