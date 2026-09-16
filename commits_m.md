@@ -17,6 +17,182 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-09-17 01:30 (+06) — Disclosure as a guarded power: step-up auth, a written reason, and an open register
+
+The disclosure endpoints existed and only curl could reach them. They are now a
+tab in the EPR oversight console, with the controls asked for: a password gate,
+a recorded declaration, and time, address, device and location on every access.
+
+**Where the password goes: nowhere near Chokro.** The client re-authenticates
+against Firebase, which refreshes `auth_time` in the ID token; the server reads
+that claim and refuses anything older than five minutes. This service never
+receives, forwards or stores a password and there is no code path that could.
+Two details that would have made it fail silently: `reauthenticateWithCredential`
+updates the session but NOT the cached ID token, so `getIdToken(true)` is
+mandatory or the step-up succeeds on the client and is refused on the server;
+and the client's unlock window is thirty seconds SHORTER than the server's, so
+the screen asks again slightly before the server would refuse — an expired
+unlock discovered after writing a declaration is a declaration written twice.
+
+**A reference number says which request; it does not say why.** So a written
+declaration is required — a sentence, not a keystroke — and it is read back on
+the register by somebody who was not there. It goes into the tamper-evident
+chain summary verbatim, not only into the readable row.
+
+**Location is asked for, not taken, and a refusal is recorded AS a refusal.**
+Never a blank: "would not say" and "could not say" are different things to read
+six months later, and the model keeps `denied` and `unavailable` apart all the
+way from `LocationOutcome` to the register row. A declined location does not
+block the disclosure — that would make the control bypassable with a system
+setting and would punish an Admin for a browser preference. A "granted"
+location whose coordinates are out of range is downgraded rather than stored,
+because a malformed pair renders as a pin in the Gulf of Guinea and reads as a
+real place.
+
+**Recorded twice, on purpose.** The audit chain is tamper-evident and is why
+this is evidence; it is also a hash-linked list of summary strings and a poor
+thing to read. `disclosureLog` is the readable half. A register write failure
+does NOT fail the disclosure — the chain entry has already committed, so
+refusing at that point would leave an audit entry for a resolution that never
+ran. The screen says the register row is missing rather than hiding it.
+
+**The register needs no unlock.** An Admin checking whether a colleague's
+access was proper must not face the same barrier as the access itself.
+
+**A latent trap found on the way.** `firestoreIndexes.test.js` mapped
+`HEAD_COLLECTION` to 'auditChainHeads'; the real constant is
+'producerAuditHeads'. Harmless today — heads are reached by `.doc(orgId)` only
+— but the first `.where()` anyone added there would have been validated against
+a collection that does not exist and passed without an index. Fixed, with the
+reason recorded next to it.
+
+Files: `server/src/disclosure.js`, `server/src/index.js`,
+`server/test/disclosure.test.js`, `server/test/firestoreIndexes.test.js`,
+`firestore.indexes.json`, `firestore.rules`,
+`lib/models/disclosure_model.dart`, `lib/services/disclosure_service.dart`,
+`lib/controllers/disclosure_controller.dart`,
+`lib/views/admin/admin_disclosure_view.dart` (new),
+`lib/views/admin/admin_epr_oversight_view.dart`,
+`test/disclosure_model_test.dart` (new)
+Checks: 1146 server tests (42 suites, +22), 1109 Flutter tests (+17), 346 rules
+tests, 67 indexes validate, analyze clean.
+
+## 2026-09-16 23:45 (+06) — Erasure requests stay by email, which exposed a missing door
+
+**Decision: no self-service deletion request.** A Champion emails; an Admin
+runs the flow. Recorded in `CHAMPION_CONSENT_LANGUAGE.md` §5.5 as a decision
+rather than left sitting as an outstanding gap.
+
+Defensible scope — a human reading each request catches the ones that are
+really something else, and the volume does not justify a flow yet. But it makes
+something release-blocking that was not before: **the app contains no contact
+address anywhere.** Grepped for it: no support screen, no `mailto`, no
+published email. The only "contact" string in the product tells a suspended
+user to "Contact a 3ZERO Admin" without saying how.
+
+So the consent draft now names the route explicitly in both languages, because
+a right whose only door is unmarked is not a right anyone can exercise — and a
+consent that says "you can ask us" without saying where reads as an assurance
+rather than an instruction. `[DELETION_REQUEST_ADDRESS]` is a deliberate
+placeholder: it must be a monitored inbox, not a personal one, because it
+becomes the data-protection contact of record.
+
+Added reviewer question 6: the PDPA may require the erasure request route to be
+as accessible as the one used to collect the data — which here was two taps
+inside the app. If it does, email alone will not hold and the self-service flow
+becomes mandatory rather than optional. Worth knowing before the decision
+hardens.
+
+Files: `docs/CHAMPION_CONSENT_LANGUAGE.md`
+Checks: no code changed. Bengali re-verified NFC-clean, both deletion
+paragraphs read back and confirmed parallel.
+
+## 2026-09-16 23:10 (+06) — The deletion flow an Admin can actually run
+
+`accountDeletion.js` existed and nothing could reach it but curl. Same gap the
+disclosure module has. This closes it for deletion.
+
+**The retained list is shown BEFORE the button, and first.** An Admin deleting
+an account is acting for somebody who is not in the room and will be asked
+afterwards what happened to their data. A deletion flow that shows what it kept
+only on the outcome screen delivers that knowledge after the one moment it was
+useful. So the dialog opens on "What is kept", then "What is removed", then the
+button.
+
+**Contested retentions are marked as Chokro's position.** `RetainedCategory`
+carries a `contested` flag from the server, and the dialog renders it as a
+label plus a sentence telling the Admin to say these are retained and why —
+not that they were deleted. An Admin answering "will my disposals go?" needs to
+know which half of their answer is settled law and which is decision 9.
+
+**A partial deletion never renders as a clean one.** The server's 207 reaches
+the screen as "Partly deleted" with the failed steps named in error tone, and
+`DeletionOutcome.complete` treats an ABSENT field as incomplete — a missing
+field must never read as reassurance here. Tested both ways.
+
+**Deletion sits behind an overflow menu, not beside Suspend.** Suspension is
+reversible and routine; erasure is neither. A one-tap-away red button next to
+one an Admin presses often is how the wrong one gets pressed. This also left
+the existing Suspend interaction untouched, so nothing already depending on it
+moved.
+
+The dialog is not dismissible by tapping outside: at the confirm step a stray
+tap should read as neither "cancel" nor "go ahead".
+
+Files: `lib/models/account_deletion_model.dart`,
+`lib/services/account_deletion_service.dart`,
+`lib/views/admin/account_deletion_dialog.dart` (new),
+`lib/controllers/admin_users_controller.dart`,
+`lib/views/admin/admin_users_view.dart`,
+`test/account_deletion_dialog_test.dart` (new, 10 tests),
+`docs/CHAMPION_CONSENT_LANGUAGE.md`
+Checks: 1092 Flutter tests pass (+10), analyze clean, 1124 server tests pass.
+
+## 2026-09-16 21:30 (+06) — Account deletion: the half of an erasure request nobody disagrees about
+
+The consent draft promises a Champion can ask to be deleted. There was no such
+path anywhere in `lib/` or `server/src/` — the only `deleteUser` call in the
+codebase is an invitation rollback.
+
+**Why this could be built while decision 9 is still open, when `retention.js`
+refuses to delete anything.** Four answers are on the table and they disagree
+completely about disposals. They agree entirely about the account: every one of
+them has `users: purge`. A name, an email, a profile photograph and a push
+token have no compliance role under any reading — they are not evidence of
+anything a certificate claims. So this module does the half they share and
+touches nothing they dispute, and returns the retained list so nobody has to
+infer it.
+
+**The user document is tombstoned, not deleted.** Retained records reference
+the uid — `disposals.userId`, orders, transactions. Deleting the document turns
+every one into a dangling pointer, and a dangling pointer does not read as
+"this person asked to be erased". It reads as corruption, which invites
+somebody to go looking for the missing record and makes the erasure less final
+rather than more. A tombstone answers the question instead.
+
+**The order of operations is the load-bearing detail.** Identity first, then
+the sign-in, then the incidentals. A run that dies after step one leaves a
+nameless account with a working login, which re-running fixes. The reverse
+order leaves a named account nobody can reach, which is the worst of both. A
+test pins the order rather than trusting the code to keep it.
+
+**Partial failure is never reported as success.** Cloudinary being down must
+not leave the name in place, so each step is caught and named rather than
+thrown; `complete` is false whenever anything failed and the route answers 207
+rather than 200. A deletion reported as done with a silent partial failure is
+how somebody is told they were forgotten when they were not. `auth/user-not-
+found` is treated as success in disguise — the outcome asked for is that the
+account is unreachable, and it already is.
+
+Admin-triggered, matching every other destructive job here (§3.3 has no
+scheduler). The self-service request flow is the remaining half of the
+promise, and both docs now say so rather than claiming the right is honoured.
+
+Files: `server/src/accountDeletion.js`, `server/test/accountDeletion.test.js`
+(new, 17 tests), `server/src/index.js` (plan + execute routes),
+`docs/CHAMPION_CONSENT_LANGUAGE.md`, `docs/RETENTION_SCHEDULE.md`
+Checks: 1124 server tests pass (42 suites, +18).
+
 ## 2026-09-16 20:15 (+06) — The lawful-disclosure path, and Chokro's proposed answer to decision 9
 
 The producer's chain-of-custody export replaces each disposal id with a

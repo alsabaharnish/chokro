@@ -121,11 +121,29 @@ it is not entitled to the operator.
   category, method, confidence tier, reversal flag.
 
 **Reversible by Chokro, on lawful request only.** `server/src/disclosure.js`
-resolves a `disposalRef` back to its evidence for a regulator. Admin-only,
-refused without a recorded DoE reference, and written to the audit chain before
-it runs. Naming the Champion is a second endpoint with its own audit action,
-because most regulator questions are about whether a collection happened rather
-than who performed it.
+resolves a `disposalRef` back to its evidence for a regulator, and it is the
+only path in the service that deliberately re-identifies a person. Five
+controls, none of them skippable:
+
+| Control | What it means |
+|---|---|
+| **Admin only** | `requireAdmin`; a producer cannot reach it at all |
+| **Recent proof of the password** | `requireFreshAuth(5 min)` — an unattended signed-in laptop cannot re-identify anybody. The password goes to Firebase, never to this service; the server reads `auth_time` from the token |
+| **A regulator reference** | No default. A disclosure without a recorded request is a lookup tool over pseudonymised data |
+| **A written reason** | The Admin's own words, a sentence minimum, read back on the register by somebody who was not there |
+| **Time, address, device and location** | Recorded with every access. A location the Admin's device refuses is recorded **as a refusal**, never as a blank — a refusal is a fact about the access |
+
+Recorded **twice**: the audit chain (tamper-evident, and the reason it is
+evidence) and `disclosureLog` (structured and readable, and the reason anyone
+will actually check). The chain entry is written *before* the resolution runs.
+
+The register is readable by any Admin **without** stepping up — oversight has
+to be cheaper than the thing it oversees. Reached at *EPR oversight →
+Disclosure*.
+
+Naming the Champion is a second endpoint with its own audit action, because
+most regulator questions are about whether a collection happened rather than
+who performed it.
 
 > **The pseudonym is only as strong as `AUDIT_CHAIN_KEY`.** Unset, the HMAC is
 > unkeyed and reversible by anyone who can guess disposal ids. The code says so

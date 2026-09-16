@@ -58,6 +58,7 @@ const anomalies = require('./anomalies');
 const reconciliation = require('./reconciliation');
 const viewAsOrganization = require('./viewAsOrganization');
 const disclosure = require('./disclosure');
+const accountDeletion = require('./accountDeletion');
 const attribute = require('./attribute');
 const { uploadImage, MAX_BYTES } = require('./cloudinary');
 const { uploadAndSaveProfilePhoto } = require('./profilePhoto');
@@ -954,6 +955,15 @@ app.post('/config/points', requireAuth, requireAdmin, writeLimit, async (req, re
 
 /** How recently a session must have signed in to change membership (SEC-9). */
 const PRIVILEGED_AUTH_MAX_AGE_SECONDS = 30 * 60;
+
+/**
+ * How recently an Admin must have proved their password before a disclosure.
+ *
+ * Shorter than the producer-portal window. Resolving a pseudonym is the one
+ * action in this service that deliberately re-identifies a person, and an hour
+ * of "I signed in earlier" is not the standard that should apply to it.
+ */
+const DISCLOSURE_AUTH_MAX_AGE_SECONDS = 5 * 60;
 
 /**
  * The origin printed on a Plastic Passport as its verification address.
@@ -2834,6 +2844,90 @@ app.post(
 );
 
 /**
+ * The disclosure register (SEC-13).
+ *
+ * Every resolution and every identity release, newest first: who, what, when,
+ * from where, under which regulator request, and why in their own words.
+ *
+ * A plain read, deliberately — reading the register must not itself require
+ * fresh authentication, or an Admin checking whether a colleague's access was
+ * proper would face the same barrier as the access. Oversight has to be easier
+ * than the thing it oversees.
+ */
+app.get(
+  '/epr/admin/disclosure/register',
+  requireAuth,
+  requireAdmin,
+  readLimit,
+  async (req, res) => {
+    try {
+      const register = await disclosure.disclosureRegister({
+        limit: req.query.limit,
+        orgId: req.query.orgId || null,
+      });
+      return res.json({ ok: true, ...register });
+    } catch (err) {
+      console.error('Disclosure register read failed:', err.message);
+      return res.status(503).json({ error: 'register_unavailable' });
+    }
+  },
+);
+
+/**
+ * Champion account deletion (SEC-13).
+ *
+ * The half of an erasure request that all four answers to open decision 9
+ * agree on: the name, the email, the photograph, the sign-in. What they
+ * disagree about — disposals, financial records — is untouched here and
+ * reported in the response so nobody has to infer it.
+ *
+ * Admin-only and irreversible. A self-service path is the right destination;
+ * this is the right first step, and matches every other destructive job in
+ * this codebase.
+ */
+app.get(
+  '/admin/accounts/:uid/deletion-plan',
+  requireAuth,
+  requireAdmin,
+  readLimit,
+  async (req, res) => {
+    try {
+      const plan = await accountDeletion.planDeletion(req.params.uid);
+      return res.json({ ok: true, ...plan });
+    } catch (err) {
+      if (err.code === 'bad_request') return eprFailure(res, err, 400);
+      console.error('Deletion plan failed:', err.message);
+      return res.status(503).json({ error: 'plan_unavailable' });
+    }
+  },
+);
+
+app.post(
+  '/admin/accounts/:uid/delete',
+  requireAuth,
+  requireAdmin,
+  writeLimit,
+  async (req, res) => {
+    try {
+      const result = await accountDeletion.deleteAccount({
+        uid: req.params.uid,
+        actorUid: req.user.uid,
+        actorName: req.user.name || '',
+        reason: req.body?.reason || '',
+      });
+      // 207 when some step failed. A partial erasure reported as 200 is how
+      // somebody gets told they were forgotten when they were not.
+      return res.status(result.complete === false ? 207 : 200)
+        .json({ ok: true, ...result });
+    } catch (err) {
+      if (err.code === 'bad_request') return eprFailure(res, err, 400);
+      console.error('Account deletion failed:', err.message);
+      return res.status(503).json({ error: 'deletion_failed' });
+    }
+  },
+);
+
+/**
  * Lawful disclosure to the regulator (SEC-13).
  *
  * Resolves a pseudonymous `disposalRef` from a chain-of-custody export back to
@@ -2853,6 +2947,12 @@ app.post(
   '/epr/admin/disclosure/resolve',
   requireAuth,
   requireAdmin,
+  // SEC-9. An Admin who signed in this morning and left the tab open must
+  // prove possession of their password again before de-identifying anybody.
+  // The password itself never reaches this service — the client
+  // re-authenticates against Firebase, which refreshes `auth_time`, and this
+  // reads that claim.
+  requireFreshAuth(DISCLOSURE_AUTH_MAX_AGE_SECONDS),
   writeLimit,
   async (req, res) => {
     try {
@@ -2860,6 +2960,8 @@ app.post(
         orgId: req.body?.orgId,
         disposalRef: req.body?.disposalRef,
         doeReference: req.body?.doeReference,
+        declaration: req.body?.declaration,
+        location: req.body?.location || null,
         periodId: req.body?.periodId || null,
         adminUid: req.user.uid,
         adminName: req.user.name || '',
@@ -2894,6 +2996,7 @@ app.post(
   '/epr/admin/disclosure/identity',
   requireAuth,
   requireAdmin,
+  requireFreshAuth(DISCLOSURE_AUTH_MAX_AGE_SECONDS),
   writeLimit,
   async (req, res) => {
     try {
@@ -2901,6 +3004,8 @@ app.post(
         orgId: req.body?.orgId,
         disposalId: req.body?.disposalId,
         doeReference: req.body?.doeReference,
+        declaration: req.body?.declaration,
+        location: req.body?.location || null,
         adminUid: req.user.uid,
         adminName: req.user.name || '',
         ip: req.ip,

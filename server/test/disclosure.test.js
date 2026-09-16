@@ -31,6 +31,9 @@ const disclosure = require('../src/disclosure');
 
 const ADMIN = { adminUid: 'admin-1', adminName: 'Ayesha Rahman' };
 const DOE = 'DoE/EPR/2026/0041';
+const WHY = 'Answering the Department of Environment audit of Padma Beverages '
+  + 'quarter three chain-of-custody export.';
+const AT = { doeReference: DOE, declaration: WHY };
 
 function attributionPage(rows) {
   return {
@@ -73,6 +76,9 @@ function fakeDb({ attributions = [], disposal = undefined, user = undefined }) {
             get: async () => ({ exists: user !== undefined, data: () => user }),
           }),
         };
+      }
+      if (name === 'disclosureLog') {
+        return { add: async () => ({ id: 'register-1' }) };
       }
       throw new Error(`unexpected collection ${name}`);
     },
@@ -152,6 +158,7 @@ describe('a disclosure without a lawful basis is refused', () => {
         orgId: 'org-1',
         disposalRef: ref,
         doeReference,
+        declaration: WHY,
         ...ADMIN,
       }),
     ).rejects.toThrow(/reference/);
@@ -177,7 +184,7 @@ describe('a disclosure without a lawful basis is refused', () => {
       disclosure.resolveDisposalRef({
         orgId: 'org-1',
         disposalRef: 'not-a-digest',
-        doeReference: DOE,
+        ...AT,
         ...ADMIN,
       }),
     ).rejects.toThrow(/chain-of-custody/);
@@ -189,7 +196,7 @@ describe('a disclosure without a lawful basis is refused', () => {
       disclosure.resolveDisposalRef({
         orgId: 'org-1',
         disposalRef: ref,
-        doeReference: DOE,
+        ...AT,
         adminUid: '',
       }),
     ).rejects.toThrow(/Admin/);
@@ -209,7 +216,7 @@ describe('the resolution is recorded before it runs', () => {
       disclosure.resolveDisposalRef({
         orgId: 'org-1',
         disposalRef: 'a'.repeat(24),
-        doeReference: DOE,
+        ...AT,
         ...ADMIN,
       }),
     ).rejects.toThrow('chain unavailable');
@@ -226,7 +233,7 @@ describe('the resolution is recorded before it runs', () => {
     await disclosure.resolveDisposalRef({
       orgId: 'org-1',
       disposalRef: 'a'.repeat(24),
-      doeReference: DOE,
+      ...AT,
       ...ADMIN,
     });
 
@@ -262,7 +269,7 @@ describe('resolving a reference', () => {
     const result = await disclosure.resolveDisposalRef({
       orgId: ORG,
       disposalRef: ref,
-      doeReference: DOE,
+      ...AT,
       ...ADMIN,
     });
 
@@ -288,7 +295,7 @@ describe('resolving a reference', () => {
     const result = await disclosure.resolveDisposalRef({
       orgId: ORG,
       disposalRef: ref,
-      doeReference: DOE,
+      ...AT,
       ...ADMIN,
     });
 
@@ -319,7 +326,7 @@ describe('resolving a reference', () => {
     const result = await d.resolveDisposalRef({
       orgId: ORG,
       disposalRef: oldRef,
-      doeReference: DOE,
+      ...AT,
       ...ADMIN,
     });
 
@@ -347,7 +354,7 @@ describe('resolving a reference', () => {
     const result = await disclosure.resolveDisposalRef({
       orgId: ORG,
       disposalRef: ref,
-      doeReference: DOE,
+      ...AT,
       ...ADMIN,
     });
 
@@ -366,7 +373,7 @@ describe('resolving a reference', () => {
     const result = await disclosure.resolveDisposalRef({
       orgId: ORG,
       disposalRef: 'b'.repeat(24),
-      doeReference: DOE,
+      ...AT,
       ...ADMIN,
     });
 
@@ -404,7 +411,7 @@ describe('releasing an identity', () => {
     const result = await disclosure.releaseIdentity({
       orgId: 'org-1',
       disposalId: 'disposal-abc',
-      doeReference: DOE,
+      ...AT,
       ...ADMIN,
     });
 
@@ -426,7 +433,7 @@ describe('releasing an identity', () => {
     const result = await disclosure.releaseIdentity({
       orgId: 'org-1',
       disposalId: 'disposal-gone',
-      doeReference: DOE,
+      ...AT,
       ...ADMIN,
     });
 
@@ -435,5 +442,223 @@ describe('releasing an identity', () => {
     // Still recorded. An attempt to name someone is worth a line in the log
     // whether or not it succeeded.
     expect(audit.append).toHaveBeenCalledTimes(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The declaration
+// ---------------------------------------------------------------------------
+
+describe('a disclosure requires a written reason', () => {
+  const ref = 'a'.repeat(24);
+
+  test.each([
+    ['absent', undefined],
+    ['empty', ''],
+    ['a keystroke', 'x'],
+    ['a word', 'audit'],
+    ['just under a sentence', 'DoE asked for this'],
+    ['whitespace padding a short reason', '   audit    '],
+    ['not a string', 42],
+  ])('%s is refused', async (_label, declaration) => {
+    await expect(
+      disclosure.resolveDisposalRef({
+        orgId: 'org-1',
+        disposalRef: ref,
+        doeReference: DOE,
+        declaration,
+        ...ADMIN,
+      }),
+    ).rejects.toThrow(/written reason/);
+    // Refused before the chain is touched, so a rejected attempt cannot pad
+    // the log.
+    expect(audit.append).not.toHaveBeenCalled();
+  });
+
+  test('a real sentence is accepted and normalised', () => {
+    expect(disclosure.normaliseDeclaration(`  Answering   the   DoE audit
+      of Padma Beverages.  `)).toBe('Answering the DoE audit of Padma Beverages.');
+  });
+
+  test('naming a person needs its own reason, not the resolution\'s', async () => {
+    await expect(
+      disclosure.releaseIdentity({
+        orgId: 'org-1',
+        disposalId: 'disposal-abc',
+        doeReference: DOE,
+        declaration: 'ok',
+        ...ADMIN,
+      }),
+    ).rejects.toThrow(/written reason/);
+  });
+
+  test('the reason is written into the chain entry verbatim', async () => {
+    firebase.db.mockReturnValue(fakeDb({ attributions: [] }));
+
+    await disclosure.resolveDisposalRef({
+      orgId: 'org-1',
+      disposalRef: ref,
+      ...AT,
+      ...ADMIN,
+    });
+
+    // Six months later this is the only thing that says why. It has to be in
+    // the tamper-evident record, not only in the readable one.
+    expect(audit.append.mock.calls[0][0].summary).toContain(WHY);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Where the Admin was
+// ---------------------------------------------------------------------------
+
+describe('location is recorded, including its absence', () => {
+  test('a granted location is kept with its accuracy', () => {
+    expect(
+      disclosure.normaliseLocation({
+        status: 'granted',
+        latitude: 23.8103,
+        longitude: 90.4125,
+        accuracyM: 12.4,
+      }),
+    ).toEqual({
+      status: 'granted',
+      latitude: 23.8103,
+      longitude: 90.4125,
+      accuracyM: 12,
+    });
+  });
+
+  test('a refusal is recorded AS a refusal, not as a blank', () => {
+    // The distinction the whole field turns on. "The Admin would not say where
+    // they were" is a fact about the access; an empty column is not.
+    expect(disclosure.normaliseLocation({ status: 'denied' })).toEqual({
+      status: 'denied',
+      latitude: null,
+      longitude: null,
+      accuracyM: null,
+    });
+  });
+
+  test('no location at all is `unavailable`, never null', () => {
+    for (const value of [null, undefined, 'somewhere', 42]) {
+      expect(disclosure.normaliseLocation(value).status).toBe('unavailable');
+    }
+  });
+
+  test.each([
+    ['out of range latitude', { status: 'granted', latitude: 100, longitude: 90 }],
+    ['out of range longitude', { status: 'granted', latitude: 23, longitude: 200 }],
+    ['non-numeric', { status: 'granted', latitude: 'here', longitude: 'there' }],
+    ['missing coordinates', { status: 'granted' }],
+  ])('a "granted" location that is %s is downgraded, not stored', (_l, value) => {
+    // A malformed pair would render as a pin in the Gulf of Guinea and read as
+    // a real place.
+    expect(disclosure.normaliseLocation(value).status).toBe('unavailable');
+    expect(disclosure.normaliseLocation(value).latitude).toBeNull();
+  });
+
+  test('the chain summary says where, or why not', () => {
+    expect(
+      disclosure.describeLocation({
+        status: 'granted', latitude: 23.8103, longitude: 90.4125, accuracyM: 12,
+      }),
+    ).toBe('23.81030, 90.41250 ±12m');
+    expect(disclosure.describeLocation({ status: 'denied' }))
+      .toBe('refused by the Admin’s device');
+    expect(disclosure.describeLocation({ status: 'unavailable' }))
+      .toBe('not available');
+  });
+
+  test('a refused location still lets the disclosure proceed', async () => {
+    firebase.db.mockReturnValue(fakeDb({ attributions: [] }));
+
+    await disclosure.resolveDisposalRef({
+      orgId: 'org-1',
+      disposalRef: 'a'.repeat(24),
+      ...AT,
+      location: { status: 'denied' },
+      ...ADMIN,
+    });
+
+    // Refusing the disclosure over a declined location would make the control
+    // trivially bypassable by turning location services off, and would punish
+    // the Admin for a browser setting rather than recording a fact.
+    expect(audit.append.mock.calls[0][0].summary).toContain('refused by the Admin');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// The readable register
+// ---------------------------------------------------------------------------
+
+describe('the register', () => {
+  test('a register write failure does not fail the disclosure', async () => {
+    firebase.db.mockReturnValue({
+      collection: (name) => {
+        if (name === 'disclosureLog') {
+          return { add: async () => { throw new Error('register offline'); } };
+        }
+        if (name === 'attributions') {
+          const q = {
+            where: () => q, orderBy: () => q, limit: () => q,
+            get: async () => ({ empty: true, size: 0, docs: [] }),
+          };
+          return q;
+        }
+        throw new Error(`unexpected ${name}`);
+      },
+    });
+
+    const result = await disclosure.resolveDisposalRef({
+      orgId: 'org-1',
+      disposalRef: 'a'.repeat(24),
+      ...AT,
+      ...ADMIN,
+    });
+
+    // The chain entry has already committed, so the access IS recorded.
+    // Refusing here would leave an audit entry for a resolution that never
+    // ran, which is a worse record than a missing readable row.
+    expect(result.found).toBe(false);
+    expect(result.registerId).toBeNull();
+  });
+
+  test('it reports whether it reached its bound', async () => {
+    const rows = Array.from({ length: 3 }, (_, i) => ({
+      id: `r${i}`,
+      data: () => ({ kind: 'resolve', at: `2026-09-1${i}`, declaration: WHY }),
+    }));
+    firebase.db.mockReturnValue({
+      collection: () => ({
+        where: function () { return this; },
+        orderBy: function () { return this; },
+        limit: function () { return this; },
+        get: async () => ({ size: rows.length, docs: rows }),
+      }),
+    });
+
+    const register = await disclosure.disclosureRegister({ limit: 2 });
+
+    // A register of privileged accesses that silently truncated would be the
+    // one document where a missing row matters most.
+    expect(register.complete).toBe(false);
+    expect(register.entries).toHaveLength(2);
+  });
+
+  test('an entry with no stored location still reports a status', async () => {
+    firebase.db.mockReturnValue({
+      collection: () => ({
+        orderBy: function () { return this; },
+        limit: function () { return this; },
+        get: async () => ({
+          size: 1,
+          docs: [{ id: 'r1', data: () => ({ kind: 'resolve', at: '2026-09-16' }) }],
+        }),
+      }),
+    });
+
+    const register = await disclosure.disclosureRegister();
+    expect(register.entries[0].location.status).toBe('unavailable');
   });
 });

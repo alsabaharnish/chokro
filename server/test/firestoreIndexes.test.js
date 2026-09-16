@@ -113,7 +113,12 @@ const CONSTANTS = {
   ANOMALIES: 'eprAnomalies',
   PERIODS: 'eprPeriods',
   COLLECTION: 'producerAuditLog',
-  HEAD_COLLECTION: 'auditChainHeads',
+  // 'auditChainHeads' until 2026-09-16, which no query has ever used — heads
+  // are reached by `.doc(orgId)` only. A wrong name here is silent: the first
+  // `.where()` anyone adds on this collection would be validated against a
+  // collection that does not exist and pass without an index.
+  HEAD_COLLECTION: 'producerAuditHeads',
+  REGISTER: 'disclosureLog',
   'passports.PASSPORTS': 'plasticPassports',
   'audit.COLLECTION': 'producerAuditLog',
   'declarations.DECLARATIONS': 'putOnMarketDeclarations',

@@ -15,6 +15,7 @@ import '../shared/content_state.dart';
 import '../shared/error_retry.dart';
 import '../shared/notice_card.dart';
 import '../shared/rejection_reason_dialog.dart';
+import 'admin_disclosure_view.dart';
 
 /// Chokro checking its own work (EPR-43, EPR-45, EPR-47, EPR-48, EPR-17).
 ///
@@ -54,7 +55,7 @@ class AdminEprOversightView extends ConsumerStatefulWidget {
 
 class _AdminEprOversightViewState extends ConsumerState<AdminEprOversightView>
     with SingleTickerProviderStateMixin {
-  late final TabController _tabs = TabController(length: 5, vsync: this);
+  late final TabController _tabs = TabController(length: 6, vsync: this);
 
   @override
   void dispose() {
@@ -79,6 +80,10 @@ class _AdminEprOversightViewState extends ConsumerState<AdminEprOversightView>
               Tab(text: 'Reconciliation'),
               Tab(text: 'Accuracy'),
               Tab(text: 'Issuance'),
+              // Last, and named for what it is. It is the only tab here that
+              // re-identifies a person, and it should not sit between two
+              // that do not.
+              Tab(text: 'Disclosure'),
             ],
           ),
           Expanded(
@@ -90,6 +95,7 @@ class _AdminEprOversightViewState extends ConsumerState<AdminEprOversightView>
                 _ReconciliationTab(),
                 _AccuracyTab(),
                 _IssuanceTab(),
+                AdminDisclosureTab(),
               ],
             ),
           ),

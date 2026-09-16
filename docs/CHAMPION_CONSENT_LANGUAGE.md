@@ -73,8 +73,9 @@ existing Champion.
 > right, so those records are kept for as long as the regulator may ask about
 > them.
 >
-> **You can ask us to delete your account at any time.** We will remove your
-> name, your email address and your profile.
+> **You can ask us to delete your account at any time.** Email us at
+> **[DELETION_REQUEST_ADDRESS]** and we will remove your name, your email
+> address and your profile.
 >
 > **Your disposal records stay.** Once packaging you disposed of has counted
 > towards a company's certificate, that record is the proof the certificate is
@@ -111,7 +112,8 @@ existing Champion.
 > পেছনে আপনার ফেলা প্যাকেজিংও আছে — আমাদের প্রমাণ করতে হয় সেই সার্টিফিকেট সঠিক
 > ছিল। তাই নিয়ন্ত্রক সংস্থা যতদিন জানতে চাইতে পারে, ততদিন সেই রেকর্ড রাখা হয়।
 >
-> **আপনি যেকোনো সময় অ্যাকাউন্ট মুছে ফেলতে বলতে পারেন।** আমরা আপনার নাম,
+> **আপনি যেকোনো সময় অ্যাকাউন্ট মুছে ফেলতে বলতে পারেন।**
+> **[DELETION_REQUEST_ADDRESS]** ঠিকানায় আমাদের ইমেইল করুন — আমরা আপনার নাম,
 > ইমেইল ঠিকানা ও প্রোফাইল সরিয়ে ফেলব।
 >
 > **আপনার ফেলার রেকর্ড থেকে যাবে।** আপনার ফেলা প্যাকেজিং একবার কোনো কোম্পানির
@@ -139,6 +141,8 @@ existing Champion.
 | "holds no name, no email and no account" | Attributions hold no uid — verified | Yes |
 | "only then... and we write down every time" | `disclosure.js`; refused without a DoE reference; audited before it runs | Yes |
 | "your disposal records stay" | Chokro's proposed position | **Pending counsel — §4.3** |
+| "we will remove your name, your email address and your profile" | `accountDeletion.js` — does exactly this | Yes |
+| "email us at …" | The only request route, by decision. **Address not yet set** | **Blocked on §5.5** |
 
 ---
 
@@ -228,15 +232,35 @@ Not a copy change:
    "updated", which means people have already used the app under a basis that
    did not mention producer reporting.
 4. **Bengali in the app**, at least on this screen — §1.2.
-5. **An account-deletion path.** The draft promises one, scoped to name,
-   email and profile. There is no such path today, and promising a right the
-   product cannot exercise is its own problem. Unlike before, what it must do
-   is now specified: delete the account, retain the disposals.
+5. **An account-deletion path.** ~~There is no such path today.~~ **Built and
+   operable.** `server/src/accountDeletion.js` erases the half all four answers
+   to decision 9 agree on — name, email, photograph, sign-in, push tokens,
+   cart — and touches nothing they disagree about. An Admin runs it from the
+   accounts screen; the dialog shows the retained list *before* offering the
+   button, marks contested entries as Chokro's position rather than settled
+   law, and never renders a partial deletion as a clean one.
+
+   **Decision, 16 September 2026: requests stay by email. No self-service
+   request flow.** Recorded as a decision rather than left as a gap.
+
+   That is a defensible scope — a human reading each request catches the ones
+   that are really something else, and the volume does not yet justify a flow.
+   But it makes one thing release-blocking that was not before: **the app
+   contains no contact address anywhere.** No support screen, no `mailto`, no
+   published email. The only "contact" string in the product tells a suspended
+   user to *"Contact a 3ZERO Admin"* without saying how.
+
+   A right whose only door is unmarked is not a right anyone can exercise. So
+   the consent text now names the address, and **`[DELETION_REQUEST_ADDRESS]`
+   is a placeholder that must be replaced before this ships.** A monitored
+   inbox, not a personal one — it becomes the data-protection contact of
+   record.
+
 6. ~~A decision on §4.1~~ — taken. The sentence was removed; no work
    outstanding.
 
-Items 1–3 are ordinary work. Item 5 is now buildable — §4.3 settles what
-"delete" does, subject to counsel confirming Chokro may scope it that way.
+Items 1–3 are ordinary work. Item 5 runs end to end for an Admin; what is
+left is publishing an address a Champion can write to.
 
 ---
 
@@ -259,12 +283,16 @@ Specific questions, beyond "is this adequate":
 5. **§4.3 — the priority.** May Chokro refuse erasure of disposal records
    under a legal-obligation exemption while honouring account deletion? A no
    means this consent cannot ship as drafted.
-6. **§4.1.** Is disclosing that bin and date are shared sufficient, or does
+6. **§5.5.** Erasure requests are email-only by decision. Does the PDPA require
+   the request route to be as accessible as the one used to collect the data —
+   which here was two taps inside the app? If it does, email alone will not
+   hold and a self-service flow becomes mandatory rather than optional.
+7. **§4.1.** Is disclosing that bin and date are shared sufficient, or does
    the PDPA require the minimisation regardless of what the consent says?
    Chokro has chosen disclosure over suppression; this is the decision
    most likely to need revisiting.
-7. Children. The draft assumes an adult reader. Chokro has no age gate.
-8. Does the re-consent in §5.3 need to block app use until answered, or may it
+8. Children. The draft assumes an adult reader. Chokro has no age gate.
+9. Does the re-consent in §5.3 need to block app use until answered, or may it
    be dismissible?
 
 ---

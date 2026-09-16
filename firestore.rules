@@ -1634,6 +1634,23 @@ service cloud.firestore {
     }
 
     // -------------------------------------------------------------------------
+    // disclosureLog — the register of regulator disclosures (SEC-13)
+    // -------------------------------------------------------------------------
+    //
+    // Denied to everybody, including administrators. The catch-all below would
+    // already do this; the block is here because a register of privileged
+    // accesses is exactly the collection a reader comes to this file to check,
+    // and not finding it reads as an oversight rather than as a decision.
+    //
+    // Written by the Admin SDK, which bypasses rules, and read back only
+    // through `/epr/admin/disclosure/register` — so the read is logged and
+    // rate-limited rather than being a direct client query.
+
+    match /disclosureLog/{entryId} {
+      allow read, write: if false;
+    }
+
+    // -------------------------------------------------------------------------
     // Everything else is denied.
     // -------------------------------------------------------------------------
 

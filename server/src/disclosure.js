@@ -31,6 +31,26 @@
  * two calls with two audit actions, and an Admin who only needed the first
  * cannot acquire the second by accident.
  *
+ * **A declaration, not just a reference.** The regulator's request number says
+ * WHICH request this answers. It does not say why this Admin is resolving this
+ * reference, and six months later that is the thing nobody will remember. So a
+ * written justification is required alongside it, long enough to be a sentence
+ * rather than a keystroke.
+ *
+ * **Recent proof of the credential.** These routes carry `requireFreshAuth`
+ * (SEC-9): an Admin who signed in this morning and left the tab open must
+ * prove possession of their password again before de-identifying anybody.
+ *
+ * NOTE ON WHERE THE PASSWORD GOES: nowhere near this service. The client
+ * re-authenticates against Firebase directly, which refreshes `auth_time` in
+ * the token; the server reads that claim and refuses a stale one. Chokro never
+ * receives, forwards or stores the password, and there is no code path here
+ * that could.
+ *
+ * **Where the Admin was.** Recorded when the browser grants it and recorded as
+ * REFUSED when it does not — never left blank. A blank reads as "not
+ * collected"; a refusal is a fact about the access and belongs in its record.
+ *
  * **This module holds the key that makes the data personal.** Chokro can
  * reverse the pseudonym, therefore the exported rows are pseudonymised and not
  * anonymised, therefore they remain personal data in most readings of the
@@ -40,7 +60,7 @@
 
 const crypto = require('crypto');
 
-const { db } = require('./firebase');
+const { db, serverTimestamp } = require('./firebase');
 const audit = require('./producerAudit');
 const reportJobs = require('./reportJobs');
 const eprPeriod = require('./eprPeriod');
@@ -48,6 +68,19 @@ const eprPeriod = require('./eprPeriod');
 const ATTRIBUTIONS = 'attributions';
 const DISPOSALS = 'disposals';
 const USERS = 'users';
+/**
+ * The readable register of every disclosure.
+ *
+ * The audit chain already records these and is tamper-evident, which is what
+ * makes it EVIDENCE. It is also a hash-linked list of summary strings, which
+ * makes it a poor thing to read. This collection is the other half: structured,
+ * queryable, and answering "who resolved what, when, from where, and why"
+ * without walking a chain.
+ *
+ * Both are written. Neither replaces the other — the chain proves the register
+ * has not been edited, and the register is the one a person actually reads.
+ */
+const REGISTER = 'disclosureLog';
 
 /**
  * The most attributions one resolution will read.
@@ -112,6 +145,60 @@ function badRequest(message) {
   return error;
 }
 
+/**
+ * The Admin's written reason. A sentence, not a keystroke.
+ *
+ * Twenty characters is deliberately low as a bar and deliberately non-zero as a
+ * principle: it stops 'x' and 'test' without pretending a length check is a
+ * quality check. What actually makes this field work is that it is read back on
+ * the register, by somebody who was not there.
+ */
+function normaliseDeclaration(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim().replace(/\s+/g, ' ');
+  if (trimmed.length < 20) return null;
+  return trimmed.slice(0, 1000);
+}
+
+/**
+ * Where the Admin was, or why that is not known.
+ *
+ * Never null and never absent. `status` is always one of granted / denied /
+ * unavailable, so a record with no coordinates still says which of the three
+ * happened — and "the Admin refused to share their location" is a fact about
+ * the access, not a gap in it.
+ */
+function normaliseLocation(value) {
+  const unavailable = { status: 'unavailable', latitude: null, longitude: null, accuracyM: null };
+  if (!value || typeof value !== 'object') return unavailable;
+
+  const status = ['granted', 'denied', 'unavailable'].includes(value.status)
+    ? value.status
+    : 'unavailable';
+
+  if (status !== 'granted') {
+    return { status, latitude: null, longitude: null, accuracyM: null };
+  }
+
+  const lat = Number(value.latitude);
+  const lon = Number(value.longitude);
+  // A "granted" location that is not a coordinate is not granted. Downgraded
+  // rather than stored, because a malformed pair would render as a pin in the
+  // Gulf of Guinea and read as a real place.
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)
+      || lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+    return unavailable;
+  }
+
+  const accuracy = Number(value.accuracyM);
+  return {
+    status: 'granted',
+    latitude: lat,
+    longitude: lon,
+    accuracyM: Number.isFinite(accuracy) ? Math.round(accuracy) : null,
+  };
+}
+
 /** A 24-character lowercase hex digest, the shape `pseudonym` produces. */
 function isValidRef(value) {
   return typeof value === 'string' && /^[0-9a-f]{24}$/.test(value);
@@ -128,6 +215,8 @@ async function resolveDisposalRef({
   orgId,
   disposalRef,
   doeReference,
+  declaration,
+  location = null,
   periodId = null,
   adminUid,
   adminName = '',
@@ -156,6 +245,17 @@ async function resolveDisposalRef({
 
   const reference = doeReference.trim();
 
+  const why = normaliseDeclaration(declaration);
+  if (why === null) {
+    throw badRequest(
+      'A disclosure requires a written reason — at least a sentence saying '
+      + 'why this reference is being resolved. It is read back on the '
+      + 'register by somebody who was not there.',
+    );
+  }
+
+  const where = normaliseLocation(location);
+
   // FIRST, and allowed to fail the request.
   await audit.append({
     orgId,
@@ -168,7 +268,26 @@ async function resolveDisposalRef({
     summary:
       `Admin resolved a pseudonymous disposal reference under regulator `
       + `request ${reference}${periodId ? ` for ${periodId}` : ''}. `
+      + `Stated reason: "${why}". `
+      + `Location: ${describeLocation(where)}. `
       + 'Collection evidence only; the Champion was not named by this action.',
+    ip,
+    userAgent,
+  });
+
+  // The readable half. After the chain entry, deliberately: if the register
+  // write fails the disclosure is still recorded in the tamper-evident log,
+  // which is the one that matters. The reverse would leave a readable entry
+  // with nothing proving it was not edited.
+  const registerId = await writeRegister({
+    kind: 'resolve',
+    orgId,
+    subject: disposalRef,
+    doeReference: reference,
+    declaration: why,
+    location: where,
+    adminUid,
+    adminName,
     ip,
     userAgent,
   });
@@ -178,6 +297,7 @@ async function resolveDisposalRef({
   if (!match.disposalId) {
     return {
       found: false,
+      registerId,
       // The distinction a regulator's conclusion turns on. "We scanned
       // everything and this row is not ours" and "we stopped early" must never
       // render the same.
@@ -200,7 +320,10 @@ async function resolveDisposalRef({
   return {
     found: true,
     exhaustive: true,
+    registerId,
     doeReference: reference,
+    declaration: why,
+    location: where,
     // Which key minted the reference. A reference that resolves only unkeyed
     // came from an export generated before AUDIT_CHAIN_KEY was set.
     referenceKeyed: match.keyed,
@@ -316,6 +439,8 @@ async function releaseIdentity({
   orgId,
   disposalId,
   doeReference,
+  declaration,
+  location = null,
   adminUid,
   adminName = '',
   ip,
@@ -336,6 +461,17 @@ async function releaseIdentity({
 
   const reference = doeReference.trim();
 
+  const why = normaliseDeclaration(declaration);
+  if (why === null) {
+    throw badRequest(
+      'Naming a person requires a written reason — at least a sentence. This '
+      + 'is the strongest disclosure Chokro performs and the record of it has '
+      + 'to stand on its own.',
+    );
+  }
+
+  const where = normaliseLocation(location);
+
   await audit.append({
     orgId,
     action: audit.ACTIONS.DISCLOSURE_IDENTITY_RELEASED,
@@ -346,8 +482,23 @@ async function releaseIdentity({
     targetId: disposalId,
     summary:
       `Admin released the identity of the Champion behind disposal `
-      + `${disposalId} under regulator request ${reference}. This names a `
-      + 'person and is the strongest disclosure Chokro performs.',
+      + `${disposalId} under regulator request ${reference}. `
+      + `Stated reason: "${why}". `
+      + `Location: ${describeLocation(where)}. `
+      + 'This names a person and is the strongest disclosure Chokro performs.',
+    ip,
+    userAgent,
+  });
+
+  const registerId = await writeRegister({
+    kind: 'identity',
+    orgId,
+    subject: disposalId,
+    doeReference: reference,
+    declaration: why,
+    location: where,
+    adminUid,
+    adminName,
     ip,
     userAgent,
   });
@@ -356,6 +507,7 @@ async function releaseIdentity({
   if (!disposalSnap.exists) {
     return {
       released: false,
+      registerId,
       doeReference: reference,
       note:
         'The disposal record no longer exists, so there is no identity to '
@@ -367,6 +519,7 @@ async function releaseIdentity({
   if (!uid) {
     return {
       released: false,
+      registerId,
       doeReference: reference,
       note: 'That disposal carries no account reference.',
     };
@@ -377,7 +530,10 @@ async function releaseIdentity({
 
   return {
     released: true,
+    registerId,
     doeReference: reference,
+    declaration: why,
+    location: where,
     disposalId,
     champion: {
       uid,
@@ -388,8 +544,88 @@ async function releaseIdentity({
   };
 }
 
+/** A one-line rendering of a location for the chain's summary string. */
+function describeLocation(where) {
+  if (where.status === 'granted') {
+    const accuracy = where.accuracyM === null ? '' : ` ±${where.accuracyM}m`;
+    return `${where.latitude.toFixed(5)}, ${where.longitude.toFixed(5)}${accuracy}`;
+  }
+  if (where.status === 'denied') return 'refused by the Admin’s device';
+  return 'not available';
+}
+
+/**
+ * Writes the readable register entry. Never throws.
+ *
+ * A failure here must not fail the disclosure: the chain entry has already
+ * committed, so the access IS recorded, and refusing at this point would leave
+ * an audit entry for a resolution that never ran. Logged loudly instead, and
+ * the caller gets a null id, which the register screen renders as a gap rather
+ * than hiding.
+ */
+async function writeRegister(entry) {
+  try {
+    const ref = await db().collection(REGISTER).add({
+      ...entry,
+      userAgent: typeof entry.userAgent === 'string'
+        ? entry.userAgent.slice(0, 300)
+        : null,
+      at: new Date().toISOString(),
+      createdAt: serverTimestamp(),
+    });
+    return ref.id;
+  } catch (err) {
+    console.error('[disclosure] register write failed:', err.message);
+    return null;
+  }
+}
+
+/**
+ * The register, newest first.
+ *
+ * Bounded (QA-10), and `complete` says whether the bound was reached — a
+ * register of privileged accesses that silently truncated would be the one
+ * document where a missing row matters most.
+ */
+async function disclosureRegister({ limit = 100, orgId = null } = {}) {
+  const capped = Math.min(Math.max(Number(limit) || 100, 1), 500);
+
+  let query = db().collection(REGISTER);
+  if (orgId) query = query.where('orgId', '==', orgId);
+  query = query.orderBy('at', 'desc').limit(capped + 1);
+
+  const snap = await query.get();
+  const docs = snap.docs.slice(0, capped);
+
+  return {
+    complete: snap.size <= capped,
+    limit: capped,
+    entries: docs.map((doc) => {
+      const d = doc.data();
+      return {
+        id: doc.id,
+        kind: d.kind ?? null,
+        orgId: d.orgId ?? null,
+        subject: d.subject ?? null,
+        doeReference: d.doeReference ?? null,
+        declaration: d.declaration ?? null,
+        location: d.location ?? { status: 'unavailable', latitude: null, longitude: null, accuracyM: null },
+        adminUid: d.adminUid ?? null,
+        adminName: d.adminName ?? null,
+        ip: d.ip ?? null,
+        userAgent: d.userAgent ?? null,
+        at: d.at ?? null,
+      };
+    }),
+  };
+}
+
 module.exports = {
   resolveDisposalRef,
+  disclosureRegister,
+  normaliseDeclaration,
+  normaliseLocation,
+  describeLocation,
   releaseIdentity,
   // Exported for the drift test: the keyed candidate MUST equal the pseudonym
   // `reportJobs` mints, or a real row resolves as not found.

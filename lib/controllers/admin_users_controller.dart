@@ -4,6 +4,7 @@ import '../models/user_model.dart';
 import '../services/product_service.dart';
 import '../services/user_service.dart';
 import 'catalog_controller.dart';
+import '../services/account_deletion_service.dart';
 
 /// Uniquely named so it cannot collide with any `userServiceProvider` declared
 /// elsewhere. `UserService` holds only `FirebaseFirestore.instance`, so a
@@ -126,3 +127,13 @@ class AdminUserActions {
 final adminUserActionsProvider = Provider<AdminUserActions>((ref) {
   return AdminUserActions(ref);
 });
+
+/// The account-deletion service (SEC-13).
+///
+/// A `Provider` rather than a field on [AdminUserActions], so a test can
+/// override it without standing up the whole actions object — and because
+/// deletion is not a suspension: it shares no state and no failure vocabulary
+/// with the suspend/reinstate pair.
+final accountDeletionServiceProvider = Provider<AccountDeletionService>(
+  (ref) => AccountDeletionService(),
+);

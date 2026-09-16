@@ -7,6 +7,7 @@ import '../../core/constants.dart';
 import '../../core/label_format.dart';
 import '../../core/theme.dart';
 import '../../models/user_model.dart';
+import 'account_deletion_dialog.dart';
 import '../shared/app_shell.dart';
 import '../shared/app_snackbar.dart';
 import '../shared/content_state.dart';
@@ -85,6 +86,27 @@ class _AdminUsersViewState extends ConsumerState<AdminUsersView> {
       _search.clear();
       _filter = _Filter.all;
     });
+  }
+
+  /// Opens the deletion flow (SEC-13).
+  ///
+  /// No confirmation here — the dialog IS the confirmation, and it shows the
+  /// retained list before offering the button. A second "are you sure" in
+  /// front of it would train an Admin to dismiss the one that matters.
+  Future<void> _delete(UserModel user) async {
+    final outcome = await showAccountDeletionDialog(context, user);
+    if (outcome == null || !mounted) return;
+
+    final snack = ScaffoldMessenger.of(context);
+    snack.showSnackBar(
+      SnackBar(
+        content: Text(
+          outcome.complete
+              ? 'Account erased.'
+              : 'Partly erased — ${outcome.failed.length} step(s) did not run.',
+        ),
+      ),
+    );
   }
 
   Future<void> _suspend(UserModel user) async {
@@ -357,6 +379,7 @@ class _AdminUsersViewState extends ConsumerState<AdminUsersView> {
                               user: visible[index],
                               isSelf: visible[index].uid == currentUid,
                               onSuspend: () => _suspend(visible[index]),
+                              onDelete: () => _delete(visible[index]),
                               onReinstate: () => _reinstate(visible[index]),
                             ),
                           ),
@@ -435,6 +458,7 @@ class _UserCard extends StatelessWidget {
     required this.isSelf,
     required this.isBusy,
     required this.onSuspend,
+    required this.onDelete,
     required this.onReinstate,
   });
 
@@ -445,6 +469,9 @@ class _UserCard extends StatelessWidget {
   final bool isBusy;
 
   final VoidCallback onSuspend;
+
+  /// Opens the SEC-13 deletion flow.
+  final VoidCallback onDelete;
   final VoidCallback onReinstate;
 
   @override
@@ -554,6 +581,27 @@ class _UserCard extends StatelessWidget {
                   foregroundColor: theme.colorScheme.error,
                 ),
                 child: const Text('Suspend'),
+              ),
+            // Behind an overflow rather than beside Suspend, and deliberately.
+            // Suspension is reversible and routine; erasure is neither, and a
+            // one-tap-away red button next to a button an Admin presses often
+            // is how the wrong one gets pressed.
+            if (!isSelf)
+              PopupMenuButton<String>(
+                tooltip: 'More',
+                icon: const Icon(Icons.more_vert, size: 18),
+                onSelected: (value) {
+                  if (value == 'delete') onDelete();
+                },
+                itemBuilder: (context) => [
+                  PopupMenuItem(
+                    value: 'delete',
+                    child: Text(
+                      'Delete account…',
+                      style: TextStyle(color: theme.colorScheme.error),
+                    ),
+                  ),
+                ],
               ),
           ],
         ),

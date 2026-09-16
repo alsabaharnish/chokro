@@ -199,7 +199,15 @@ the spec had not.
   of zero**; the two must not render alike.
 - `erasureImpact(uid)` — see §6.
 
-**Deliberately not built: an executor.** There is no code path in Chokro that
+**Built separately: account deletion.** `server/src/accountDeletion.js` erases
+the half of an erasure request that all four answers to decision 9 agree on —
+name, email, profile photograph, sign-in, push tokens, cart — and touches
+nothing they disagree about. It tombstones the user document rather than
+deleting it, because retained records reference the uid and a dangling pointer
+reads as corruption rather than as an erasure. It is not the retention
+executor; it runs on request, not on a schedule, and it needs no duration.
+
+**Deliberately not built: a retention executor.** There is no code path in Chokro that
 deletes anything on a retention basis, and `retention.test.js` asserts the
 module exports none. Until open decision 9 is answered, `sever` and `purge` are
 indistinguishable guesses about the same record — `disposals` is the case in
