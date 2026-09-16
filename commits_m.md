@@ -17,6 +17,74 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-09-16 15:20 (+06) — SEC-13: the three deliverables that do not need counsel
+
+SEC-13 names four things required before launch. I had been calling the whole
+requirement blocked on legal counsel. Re-reading it, three of the four are
+engineering work and only the durations and the erasure-versus-compliance
+tension are a lawyer's.
+
+**EXIF (deliverable 3) was already done** — `keepExif: false` at every capture
+path, Cloudinary stripping again on transform. And the stronger clause, "EXIF
+is stripped on the served derivative", holds vacuously on the producer path:
+verified by inspection that `passportPdf.js`, `passports.js` and `reportJobs.js`
+contain **no image handling at all**. No photograph reaches a producer by any
+route.
+
+**The data-flow map** (`docs/DATA_FLOW_MAP.md`) enumerates every producer-facing
+route, what crosses, what is withheld, and the public verification surface.
+Writing it turned up one thing worth acting on: the k-anonymity floor is applied
+to the aggregate district breakdown but **not to the chain-of-custody export**,
+which hands a producer one row per attribution carrying `binId` and `date` with
+no floor — the exact "single bin, single day" shape SEC-3 names as isolating an
+individual. Flagged for the spec author as a change to EPR-33 rather than made
+unilaterally: it alters a report's contents, and an auditor who expects a bin
+column would read a silently absent one as an error.
+
+**The retention module inverts this codebase's usual rule about absence.**
+`eprPolicy.js` falls back to documented defaults because a verification that
+fails when nobody has opened the policy screen is the worse failure. Retention
+cannot work that way — a wrong duration either destroys evidence behind an
+issued certificate or keeps personal data past its basis, and both are the harm
+the schedule exists to prevent. So there are **no default durations**, an
+unconfigured collection **throws**, a malformed stored value reads as unset
+rather than being clamped into range, and `planExpiry` reports `unconfigured`
+and a null count rather than a count of zero — an unset schedule and an empty
+collection must never render alike.
+
+**No executor, deliberately.** Nothing in Chokro deletes on a retention basis,
+and a test asserts the module exports no such function. Until open decision 9
+is answered, `sever` and `purge` are indistinguishable guesses about the same
+record; `disposals` is the case in point.
+
+**What makes the legal question tractable:** an attribution holds no Champion
+identifier. It holds `disposalId`, a foreign key into `disposals`, which holds
+the uid. So the retained compliance record is about packaging and is personal
+only by way of a link that can be cut — which is a third option SEC-13's
+framing does not consider. `erasureImpact(uid)` measures that collision per
+Champion, so counsel answers a question with numbers on it rather than in the
+abstract.
+
+**My own completeness test caught four collections I had missed** — `orders`,
+`carts`, `products`, `donations`. Reading the spec had not found them; scanning
+the source for `.collection('x')` did. The scan strips comments first, which is
+the third time in this project that has been necessary.
+
+**The consent draft** (`docs/CHAMPION_CONSENT_LANGUAGE.md`) turned up two
+things before the wording: there is no consent surface in `lib/` to update at
+all, and the app is English-only while its users are not — so a Bengali version
+is a precondition of the text meaning anything, not a follow-up. Three sentences
+in the draft are ahead of the code and each is marked: the location-hiding
+promise depends on closing the gap above, the retention wording depends on Q3,
+and "nothing left that points to you" is true only if severing is what erasure
+turns out to mean.
+
+Files: `docs/DATA_FLOW_MAP.md`, `docs/RETENTION_SCHEDULE.md`,
+`docs/CHAMPION_CONSENT_LANGUAGE.md` (all new), `server/src/retention.js`,
+`server/test/retention.test.js`
+Checks: 1084 server tests pass (40 suites, +36 new). Bengali verified NFC-
+normalised with no replacement characters. No Dart changed.
+
 ## 2026-09-16 09:45 (+06) — The Admin console for Phase E
 
 Seven server surfaces that existed only as API endpoints now have screens.
