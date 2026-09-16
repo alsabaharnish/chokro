@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../controllers/account_profile_controller.dart';
+import '../../controllers/admin_oversight_controller.dart';
 import '../../controllers/admin_workload_controller.dart';
 import '../../controllers/auth_controller.dart';
 import '../../controllers/wallet_controller.dart';
@@ -263,6 +264,35 @@ class HomeView extends ConsumerWidget {
                                           ? null
                                           : () =>
                                                 context.push('/admin/producers'),
+                                    ),
+                                    // One card for five oversight surfaces.
+                                    //
+                                    // This grid is the ONLY place every admin
+                                    // screen is reachable, and it already holds
+                                    // ten. Five more cards would make fifteen;
+                                    // the five behind this one are a single
+                                    // activity — is what Chokro publishes
+                                    // defensible — and an investigation moves
+                                    // between them constantly.
+                                    ActionCard(
+                                      icon: Icons.fact_check_outlined,
+                                      title: 'EPR oversight',
+                                      subtitle:
+                                          'Anomalies, filed declarations, '
+                                          'reconciliation, recognition accuracy '
+                                          'and every certificate issued.',
+                                      badgeCount: ref
+                                          .watch(openAnomalyCountProvider)
+                                          .maybeWhen(
+                                            data: (count) => count,
+                                            orElse: () => 0,
+                                          ),
+                                      disabledSubtitle:
+                                          'Unavailable while suspended.',
+                                      tone: ActionTone.admin,
+                                      onTap: suspended
+                                          ? null
+                                          : () => context.push('/admin/epr'),
                                     ),
                                   ],
                                 ),

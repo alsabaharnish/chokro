@@ -31,6 +31,8 @@ import '../views/donations/donation_view.dart';
 import '../views/admin/admin_disposals_view.dart';
 import '../views/admin/admin_appeals_view.dart';
 import '../views/admin/admin_dashboard_view.dart';
+import '../views/admin/admin_epr_oversight_view.dart';
+import '../views/admin/admin_producer_detail_view.dart';
 import '../views/admin/admin_mass_queue_view.dart';
 import '../views/admin/admin_producers_view.dart';
 import '../views/producer/invitation_redeem_view.dart';
@@ -828,6 +830,25 @@ final routerProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/admin/mass-queue',
         builder: (context, state) => const AdminMassQueueView(),
+        redirect: requireAdmin,
+      ),
+      GoRoute(
+        path: '/admin/epr',
+        builder: (context, state) => const AdminEprOversightView(),
+        redirect: requireAdmin,
+      ),
+      // The first admin route with a path parameter, and deliberately.
+      //
+      // Every other admin screen is a flat parameterless list with detail in a
+      // dialog, which is right for "verify this SKU" and wrong for a whole
+      // read-only dashboard and a long history — both of which are inherently
+      // about ONE organisation. Reached from the producer list, which already
+      // exists.
+      GoRoute(
+        path: '/admin/producers/:orgId',
+        builder: (context, state) => AdminProducerDetailView(
+          orgId: state.pathParameters['orgId'] ?? '',
+        ),
         redirect: requireAdmin,
       ),
 

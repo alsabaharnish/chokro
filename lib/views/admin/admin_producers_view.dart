@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../controllers/admin_producers_controller.dart';
 import '../../core/api_config.dart';
@@ -255,6 +256,17 @@ class _ProducerCard extends ConsumerWidget {
               spacing: AppTheme.gapSm,
               runSpacing: AppTheme.gapSm,
               children: [
+                // Available whatever the organisation's status, including
+                // suspended and closed. Suspension makes a workspace read-only;
+                // it does not make the company's history unreadable, and the
+                // moment an Admin most needs to look at a producer's record is
+                // usually the moment it has just been suspended.
+                OutlinedButton.icon(
+                  onPressed: () =>
+                      context.push('/admin/producers/${organization.id}'),
+                  icon: const Icon(Icons.open_in_new, size: 18),
+                  label: const Text('Their view & history'),
+                ),
                 if (organization.isAwaitingReview) ...[
                   FilledButton.icon(
                     onPressed: () => _openReviewDialog(

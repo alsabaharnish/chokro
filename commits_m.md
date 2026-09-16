@@ -17,6 +17,89 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-09-16 09:45 (+06) — The Admin console for Phase E
+
+Seven server surfaces that existed only as API endpoints now have screens.
+
+**The information architecture came from one surviving agent.** I ran a
+workflow to map the existing Admin UI and propose an IA; it hit the session
+limit and six of seven agents died. The one that completed was the navigation
+mapper, and it settled the question on its own:
+
+  Home is the real admin hub — a grid of EXACTLY TEN ActionCards, and the only
+  place all ten admin screens are reachable. Six of them have no navigation
+  chrome at all, just a "back to home" button.
+
+  Admin detail is a DIALOG, not a route. Across all ten screens there are two
+  `context.push` calls. There is no `/admin/:orgId` precedent anywhere.
+
+  `badgeFor` is a hardcoded switch over Firestore STREAM counts. Every Phase E
+  count is REST, so a badge needs a new provider shape rather than a new case.
+
+So: **one new card, not five.** Seventeen cards would be unusable, and five more
+chrome-less screens would make every move between two oversight surfaces
+home → card → screen. The five cross-producer surfaces are one activity — is
+what Chokro publishes defensible — and an investigation moves between them
+constantly, so they became tabs on `/admin/epr` with ONE period selector shared
+across them. An Admin investigating September who switches from anomalies to
+accuracy is still investigating September.
+
+**One new precedent, set deliberately: `/admin/producers/:orgId`.** View-as is a
+whole read-only dashboard and a timeline is a long scroll; neither fits the
+dialog convention, and both are inherently about one organisation. Reached from
+the producer list, which already exists — and available whatever the
+organisation's status, because the moment an Admin most needs a producer's
+record is usually the moment it has just been suspended.
+
+**Every model here is about ABSENCE.** The server refuses to invent a figure it
+has no basis for, and a client that parsed null into zero would undo all of it
+in one line. The damage is asymmetric and worth spelling out:
+
+  A blank on a reconciliation screen reads as "checked and fine". So a
+  never-checked period reports a NULL variance, and the screen has three states
+  rather than two — agrees, disagrees, never checked.
+
+  A zero on an accuracy panel reads as "recognition is never right". So
+  precision below the sample floor renders the server's stated reason, not a
+  figure and not a dash.
+
+  A dash in a variance column reads as "no change". So a first filing says
+  "nothing to compare against" in words.
+
+**`isSafeReadOnlyView` is checked in the service, before the screen renders.**
+EPR-46 requires the view to be read-only and visually distinct. The payload
+asserts `readOnly`, `impersonation: false` and a capabilities block; if a future
+server change ever sent a writable payload down that route, the view refuses
+rather than quietly offering an Admin a write affordance under a producer's
+identity. A payload with the field MISSING is treated as unsafe — the assertion
+has to be present to count.
+
+The read-only tint runs behind the whole tab rather than sitting in a banner,
+because a banner scrolls away and the moment an Admin has most likely forgotten
+whose screen they are on is after a scroll.
+
+**Four surfaces require a reason, and all four reuse
+`showRejectionReasonDialog`** — which already enforces a minimum length and
+returns trimmed-or-null. The anomaly queue offers two buttons rather than one:
+"innocent — dismiss" and "real — actioned", with a line under them saying why
+both exist. Collapsing them would make the queue's own history useless for the
+question an auditor asks.
+
+**A partial recompute is reported as partial.** The server's recompute is
+resumable, so a large period needs more than one pass — and a partial pass's
+"variance" compares a full counter against a fraction of the rows. A console
+that ignored the cursor would report that as a result.
+
+Files: lib/models/admin_oversight_model.dart,
+lib/services/admin_oversight_service.dart,
+lib/controllers/admin_oversight_controller.dart,
+lib/views/admin/{admin_epr_oversight_view,admin_producer_detail_view}.dart,
+lib/views/admin/admin_producers_view.dart, lib/views/home/home_view.dart,
+lib/routing/router.dart, test/admin_oversight_model_test.dart
+Checks: 1060 Flutter tests (up from 1035), 1047 server, analyze clean.
+
+---
+
 ## 2026-09-16 08:20 (+06) — Phase E server-side complete: view-as, timeline, audit pack
 
 EPR-44, EPR-46 and EPR-33's audit pack. Everything in Phase E except retention,
