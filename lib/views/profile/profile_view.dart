@@ -480,6 +480,44 @@ class _ProfileViewState extends ConsumerState<ProfileView>
                       label: const Text('Support green initiatives'),
                     ),
                   ],
+
+                  // NOT ROLE-GATED, AND NOT GATED ON `active`.
+                  //
+                  // Everything above this point is a capability, and capabilities
+                  // are withdrawn when an account is suspended. This is not one.
+                  // The right to ask what is held about you, and to ask for it
+                  // to be deleted, does not depend on the account being in good
+                  // standing — a suspended person arguably needs it more, and a
+                  // screen that hid the address exactly when someone wanted to
+                  // leave would be the worst possible time to hide it.
+                  //
+                  // Erasure requests are email-only by decision (16 September
+                  // 2026, no self-service flow). That decision is only
+                  // defensible while the address is somewhere a person can
+                  // actually find it, which is what this section is for.
+                  const SizedBox(height: AppTheme.gapLg),
+                  Text(
+                    'Privacy and contact',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: AppTheme.gapSm),
+                  _Fact(
+                    icon: Icons.alternate_email_outlined,
+                    label: 'Contact us',
+                    // `_Fact` renders its value as SelectableText, so the
+                    // address can be copied. Deliberately not a `mailto:` link:
+                    // a tap that opens nothing — no mail client configured, a
+                    // browser that blocks the handler — leaves a person who was
+                    // trying to exercise a right with no address and no way to
+                    // get one.
+                    value: AppConstants.contactEmail,
+                    note:
+                        'Ask what we hold about you, ask for your account or '
+                        'your data to be deleted, or raise anything else. '
+                        'Write in Bangla or English.',
+                  ),
                 ],
               ),
             ),
@@ -716,8 +754,9 @@ class _SuspensionNotice extends StatelessWidget {
                 const SizedBox(height: AppTheme.gapXs),
                 Text(
                   until == null
-                      ? 'Most actions are unavailable. Contact a 3ZERO Admin '
-                            'to have this reviewed.'
+                      ? 'Most actions are unavailable. Email '
+                            '${AppConstants.contactEmail} to have this '
+                            'reviewed.'
                       // The admin sets an exact time, so show one. A bare
                       // date reads as "you are free on the 26th" when the
                       // account is blocked until that evening.

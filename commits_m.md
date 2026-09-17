@@ -17,6 +17,55 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-09-17 21:35 (+06) — A right whose only door was unmarked
+
+Erasure requests are email-only by decision (16 September), and the app
+contained no contact address anywhere. Four strings told people to "Contact a
+3ZERO Admin" and named no way to do it.
+
+**Two of the four are shown to somebody who cannot sign in.** A disabled
+account never reaches a screen where an address could be found later, so an
+unnamed contact there is not an inconvenience — it is the end of the road, and
+the only one the product offered.
+
+Address is `ceo@impact-sol.com`, held as `AppConstants.contactEmail` and
+referenced everywhere: the sign-in error for a disabled account, the
+`operation-not-allowed` error, the home suspension card, the profile
+suspension notice, and a new *Privacy and contact* section on the profile
+screen. Replaces `[DELETION_REQUEST_ADDRESS]` in the consent text, English and
+Bengali.
+
+**The Privacy section is not gated on `active`, unlike everything above it.**
+Those are capabilities and are withdrawn on suspension. The right to ask what
+is held about you, and to ask for it to be deleted, is not — and a screen that
+hid the address exactly when somebody wanted to leave would be hiding it at
+the worst possible moment.
+
+Rendered as selectable text, not a `mailto:`. `url_launcher` is not a
+dependency, and a tap that opens nothing — no mail client, a browser blocking
+the handler — leaves someone exercising a right with no address and no way to
+get one.
+
+**The consent document said three places. There were four.** The fourth
+(`home_view.dart:893`) lived in a widget no test touched, so counting by hand
+missed it. `test/contact_address_test.dart` now scans `lib/` on every run for
+the imperative phrasing, and separately asserts the address is never re-typed
+as a literal — two literals is how the app and the consent text drift apart
+about an address people have already been told to write to. Comments are
+stripped first so the explanations at each call site do not read as uses.
+
+Both assertions verified by mutation: reintroducing the phrase fails the first,
+hard-coding the address fails the second.
+
+Files: lib/core/constants.dart, lib/core/auth_errors.dart,
+lib/views/home/home_view.dart, lib/views/profile/profile_view.dart,
+docs/CHAMPION_CONSENT_LANGUAGE.md, test/contact_address_test.dart,
+test/auth_errors_test.dart, test/profile_view_test.dart
+Checks: 1155 Flutter tests, analyze clean.
+Outstanding: `ceo@` is a role alias reaching one person. It is now the
+data-protection contact of record and should become a monitored group inbox,
+or an alias re-pointable without invalidating consents already given.
+
 ## 2026-09-17 20:40 (+06) — "The chain is BROKEN" on an organisation that never had a chain
 
 With the index built, verification ran for the first time and reported the

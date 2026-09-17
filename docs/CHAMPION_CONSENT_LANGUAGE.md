@@ -74,7 +74,7 @@ existing Champion.
 > them.
 >
 > **You can ask us to delete your account at any time.** Email us at
-> **[DELETION_REQUEST_ADDRESS]** and we will remove your name, your email
+> **ceo@impact-sol.com** and we will remove your name, your email
 > address and your profile.
 >
 > **Your disposal records stay.** Once packaging you disposed of has counted
@@ -113,7 +113,7 @@ existing Champion.
 > ছিল। তাই নিয়ন্ত্রক সংস্থা যতদিন জানতে চাইতে পারে, ততদিন সেই রেকর্ড রাখা হয়।
 >
 > **আপনি যেকোনো সময় অ্যাকাউন্ট মুছে ফেলতে বলতে পারেন।**
-> **[DELETION_REQUEST_ADDRESS]** ঠিকানায় আমাদের ইমেইল করুন — আমরা আপনার নাম,
+> **ceo@impact-sol.com** ঠিকানায় আমাদের ইমেইল করুন — আমরা আপনার নাম,
 > ইমেইল ঠিকানা ও প্রোফাইল সরিয়ে ফেলব।
 >
 > **আপনার ফেলার রেকর্ড থেকে যাবে।** আপনার ফেলা প্যাকেজিং একবার কোনো কোম্পানির
@@ -245,16 +245,25 @@ Not a copy change:
 
    That is a defensible scope — a human reading each request catches the ones
    that are really something else, and the volume does not yet justify a flow.
-   But it makes one thing release-blocking that was not before: **the app
-   contains no contact address anywhere.** No support screen, no `mailto`, no
-   published email. The only "contact" string in the product tells a suspended
+   But it made one thing release-blocking that was not before: **the app
+   contained no contact address anywhere.** No support screen, no `mailto`, no
+   published email. The only "contact" string in the product told a suspended
    user to *"Contact a 3ZERO Admin"* without saying how.
 
-   A right whose only door is unmarked is not a right anyone can exercise. So
-   the consent text now names the address, and **`[DELETION_REQUEST_ADDRESS]`
-   is a placeholder that must be replaced before this ships.** A monitored
-   inbox, not a personal one — it becomes the data-protection contact of
-   record.
+   A right whose only door is unmarked is not a right anyone can exercise.
+   **Resolved, 17 September 2026: `ceo@impact-sol.com`.** It is named in this
+   consent text in both languages, and in the app in three places — the
+   sign-in error for a disabled account, the suspension notice, and a *Privacy
+   and contact* section on the profile screen that is deliberately not gated on
+   the account being in good standing. Held as one constant
+   (`AppConstants.contactEmail`) so the app and this text cannot drift apart
+   about an address people have already consented against.
+
+   **Outstanding on this item:** `ceo@` is a role alias reaching one person.
+   It is now the data-protection contact of record, so it should become a
+   monitored group inbox — or an alias such as `privacy@` re-pointable without
+   invalidating the address on consents already given. Erasure requests carry
+   statutory deadlines and cannot wait on one person's availability.
 
 6. ~~A decision on §4.1~~ — taken. The sentence was removed; no work
    outstanding.

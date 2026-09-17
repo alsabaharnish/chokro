@@ -9,6 +9,7 @@ import '../../controllers/wallet_controller.dart';
 import '../../controllers/orders_controller.dart';
 import '../../controllers/submission_history_controller.dart';
 import '../../core/account_profile.dart';
+import '../../core/constants.dart';
 import '../../core/label_format.dart';
 import '../../core/name_format.dart';
 import '../../core/theme.dart';
@@ -890,7 +891,8 @@ class _SuspendedNotice extends StatelessWidget {
     final scheme = theme.colorScheme;
 
     final detail = indefinite || until == null
-        ? 'Submitting and claiming are unavailable. Contact a 3ZERO Admin.'
+        ? 'Submitting and claiming are unavailable. Email '
+              '${AppConstants.contactEmail} to have this reviewed.'
         // The exact time the admin actually set, not just the date — a
         // suspension that lifts at 18:40 read as "you are free on the 26th".
         : 'Submitting and claiming are unavailable until '

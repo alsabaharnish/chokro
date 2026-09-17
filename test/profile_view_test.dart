@@ -207,7 +207,69 @@ void main() {
     await _pump(tester, user: _user(status: AppConstants.statusSuspended));
 
     expect(find.text('Account suspended'), findsOneWidget);
-    expect(find.textContaining('Contact a 3ZERO Admin'), findsOneWidget);
+    // Names the address rather than saying "Contact a 3ZERO Admin", which told
+    // someone their account was blocked and left them to guess how to ask.
+    //
+    // Matched against the notice's own sentence: a suspended account now shows
+    // the address twice, here and in the Privacy section below, so a bare
+    // search for it would pass on the wrong one.
+    expect(
+      find.textContaining(
+        '${AppConstants.contactEmail} to have this reviewed',
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('the contact address is on the profile screen', (tester) async {
+    // Erasure requests are email-only by decision, which is only defensible
+    // while the address is somewhere a person can actually find it.
+    await _pump(tester, user: _user());
+
+    await tester.scrollUntilVisible(
+      find.text('Privacy and contact'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+
+    expect(find.text('Privacy and contact'), findsOneWidget);
+    expect(find.text(AppConstants.contactEmail), findsOneWidget);
+    expect(find.textContaining('deleted'), findsOneWidget);
+  });
+
+  testWidgets('a suspended account can still find the address', (tester) async {
+    // The capabilities above it are withdrawn on suspension; this is not one.
+    // The right to ask what is held about you, and to ask for it to be
+    // deleted, does not depend on being in good standing — and hiding the
+    // address exactly when somebody wants to leave would be the worst possible
+    // moment to hide it.
+    await _pump(tester, user: _user(status: AppConstants.statusSuspended));
+
+    await tester.scrollUntilVisible(
+      find.text('Privacy and contact'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+
+    expect(find.text(AppConstants.contactEmail), findsOneWidget);
+  });
+
+  testWidgets('the address is selectable, so it can be copied', (tester) async {
+    // Deliberately not a mailto: link — url_launcher is not a dependency, and
+    // a tap that opens nothing would leave someone exercising a right with no
+    // address and no way to get one. Selectable text always works.
+    await _pump(tester, user: _user());
+
+    await tester.scrollUntilVisible(
+      find.text('Privacy and contact'),
+      200,
+      scrollable: find.byType(Scrollable).first,
+    );
+
+    expect(
+      find.widgetWithText(SelectableText, AppConstants.contactEmail),
+      findsOneWidget,
+    );
   });
 
   testWidgets('a pending join date reads as just now, not as an error', (

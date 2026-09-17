@@ -14,6 +14,7 @@
 /// the caller.
 library;
 
+import 'constants.dart';
 import 'network_errors.dart';
 
 /// An authentication failure carrying a message already fit to display.
@@ -54,8 +55,15 @@ String authErrorMessage(String? code) {
     case 'invalid-email':
       return 'That does not look like an email address.';
 
+    // NAMES THE ADDRESS, because this reader cannot go and find it.
+    //
+    // A disabled account cannot sign in, so every screen that could carry a
+    // contact address later is unreachable. "Contact a 3ZERO Admin" told
+    // someone locked out of the product to seek help through a door the
+    // product never showed them.
     case 'user-disabled':
-      return 'This account has been disabled. Contact a 3ZERO Admin.';
+      return 'This account has been disabled. Email '
+          '${AppConstants.contactEmail} to have it reviewed.';
 
     case 'email-already-in-use':
       return 'An account already exists with that email. Sign in instead.';
@@ -63,8 +71,11 @@ String authErrorMessage(String? code) {
     case 'weak-password':
       return 'Choose a longer password — at least six characters.';
 
+    // A misconfiguration nobody signing in can fix, so the address is the only
+    // useful thing this message can offer.
     case 'operation-not-allowed':
-      return 'Email sign-in is not enabled for this app. Contact a 3ZERO Admin.';
+      return 'Email sign-in is not enabled for this app. Email '
+          '${AppConstants.contactEmail} and we will look into it.';
 
     case 'too-many-requests':
       return 'Too many attempts. Wait a few minutes before trying again.';

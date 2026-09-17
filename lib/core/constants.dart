@@ -62,6 +62,32 @@ class AppConstants {
   static const String statusPending = 'pending';
   static const String statusApproved = 'approved';
   static const String statusRejected = 'rejected';
+
+  /// The address a person writes to about their own data, and about an account
+  /// they cannot use.
+  ///
+  /// ## Why this exists as a constant at all
+  ///
+  /// The app used to tell people to "Contact a 3ZERO Admin" in three places
+  /// and name no way to do it. Two of those three are shown to somebody who
+  /// CANNOT SIGN IN — a disabled account never reaches a screen where an
+  /// address could be found later, so an unnamed contact is not an
+  /// inconvenience there, it is a dead end.
+  ///
+  /// It also carries a second job. Erasure requests are email-only by decision
+  /// (16 September 2026, no self-service flow), and the Champion consent text
+  /// names this address as the route. A right whose only door is unmarked is
+  /// not a right anyone can exercise, so this string is what makes that
+  /// decision defensible rather than theoretical.
+  ///
+  /// ## Why one constant and not three literals
+  ///
+  /// This is the data-protection contact of record. It appears in consent text
+  /// that people have already agreed to, so the app and the consent must never
+  /// disagree about it — and they will, silently, the first time somebody
+  /// updates two of the three call sites. Changing it here changes it
+  /// everywhere the app says it.
+  static const String contactEmail = 'ceo@impact-sol.com';
 }
 
 /// Organisation-scoped capabilities inside one producer company (EPR-3).

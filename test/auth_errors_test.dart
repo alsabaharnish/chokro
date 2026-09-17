@@ -1,4 +1,5 @@
 import 'package:chokro/core/auth_errors.dart';
+import 'package:chokro/core/constants.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
@@ -92,6 +93,55 @@ void main() {
       const failure = AuthFailure('Message.', code: 'too-many-requests');
       expect(failure.code, 'too-many-requests');
       expect(failure.message, isNot(contains('too-many-requests')));
+    });
+  });
+
+  group('a message a locked-out reader can act on', () {
+    // Two of these are shown to somebody who CANNOT SIGN IN. A disabled
+    // account never reaches a screen where an address could be found later, so
+    // "Contact a 3ZERO Admin" was not an inconvenience there — it was a dead
+    // end, and the only one the product offered.
+    test('a disabled account is told where to write', () {
+      final message = authErrorMessage('user-disabled');
+      expect(message, contains(AppConstants.contactEmail));
+      expect(message, isNot(contains('Contact a 3ZERO Admin')));
+    });
+
+    test('a sign-in method nobody can enable names the address too', () {
+      expect(
+        authErrorMessage('operation-not-allowed'),
+        contains(AppConstants.contactEmail),
+      );
+    });
+
+    test('no message still tells a reader to contact an unnamed admin', () {
+      // The whole point of the change. If a new message reintroduces the
+      // phrase without an address, this catches it.
+      const codes = <String?>[
+        'invalid-credential',
+        'wrong-password',
+        'user-not-found',
+        'invalid-email',
+        'user-disabled',
+        'email-already-in-use',
+        'weak-password',
+        'operation-not-allowed',
+        'too-many-requests',
+        'network-request-failed',
+        'requires-recent-login',
+        null,
+        'some-code-we-have-never-seen',
+      ];
+      for (final code in codes) {
+        final message = authErrorMessage(code);
+        if (message.contains('3ZERO Admin')) {
+          expect(
+            message,
+            contains(AppConstants.contactEmail),
+            reason: 'code "$code" names an admin but no way to reach one',
+          );
+        }
+      }
     });
   });
 }
