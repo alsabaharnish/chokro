@@ -17,6 +17,68 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-09-17 22:30 (+06) — App Check on the client, attesting before enforcement
+
+The server has held `APP_CHECK_ENFORCED` since Phase A and the client had
+nothing: `firebase_app_check` was not a dependency, no initialisation, no
+`X-Firebase-AppCheck` header anywhere in `lib/`. Setting the flag today would
+have 401'd every request from the app.
+
+**The refactor I quoted was not needed.** I had reported 18 services each
+building their own header and framed this as needing a shared API client
+first. Re-checking: **zero** direct `http.get/post` calls exist — every network
+call already goes through an injected `http.Client`, all 19 defaulting to
+`http.Client()`. The injection point was already there. The duplicated
+`Authorization` header is real but is not what blocks attestation.
+
+So `AttestedClient extends http.BaseClient` adds the header in `send()`, and
+the 19 defaults became `AttestedClient()`. Services keep their constructors and
+their auth headers; every test that injects a fake keeps working untouched.
+
+**Best effort here, authoritative there.** A request with no token is sent
+WITHOUT the header rather than refused locally. The client is the wrong place
+to decide whether attestation is required — the server holds the flag and is
+fail-closed once set. Refusing here too would break the app against every
+deployment that does not enforce, which is every local run, every emulator and
+the whole of the rollout. Token failures are logged once per client, not per
+request.
+
+Activation never throws. Every failure mode is ordinary — no Play Services, a
+simulator without App Attest, a reCAPTCHA key not yet provisioned — and none of
+them should black-screen the app when the server will refuse the request with a
+status that says so.
+
+**Debug providers are gated on `kDebugMode`, and that is the property worth
+pinning.** A release build attesting with a debug provider reports success,
+satisfies an enforcing server and proves nothing — attestation any caller can
+obtain is worse than none, because the console then says the control is on. Two
+tests assert a release build gets `AndroidPlayIntegrityProvider` /
+`AppleAppAttestWithDeviceCheckFallbackProvider` / `ReCaptchaV3Provider` and
+never a debug one.
+
+`test/attested_client_test.dart` scans `lib/` for a bare `http.Client()` and
+for top-level `http.get/post`. That failure is invisible until the day
+enforcement is switched on and then total for whatever service was missed —
+and no service test can catch it, because the default is exactly what a fake
+replaces. Verified by mutation.
+
+Apple provider is App Attest WITH DeviceCheck fallback. Not for the version
+floor (this app requires iOS 15; App Attest arrived in 14) but for a device
+whose attestation Apple declines, an App ID without the capability, or Apple's
+service being unreachable.
+
+Files: pubspec.yaml, lib/core/attested_client.dart, lib/core/app_check_setup.dart,
+lib/main.dart, 19 services/views, test/attested_client_test.dart,
+test/app_check_setup_test.dart
+Checks: 1173 Flutter tests, analyze clean.
+Outstanding — console steps this code cannot perform, all required before
+`APP_CHECK_ENFORCED=true`: register App Check per platform; a reCAPTCHA v3 site
+key passed as `--dart-define=CHOKRO_RECAPTCHA_SITE_KEY=`; a registered debug
+token for local runs; and for iOS, the App Attest capability on the App ID plus
+`com.apple.developer.devicecheck.appattest-environment` in Runner.entitlements
+— deliberately NOT added here, because adding it before the capability exists
+breaks iOS signing with an unrelated-looking error.
+
 ## 2026-09-17 21:35 (+06) — A right whose only door was unmarked
 
 Erasure requests are email-only by decision (16 September), and the app

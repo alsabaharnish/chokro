@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
 
 import '../core/api_config.dart';
+import '../core/attested_client.dart';
 
 /// Ending a session on the server, not only on the device (SEC-9).
 ///
@@ -17,7 +18,7 @@ import '../core/api_config.dart';
 /// as well — immediately, on their next request.
 class SessionService {
   SessionService({http.Client? client, FirebaseAuth? auth})
-    : _client = client ?? http.Client(),
+    : _client = client ?? AttestedClient(),
       _auth = auth ?? FirebaseAuth.instance;
 
   final http.Client _client;

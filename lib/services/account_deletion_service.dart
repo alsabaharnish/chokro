@@ -1,3 +1,4 @@
+import '../core/attested_client.dart';
 import 'dart:convert';
 
 import 'package:firebase_auth/firebase_auth.dart';
@@ -29,7 +30,7 @@ import 'organization_service.dart' show OrgActionException;
 /// list of what DID run as much as the list of what did not.
 class AccountDeletionService {
   AccountDeletionService({http.Client? client, FirebaseAuth? auth})
-    : _client = client ?? http.Client(),
+    : _client = client ?? AttestedClient(),
       _auth = auth ?? FirebaseAuth.instance;
 
   final http.Client _client;

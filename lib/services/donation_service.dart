@@ -1,3 +1,4 @@
+import '../core/attested_client.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -16,7 +17,7 @@ import '../models/payment_model.dart';
 /// There is intentionally no Firestore write here. A donation debits a wallet,
 /// and only the server can move a balance and write its matching ledger entry.
 class DonationService {
-  DonationService({http.Client? client}) : _client = client ?? http.Client();
+  DonationService({http.Client? client}) : _client = client ?? AttestedClient();
 
   final http.Client _client;
 

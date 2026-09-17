@@ -1,3 +1,4 @@
+import '../core/attested_client.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -49,7 +50,7 @@ class BuyerOrderPage {
 class OrderService {
   OrderService({FirebaseFirestore? firestore, http.Client? client})
     : _db = firestore ?? FirebaseFirestore.instance,
-      _client = client ?? http.Client();
+      _client = client ?? AttestedClient();
 
   final FirebaseFirestore _db;
   final http.Client _client;

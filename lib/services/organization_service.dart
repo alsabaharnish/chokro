@@ -1,3 +1,4 @@
+import '../core/attested_client.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -39,7 +40,7 @@ import '../models/producer_audit_model.dart';
 /// concludes an ex-employee no longer has access when they still do.
 class OrganizationService {
   OrganizationService({http.Client? client, FirebaseAuth? auth})
-    : _client = client ?? http.Client(),
+    : _client = client ?? AttestedClient(),
       _auth = auth ?? FirebaseAuth.instance;
 
   final http.Client _client;

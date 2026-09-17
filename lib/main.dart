@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_web_plugins/url_strategy.dart';
 import 'controllers/push_controller.dart';
+import 'core/app_check_setup.dart';
 import 'core/bin_link.dart';
 import 'core/theme.dart';
 import 'services/server_warmup.dart';
@@ -64,6 +65,18 @@ Future<void> main() async {
 /// Everything that must succeed before the app can be shown.
 Future<void> _initialise() async {
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
+
+  // Immediately after Firebase and before anything makes a request.
+  //
+  // Awaited, so the first call out of the app can carry a token — `ping()` at
+  // the end of this function is a request, and warming the server with an
+  // unattested call against an enforcing deployment would spend the cold start
+  // on a 401.
+  //
+  // It never throws: a build that cannot attest is refused by the SERVER, with
+  // a status that says so, rather than failing to start here with a blank
+  // screen. See `core/app_check_setup.dart`.
+  await activateAppCheck();
 
   // Offline persistence, set explicitly rather than left to the platform
   // default (NFR-7).

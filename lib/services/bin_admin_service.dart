@@ -1,3 +1,4 @@
+import '../core/attested_client.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -22,7 +23,7 @@ import '../core/wire_values.dart';
 class BinAdminService {
   final http.Client _client;
 
-  BinAdminService({http.Client? client}) : _client = client ?? http.Client();
+  BinAdminService({http.Client? client}) : _client = client ?? AttestedClient();
 
   /// Registers a bin and returns it, including the server-generated id and QR
   /// payload.

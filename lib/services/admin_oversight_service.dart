@@ -1,3 +1,4 @@
+import '../core/attested_client.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -38,7 +39,7 @@ import 'organization_service.dart' show OrgActionException;
 /// `admin_oversight_model.dart`.
 class AdminOversightService {
   AdminOversightService({http.Client? client, FirebaseAuth? auth})
-    : _client = client ?? http.Client(),
+    : _client = client ?? AttestedClient(),
       _auth = auth ?? FirebaseAuth.instance;
 
   final http.Client _client;

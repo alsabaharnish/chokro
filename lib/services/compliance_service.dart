@@ -1,3 +1,4 @@
+import '../core/attested_client.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -35,7 +36,7 @@ import 'organization_service.dart' show OrgActionException;
 /// makes the filing trustworthy happened somewhere else, or not at all.
 class ComplianceService {
   ComplianceService({http.Client? client, FirebaseAuth? auth})
-    : _client = client ?? http.Client(),
+    : _client = client ?? AttestedClient(),
       _auth = auth ?? FirebaseAuth.instance;
 
   final http.Client _client;

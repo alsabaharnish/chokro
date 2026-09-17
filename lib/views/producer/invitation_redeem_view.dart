@@ -1,9 +1,9 @@
+import '../../core/attested_client.dart';
 import 'dart:convert';
 
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
-import 'package:http/http.dart' as http;
 
 import '../../core/api_config.dart';
 import '../../core/theme.dart';
@@ -44,7 +44,7 @@ class _InvitationRedeemViewState extends State<InvitationRedeemView> {
   final _formKey = GlobalKey<FormState>();
   final _name = TextEditingController();
   final _password = TextEditingController();
-  final _client = http.Client();
+  final _client = AttestedClient();
 
   bool _submitting = false;
   bool _obscure = true;

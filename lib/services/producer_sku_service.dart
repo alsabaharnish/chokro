@@ -1,3 +1,4 @@
+import '../core/attested_client.dart';
 import 'dart:convert';
 
 import 'package:firebase_auth/firebase_auth.dart';
@@ -17,7 +18,7 @@ import 'organization_service.dart';
 /// returns the list means the screen and the server cannot disagree about them.
 class ProducerSkuService {
   ProducerSkuService({http.Client? client, FirebaseAuth? auth})
-    : _client = client ?? http.Client(),
+    : _client = client ?? AttestedClient(),
       _auth = auth ?? FirebaseAuth.instance;
 
   final http.Client _client;

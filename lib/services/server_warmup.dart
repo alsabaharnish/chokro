@@ -1,3 +1,4 @@
+import '../core/attested_client.dart';
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
@@ -55,7 +56,7 @@ class ServerWarmup {
     if (kDebugMode && warning != null) {
       debugPrint('[warmup] CONFIGURATION: $warning');
     }
-    unawaited(_ping(client ?? http.Client()));
+    unawaited(_ping(client ?? AttestedClient()));
   }
 
   static Future<void> _ping(http.Client client) async {

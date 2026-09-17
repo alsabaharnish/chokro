@@ -1,3 +1,4 @@
+import '../core/attested_client.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -23,7 +24,7 @@ import '../core/wire_values.dart';
 /// auto-approve lane exists only where mechanical checks can pass.
 class ClaimService {
   ClaimService({http.Client? client, FirebaseFirestore? firestore})
-    : _client = client ?? http.Client(),
+    : _client = client ?? AttestedClient(),
       _db = firestore ?? FirebaseFirestore.instance;
 
   final http.Client _client;

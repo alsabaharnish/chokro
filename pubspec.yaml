@@ -45,6 +45,11 @@ dependencies:
   # "Expected to find fonts for (MaterialIcons, packages/cupertino_icons/...)".
   cupertino_icons: ^1.0.8
   firebase_core: ^4.13.0
+  # Proves a request came from a build this project published, which
+  # authentication does not (SEC-10, NFR-E-9). The server verifies the
+  # X-Firebase-AppCheck header only when APP_CHECK_ENFORCED=true, so this
+  # ships attesting before enforcement is switched on.
+  firebase_app_check: ^0.4.8
   firebase_auth: ^6.5.7
   cloud_firestore: ^6.8.0
   flutter_riverpod: ^3.4.1

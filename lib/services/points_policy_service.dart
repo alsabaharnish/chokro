@@ -1,3 +1,4 @@
+import '../core/attested_client.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -26,7 +27,7 @@ class PointsPolicyService {
   final FirebaseFirestore _db;
 
   PointsPolicyService({http.Client? client, FirebaseFirestore? firestore})
-    : _client = client ?? http.Client(),
+    : _client = client ?? AttestedClient(),
       _db = firestore ?? FirebaseFirestore.instance;
 
   /// Current policy. Any signed-in user may read it — the values are visible

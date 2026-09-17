@@ -1,3 +1,4 @@
+import '../core/attested_client.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -21,7 +22,7 @@ import '../core/wire_values.dart';
 class ReviewService {
   final http.Client _client;
 
-  ReviewService({http.Client? client}) : _client = client ?? http.Client();
+  ReviewService({http.Client? client}) : _client = client ?? AttestedClient();
 
   Future<ReviewOutcome> approve(String disposalId) =>
       _review(disposalId, decision: 'approve');

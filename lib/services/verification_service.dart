@@ -1,3 +1,4 @@
+import '../core/attested_client.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -24,7 +25,7 @@ class VerificationService {
   final http.Client _client;
 
   VerificationService({http.Client? client})
-    : _client = client ?? http.Client();
+    : _client = client ?? AttestedClient();
 
   /// Asks the server to verify a submission.
   ///

@@ -1,3 +1,4 @@
+import '../core/attested_client.dart';
 import 'dart:async';
 import 'dart:convert';
 // Used for `SocketException` in the catch below. Flutter web compiles this
@@ -27,7 +28,7 @@ import '../core/wire_values.dart';
 class PhotoUploadService {
   final http.Client _client;
 
-  PhotoUploadService({http.Client? client}) : _client = client ?? http.Client();
+  PhotoUploadService({http.Client? client}) : _client = client ?? AttestedClient();
 
   /// Uploads [bytes] and returns its URL and Cloudinary public id.
   ///
