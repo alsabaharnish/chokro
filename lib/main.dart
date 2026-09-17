@@ -11,6 +11,7 @@ import 'services/server_warmup.dart';
 import 'firebase_options.dart';
 import 'routing/router.dart';
 import 'services/push_service.dart';
+import 'core/idle_session.dart';
 
 /// Handles a push that arrives while the app is backgrounded or dead (F7.1).
 ///
@@ -280,18 +281,20 @@ class _ChokroAppState extends ConsumerState<ChokroApp> {
       if (message != null) _openFromMessage(message);
     });
 
-    return MaterialApp.router(
-      title: 'Chokro',
-      debugShowCheckedModeBanner: false,
-      scaffoldMessengerKey: _messengerKey,
-      theme: _light,
-      darkTheme: _dark,
-      // Follows the device. The app is used outdoors at a bin and indoors at a
-      // desk, and a user who has chosen dark mode system-wide has chosen it here
-      // too — there was previously no dark theme at all, so every screen was a
-      // full-brightness white panel at night.
-      themeMode: ThemeMode.system,
-      routerConfig: router,
+    return IdleSessionGuard(
+      child: MaterialApp.router(
+          title: 'Chokro',
+        debugShowCheckedModeBanner: false,
+        scaffoldMessengerKey: _messengerKey,
+        theme: _light,
+        darkTheme: _dark,
+        // Follows the device. The app is used outdoors at a bin and indoors at a
+        // desk, and a user who has chosen dark mode system-wide has chosen it here
+        // too — there was previously no dark theme at all, so every screen was a
+        // full-brightness white panel at night.
+        themeMode: ThemeMode.system,
+        routerConfig: router,
+      ),
     );
   }
 }

@@ -27,6 +27,11 @@ jest.mock('../src/firebase', () => {
     },
     serverTimestamp: jest.fn(() => '__TS__'),
     bucket: jest.fn(() => ({
+      // The preflight asks whether the bucket is THERE, not just whether its
+      // name is configured — a project where Cloud Storage was never
+      // provisioned has the name and no bucket. Overridden per test where the
+      // absent case is the subject.
+      exists: async () => [true],
       file: (path) => ({
         save: async (buffer) => saved.set(path, buffer),
         getSignedUrl: async () => [`https://signed.example/${path}?sig=abc`],
@@ -745,6 +750,51 @@ describe('delivery (SEC-6)', () => {
     // And nothing was written, so there is no job to poll forever.
     expect(fs._find('reportJobs')).toHaveLength(0);
   });
+
+  test('refuses when the variable is set but the BUCKET does not exist', async () => {
+    // The state this project was actually in. `FIREBASE_STORAGE_BUCKET` held a
+    // perfectly good name and Cloud Storage had never been provisioned, so the
+    // old preflight passed and the failure arrived later as an opaque GCS
+    // error from inside a running job — with no mention of the remedy.
+    process.env.FIREBASE_STORAGE_BUCKET = 'chokro-30887.firebasestorage.app';
+    reportJobs.resetStorageCheck();
+    firebase.bucket.mockReturnValueOnce({ exists: async () => [false] });
+
+    await expect(enqueue()).rejects.toThrow(/has not been set up/);
+    expect(fs._find('reportJobs')).toHaveLength(0);
+  });
+
+  test('the refusal names the remedy, not just the symptom', async () => {
+    process.env.FIREBASE_STORAGE_BUCKET = 'chokro-30887.firebasestorage.app';
+    reportJobs.resetStorageCheck();
+    firebase.bucket.mockReturnValueOnce({ exists: async () => [false] });
+
+    // An operator reading this has to know what to do. "Bucket not found" does
+    // not tell them that Storage needs billing enabled first.
+    await expect(enqueue()).rejects.toThrow(/Blaze/);
+    // And that the rest of the product is fine, so nobody treats it as an
+    // outage.
+    await expect(
+      (async () => {
+        reportJobs.resetStorageCheck();
+        firebase.bucket.mockReturnValueOnce({ exists: async () => [false] });
+        return enqueue();
+      })(),
+    ).rejects.toThrow(/Plastic Passports/);
+  });
+
+  test('an unreachable bucket is an outage, not a misconfiguration', async () => {
+    process.env.FIREBASE_STORAGE_BUCKET = 'chokro-30887.firebasestorage.app';
+    reportJobs.resetStorageCheck();
+    firebase.bucket.mockReturnValueOnce({
+      exists: async () => { throw new Error('ECONNRESET'); },
+    });
+
+    // A network failure must not be reported to a producer as "your Chokro
+    // instance is misconfigured" — the remedy is to try again, not to call an
+    // operator.
+    await expect(enqueue()).rejects.toThrow(/could not be reached/);
+  });
 });
 
 describe('the report catalogue', () => {
@@ -942,5 +992,98 @@ describe('the audit pack', () => {
     } finally {
       nodeFs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Two findings recovered from the audit journals, fixed 2026-09-17
+// ---------------------------------------------------------------------------
+
+describe('a job as a client sees it (SEC-6)', () => {
+  /**
+   * `storagePath` — the object's path in the private bucket — was stripped on
+   * the single-job poll route with `{ ...job, storagePath: undefined }` and
+   * returned verbatim by `listJobs`. The list leaked exactly what the poll was
+   * careful to hide, because a rule enforced in one route is a rule the next
+   * route does not know about.
+   */
+  const raw = {
+    jobId: 'job-1',
+    orgId: 'org-1',
+    reportType: 'chainOfCustody',
+    status: 'ready',
+    storagePath: 'reports/org-1/job-1.csv',
+    contentHash: 'a'.repeat(64),
+  };
+
+  test('the bucket path never reaches a client', () => {
+    const out = reportJobs.projectJob(raw);
+    expect(out.storagePath).toBeUndefined();
+    expect(JSON.stringify(out)).not.toContain('reports/org-1');
+  });
+
+  test('it is an allowlist, so a new field cannot leak by default', () => {
+    // The property that matters more than the one field. A key added to the
+    // job document later must not reach a client because nobody remembered.
+    const out = reportJobs.projectJob({
+      ...raw,
+      internalCursor: 'page-42',
+      signedUrlLastMinted: '2026-09-17T00:00:00Z',
+    });
+    expect(out.internalCursor).toBeUndefined();
+    expect(out.signedUrlLastMinted).toBeUndefined();
+  });
+
+  test('what a client needs still arrives', () => {
+    const out = reportJobs.projectJob(raw);
+    expect(out.jobId).toBe('job-1');
+    expect(out.status).toBe('ready');
+    expect(out.reportType).toBe('chainOfCustody');
+    expect(out.contentHash).toBe('a'.repeat(64));
+  });
+
+  test('a null job projects to null rather than an empty shell', () => {
+    expect(reportJobs.projectJob(null)).toBeNull();
+  });
+});
+
+describe('report row order does not depend on the runtime (NFR-E-8)', () => {
+  /**
+   * Every sort in this module sat under a comment promising output
+   * "byte-identical across runs", and used `localeCompare` — which reads the
+   * process locale and the ICU data compiled into Node.
+   *
+   * On real Bangladeshi district names that is not a subtle difference: the
+   * default locale sorts Latin before Bengali and `bn` sorts Bengali before
+   * Latin. A report carries a `contentHash`, so the order decides the hash,
+   * and the same rows would hash differently on a deploy where nothing but
+   * `LANG` had changed.
+   */
+  const DISTRICTS = ['ঢাকা', 'চট্টগ্রাম', 'খুলনা', 'Dhaka', 'Khulna', 'রাজশাহী'];
+
+  test('it matches code-point order, not collation order', () => {
+    const sorted = [...DISTRICTS].sort(reportJobs.byCodePoint);
+    const expected = [...DISTRICTS].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+    expect(sorted).toEqual(expected);
+  });
+
+  test('it disagrees with a locale sort, which is the point', () => {
+    // If these ever agreed, the test would be passing for the wrong reason and
+    // the bug could return unnoticed.
+    const byCode = [...DISTRICTS].sort(reportJobs.byCodePoint);
+    const byBengali = [...DISTRICTS].sort((a, b) => a.localeCompare(b, 'bn'));
+    expect(byCode).not.toEqual(byBengali);
+  });
+
+  test('it is stable and total', () => {
+    expect(reportJobs.byCodePoint('a', 'b')).toBe(-1);
+    expect(reportJobs.byCodePoint('b', 'a')).toBe(1);
+    expect(reportJobs.byCodePoint('a', 'a')).toBe(0);
+  });
+
+  test('null and undefined sort as empty rather than throwing', () => {
+    // A district key that is missing must not crash a report mid-build.
+    expect(reportJobs.byCodePoint(null, 'a')).toBe(-1);
+    expect(reportJobs.byCodePoint(undefined, '')).toBe(0);
   });
 });

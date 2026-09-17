@@ -92,7 +92,7 @@ async function recomputePeriod({
   }
 
   const snap = await query.get();
-  const totals = carried ? cloneTotals(carried) : emptyTotals();
+  const totals = carried ? validateCarried(carried) : emptyTotals();
 
   for (const doc of snap.docs) {
     accumulate(totals, doc.data());
@@ -188,6 +188,77 @@ async function storeRecomputeResult({ orgId, periodId, totals, adminUid }) {
       recomputedUniqueSkuCount: totals.skuIds.length,
     };
   });
+}
+
+/**
+ * Validates client-supplied running totals for a resumed recompute.
+ *
+ * ## WHY THIS HAS TO EXIST
+ *
+ * A recompute is the INDEPENDENT CHECK on the incremented counters — the thing
+ * that catches a counter fault (EPR-48, QA-3). `carried` arrives in the request
+ * body, seeds those running totals, and the result is written onto the period
+ * document as the recomputed figure.
+ *
+ * So whoever runs the check was choosing what it started from. A resumed pass
+ * seeded with wrong totals produces a recomputed figure that agrees with
+ * nothing in particular, and the console renders it as a reconciliation.
+ * Malice is not required: a client that resumed with stale or truncated state
+ * did the same thing silently.
+ *
+ * It is still a number a caller supplies, and no validation makes it
+ * trustworthy — a plausible wrong value passes. What this does is stop garbage
+ * becoming a compliance figure, and `storeRecomputeResult` records that the
+ * pass was RESUMED so a seeded reconciliation is distinguishable from one
+ * computed in a single read.
+ *
+ * Returns the cloned totals, or throws. Rejects rather than coerces: a
+ * negative mass silently clamped to zero is a wrong figure that looks
+ * deliberate.
+ */
+function validateCarried(carried) {
+  const fail = (why) => {
+    throw badRequest(`Those carried totals are not usable: ${why}.`);
+  };
+
+  if (typeof carried !== 'object' || carried === null || Array.isArray(carried)) {
+    fail('expected an object of running totals');
+  }
+
+  // An allowlist of keys, so a resumed pass cannot smuggle a field into the
+  // period document through the totals object.
+  const allowed = new Set(Object.keys(emptyTotals()));
+  for (const key of Object.keys(carried)) {
+    if (!allowed.has(key)) fail(`'${key}' is not a total this recompute keeps`);
+  }
+
+  for (const key of ['massMgByCategory', 'unitsByCategory', 'massMgByPolymer', 'massMgByDistrict']) {
+    const map = carried[key];
+    if (map === undefined) continue;
+    if (typeof map !== 'object' || map === null || Array.isArray(map)) {
+      fail(`'${key}' must be a map`);
+    }
+    for (const [k, v] of Object.entries(map)) {
+      if (!Number.isInteger(v) || v < 0) {
+        fail(`'${key}.${k}' must be a whole number of milligrams, not below zero`);
+      }
+    }
+  }
+
+  for (const key of ['attributionCount', 'uncertainMassMg', 'reversedCount', 'reversedMassMg']) {
+    const v = carried[key];
+    if (v === undefined) continue;
+    if (!Number.isInteger(v) || v < 0) fail(`'${key}' must be a whole number, not below zero`);
+  }
+
+  for (const key of ['skuIds', 'disposalIds']) {
+    const list = carried[key];
+    if (list === undefined) continue;
+    if (!Array.isArray(list)) fail(`'${key}' must be a list`);
+    if (!list.every((x) => typeof x === 'string')) fail(`'${key}' must hold ids`);
+  }
+
+  return cloneTotals({ ...emptyTotals(), ...carried });
 }
 
 function emptyTotals() {
@@ -491,6 +562,7 @@ function badRequest(message) {
 }
 
 module.exports = {
+  validateCarried,
   RECOMPUTE_BATCH,
   emptyTotals,
   accumulate,

@@ -131,7 +131,12 @@ async function buildShortlist({
         // twice. An unstable order would make a re-run of the same photograph
         // send a different prompt and get a different answer, which would make
         // the accuracy audit measure the shortlist rather than the model.
-        return a.sku.skuId.localeCompare(b.sku.skuId);
+        // Code point, not locale: the shortlist decides which SKUs a model
+        // sees, so an order that changes with the runtime's collation makes
+        // recognition non-reproducible for the same photograph.
+        const x = String(a.sku.skuId ?? '');
+        const y = String(b.sku.skuId ?? '');
+        return x < y ? -1 : x > y ? 1 : 0;
       })
       .slice(0, cap)
       .map(({ sku }) => toCandidate(sku));

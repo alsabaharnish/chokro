@@ -154,3 +154,62 @@ describe('when enforcement is on', () => {
     expect(appCheck.describeEnforcement()).toContain('ENFORCED');
   });
 });
+
+// ---------------------------------------------------------------------------
+// The exemption that cannot be got wrong (SEC-7, SEC-10)
+// ---------------------------------------------------------------------------
+
+describe('certificate verification survives App Check enforcement', () => {
+  /**
+   * Recovered from the 2026-09-10 audit journals on 2026-09-17 and confirmed.
+   *
+   * `GET /passports/verify/:serial` was not exempt. The URL is PRINTED INTO
+   * every certificate, the holder is a regulator or a customer with a piece of
+   * paper and nothing to attest with, and the document is content-hashed — so
+   * enforcing App Check would have invalidated every certificate already
+   * issued, with reissuing all of them as the only remedy.
+   *
+   * NFR-E-9 and SEC-10 make enforcement release-blocking, so this was going to
+   * be turned on.
+   */
+  test('a serial path is exempt', () => {
+    expect(appCheck.isExempt('/passports/verify/CHKR-PP-ABCD-2345')).toBe(true);
+  });
+
+  test('every serial is exempt, not one literal string', () => {
+    // The trap in the obvious fix. `EXEMPT_PATHS` is exact-match, and
+    // `/passports/verify/<serial>` is a different string for every certificate
+    // ever issued — adding it there would have looked like a fix, matched
+    // nothing, and left the deploy log claiming an exemption was in place.
+    for (const serial of [
+      'CHKR-PP-0000-0000',
+      'CHKR-PP-ZZZZ-9999',
+      'CHKR-PP-9F2K-7T4D',
+      'not-a-serial',
+    ]) {
+      expect(appCheck.isExempt(`/passports/verify/${serial}`)).toBe(true);
+    }
+  });
+
+  test('the prefix cannot be widened by a similarly-named route', () => {
+    // The trailing slash is why. A later `/passports/verify-all` must not
+    // inherit an exemption written for certificate holders.
+    expect(appCheck.isExempt('/passports/verify-all')).toBe(false);
+    expect(appCheck.isExempt('/passports/verifyanything')).toBe(false);
+    expect(appCheck.isExempt('/passports/verify')).toBe(false);
+  });
+
+  test('nothing else under /passports is exempt', () => {
+    // The producer-facing passport routes have an app and an account, so they
+    // attest like everything else.
+    expect(appCheck.isExempt('/epr/passports')).toBe(false);
+    expect(appCheck.isExempt('/epr/passports/CHKR-PP-ABCD-2345.pdf')).toBe(false);
+  });
+
+  test('the documented exemptions and the code agree on how many there are', () => {
+    // The comment said "Two of them" while the array held three. A list whose
+    // own description is wrong is a list nobody will check against the code.
+    const total = appCheck.EXEMPT_PATHS.length + appCheck.EXEMPT_PREFIXES.length;
+    expect(total).toBe(4);
+  });
+});

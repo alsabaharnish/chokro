@@ -114,7 +114,84 @@ async function requireAuth(req, res, next) {
     emailVerified: decoded.email_verified === true,
   };
 
+  // SEC-9, the absolute limit. After the profile read, because the limit is
+  // per role and the role is the STORED one — a producer must not get a
+  // citizen's session length by holding a stale claim.
+  if (sessionHasExpired(req.user)) {
+    return res.status(401).json({
+      error: 'session_expired',
+      message: 'Your session has reached its maximum length. Sign in again.',
+    });
+  }
+
   return next();
+}
+
+
+/**
+ * The absolute maximum session lifetime, per role (SEC-9).
+ *
+ * ## WHY THE ABSOLUTE LIMIT IS ENFORCED HERE AND THE IDLE TIMEOUT IS NOT
+ *
+ * SEC-9 asks for both, and they defend against different things, so they
+ * belong in different places.
+ *
+ * The **absolute** limit bounds the blast radius of a STOLEN CREDENTIAL. A
+ * Firebase session refreshes itself indefinitely, so without this an ID token
+ * minted six weeks ago is as good as one minted this minute — and an attacker
+ * holding a refresh token has it forever. That is a network threat, the client
+ * is the attacker, and a client-side rule is worth nothing. It goes here,
+ * derived from `auth_time`, which the client cannot forge.
+ *
+ * The **idle** timeout defends against an UNATTENDED DESKTOP — someone walking
+ * up to a signed-in machine. That is a physical threat, the client is not the
+ * attacker, and the control has to end the session on the device where the
+ * person is absent. It belongs on the client, and is implemented there.
+ *
+ * Enforcing idle here as well would mean a per-request write to track last
+ * activity, on every request in the product, to defend against an adversary
+ * who is not the one making the requests.
+ *
+ * ## THE VALUES, AND "SHORTER THAN THE CONSUMER APP'S"
+ *
+ * SEC-9 requires the portal's limits to be shorter than the consumer app's,
+ * which had none. So the consumer figure is also set here, and is the loosest
+ * of the three: a Champion photographing a bin has no compliance data on their
+ * account, and signing them out weekly would cost disposals without protecting
+ * anything.
+ *
+ * Eight hours for a producer is one working day. A session that outlives the
+ * day it started in is one nobody is watching.
+ */
+const SESSION_MAX_AGE_SECONDS = Object.freeze({
+  producer: 8 * 60 * 60,
+  admin: 8 * 60 * 60,
+  // Sellers hold a shop and a payout balance but no compliance record.
+  seller: 7 * 24 * 60 * 60,
+  buyer: 30 * 24 * 60 * 60,
+});
+
+/** The limit for a role, defaulting to the strictest rather than the loosest. */
+function sessionMaxAgeFor(role) {
+  return SESSION_MAX_AGE_SECONDS[role] ?? SESSION_MAX_AGE_SECONDS.producer;
+}
+
+/**
+ * Whether this session has outlived its role's absolute limit.
+ *
+ * A token with no `auth_time` is treated as EXPIRED, not as exempt. The claim
+ * is present on every Firebase ID token, so its absence means something is
+ * wrong with the token rather than that the rule does not apply — and the
+ * failure this guards is one where the attacker chooses the token.
+ */
+function sessionHasExpired(user, nowSeconds = Math.floor(Date.now() / 1000)) {
+  const authTime = user?.authTime;
+  if (typeof authTime !== 'number') return true;
+  // A clock skew that puts `auth_time` in the future is not an expired
+  // session. Clamping at zero rather than treating it as a huge age, which
+  // would sign out every user on a server whose clock jumped backwards.
+  const age = Math.max(0, nowSeconds - authTime);
+  return age > sessionMaxAgeFor(user.role);
 }
 
 /** Requires an administrator. Use after [requireAuth]. */
@@ -354,6 +431,9 @@ function requireOrgRole(minRole) {
 }
 
 module.exports = {
+  SESSION_MAX_AGE_SECONDS,
+  sessionMaxAgeFor,
+  sessionHasExpired,
   requireAuth,
   requireAdmin,
   requireSeller,

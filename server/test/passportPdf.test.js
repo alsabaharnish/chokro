@@ -28,6 +28,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const PDFDocument = require('pdfkit');
+const crypto = require('crypto');
 const fontkit = require('fontkit');
 
 const pdf = require('../src/passportPdf');
@@ -1017,5 +1018,195 @@ describe('rendering', () => {
   test('falls back to English for an unknown locale rather than failing', async () => {
     const buffer = await render({ locale: 'fr' });
     expect(buffer.slice(0, 5).toString('latin1')).toBe('%PDF-');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Two findings from the 2026-09-10 audit pass, verified 2026-09-17
+// ---------------------------------------------------------------------------
+
+describe('heightOfFlow is an upper bound, not an estimate', () => {
+  /**
+   * The finding: "heightOfFlow may under-measure a mixed-script status banner
+   * by a line."
+   *
+   * It measures the WHOLE string once per distinct face and takes the max,
+   * while `writeFlow` renders each run in its own face. If a face measured the
+   * scripts it has no glyphs for as zero-width, both measurements could come
+   * out short and the max of two under-counts is still an under-count. That is
+   * a real mechanism and the reason the finding was plausible.
+   *
+   * Measured rather than argued: 432 combinations of locale, weight, size and
+   * width were rendered and compared against the prediction. None
+   * under-measured. This test pins the property at a representative sample —
+   * an under-measurement would overlap the next section on a certificate,
+   * which is the kind of defect that reaches a regulator's desk looking
+   * deliberate.
+   */
+  function faceFor(body, run, bold) {
+    if (run.script === 'bengali' && body.bengali) {
+      return bold ? body.bengaliBold : body.bengali;
+    }
+    return bold ? body.latinBold : body.latin;
+  }
+
+  /** What `writeFlow` does, so the actual consumed height can be measured. */
+  function writeFlowActual(doc, body, text, width, size, bold) {
+    const runs = pdf.splitRuns(body, text);
+    const x = doc.page.margins.left;
+    const y = doc.y;
+    if (runs.length === 1) {
+      doc.font(faceFor(body, runs[0], bold)).fontSize(size)
+        .text(runs[0].text, x, y, { width });
+      return;
+    }
+    runs.forEach((run, i) => {
+      const last = i === runs.length - 1;
+      doc.font(faceFor(body, run, bold)).fontSize(size);
+      if (i === 0) doc.text(run.text, x, y, { width, continued: !last });
+      else doc.text(run.text, { continued: !last });
+    });
+  }
+
+  const CASES = [
+    ['pure latin', 'Padma Beverages Limited collected 4.12 kg this period'],
+    ['pure bengali', 'পদ্মা বেভারেজেস লিমিটেড এই সময়ে ৪.১২ কেজি সংগ্রহ করেছে'],
+    ['mixed latin-first', 'Padma Beverages পাসপোর্ট Limited'],
+    ['mixed bengali-first', 'পাসপোর্ট Padma Beverages Limited পাসপোর্ট'],
+    // The string the finding named.
+    ['status banner', 'SUPERSEDED · প্রতিস্থাপিত by CHKR-PP-ABCD-2345 on 16 September 2026'],
+    ['long mixed, wraps', 'Padma পাসপোর্ট Beverages পাসপোর্ট Limited পাসপোর্ট '.repeat(4)],
+    ['alternating runs', 'A পা B সপো C র্ট D পা E সপো F র্ট G পা H সপো'],
+    ['digits mixed', '৪.১২ kg · 29.9% · ২৯.৯ শতাংশ'],
+  ];
+
+  for (const locale of ['en', 'bn']) {
+    for (const bold of [false, true]) {
+      test(`never under-measures — ${locale}, ${bold ? 'bold' : 'regular'}`, () => {
+        for (const width of [140, 300, 480]) {
+          for (const size of [7.5, 9.5, 14]) {
+            const doc = new PDFDocument({ size: 'A4', margin: 48 });
+            doc.on('data', () => {});
+            const body = pdf.registerFonts(doc, locale);
+
+            for (const [label, text] of CASES) {
+              const predicted = pdf.heightOfFlow(doc, body, text, width, {
+                size,
+                bold,
+              });
+              const before = doc.y;
+              writeFlowActual(doc, body, text, width, size, bold);
+              const actual = doc.y - before;
+
+              // Half a point of tolerance for rounding. Anything more is a
+              // section drawn on top of the one above it.
+              expect({ label, width, size, short: actual - predicted })
+                .toEqual({ label, width, size, short: expect.any(Number) });
+              expect(actual - predicted).toBeLessThanOrEqual(0.5);
+
+              if (doc.y > 680) doc.addPage();
+            }
+          }
+        }
+      });
+    }
+  }
+});
+
+describe('a broken Bengali face degrades instead of killing the page', () => {
+  /**
+   * The finding: "a corrupt Bengali font file may break the pure-Latin English
+   * edition." Confirmed, and worse than reported — BOTH of `registerFonts`'
+   * recovery paths were dead code.
+   *
+   * Each catch returned a Latin-only body reading `latin`, `latinBold` and
+   * `latinCoverage`. Those are declared with `let` AFTER the Bengali block, so
+   * at the point of the early return they are in the temporal dead zone: the
+   * recovery threw `Cannot access 'latin' before initialization` instead of
+   * recovering. Both comments described a degradation that had never once
+   * happened. Fixed by hoisting the Latin setup above every early return.
+   *
+   * WHY THIS DOES NOT CORRUPT THE REAL FONT FILE. The first version of this
+   * block did, and it broke `passports.test.js` — Jest runs files in parallel
+   * workers and the font is shared state on disk, so another worker read the
+   * corrupt bytes mid-suite. The trigger is environmental; the DEFECT is the
+   * recovery path, so that is what is exercised here.
+   */
+  const brokenDoc = () => {
+    const doc = new PDFDocument({ size: 'A4', margin: 48 });
+    doc.on('data', () => {});
+    return doc;
+  };
+
+  afterEach(() => jest.restoreAllMocks());
+
+  test('the fontkit shim failing yields a Latin-only body, not a crash', () => {
+    jest.spyOn(nullAnchorFix, 'install').mockImplementation(() => {
+      throw new Error('simulated: the shim could not patch fontkit');
+    });
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    const body = pdf.registerFonts(brokenDoc(), 'en');
+
+    // The assertion the old code could never have satisfied.
+    expect(body.bengali).toBeNull();
+    expect(body.bengaliBold).toBeNull();
+    expect(body.coverage).toBeNull();
+    // And the Latin face is present and usable, which is the whole point of
+    // degrading rather than refusing.
+    expect(body.latin).toBeTruthy();
+    expect(body.latinBold).toBeTruthy();
+    expect(body.regular).toBe(body.latin);
+  });
+
+  test('pdfkit failing to shape Bengali yields a Latin-only body too', () => {
+    // The second path: the shim reports success and pdfkit still cannot shape
+    // — two fontkit copies, or a font file replaced under a running process.
+    const original = PDFDocument.prototype.widthOfString;
+    jest
+      .spyOn(PDFDocument.prototype, 'widthOfString')
+      .mockImplementation(function widthOfString(text, ...rest) {
+        if (text === nullAnchorFix.SELF_TEST_STRING) {
+          throw new Error('simulated: pdfkit cannot shape this');
+        }
+        return original.call(this, text, ...rest);
+      });
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    const body = pdf.registerFonts(brokenDoc(), 'en');
+
+    expect(body.bengali).toBeNull();
+    expect(body.latin).toBeTruthy();
+  });
+
+  test('a Bangla edition asked for with no Bengali face still refuses', () => {
+    jest.spyOn(nullAnchorFix, 'install').mockImplementation(() => {
+      throw new Error('simulated');
+    });
+    jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    const body = pdf.registerFonts(brokenDoc(), 'bn');
+
+    // Degrading must not become "render Bangla in a Latin face". The body
+    // still reports bengali as absent, and `primaryScript` still says bengali
+    // — which is what makes the downstream refusal fire rather than silently
+    // dropping every glyph.
+    expect(body.bengali).toBeNull();
+    expect(body.primaryScript).toBe('bengali');
+    expect(body.regular).toBe(body.latin);
+  });
+
+  test('the degradation is reported, not silent', () => {
+    jest.spyOn(nullAnchorFix, 'install').mockImplementation(() => {
+      throw new Error('simulated: the shim could not patch fontkit');
+    });
+    const logged = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    pdf.registerFonts(brokenDoc(), 'en');
+
+    // An operator seeing Bangla certificates refuse needs the reason in the
+    // log; the refusal message itself cannot carry it.
+    expect(logged).toHaveBeenCalled();
+    expect(logged.mock.calls.flat().join(' ')).toMatch(/Latin-only/);
   });
 });

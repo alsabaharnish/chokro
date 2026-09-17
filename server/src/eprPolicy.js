@@ -338,7 +338,62 @@ function isWithinTolerance({ declaredMg, measuredMeanMg, toleranceFraction }) {
   return Math.abs(measuredMeanMg - declaredMg) <= allowed;
 }
 
+
+/**
+ * The policy as a non-Admin may see it (SEC-3, SEC-14).
+ *
+ * ## WHY THIS EXISTS
+ *
+ * `GET /epr/config/policy` is `requireAuth` only, so every authenticated
+ * account — a Champion, a producer's viewer, anyone with a login — used to
+ * receive the WHOLE document. That document contains every detection
+ * threshold in the system.
+ *
+ * SEC-14's table names the adversaries and the controls that stop them. Three
+ * of those controls are thresholds:
+ *
+ *   "Producer understates put-on-market" → variance review (EPR-43)
+ *   "Champion farms one brand"           → per-account anomaly queue (EPR-45)
+ *   "Producer inflates declared mass"    → target-edge detection (EPR-45)
+ *
+ * A control whose threshold the adversary can read is a control they can sail
+ * just under. `anomalyTargetMargin` is the sharpest case: it is the margin by
+ * which clearing a gazette target is treated as suspicious, so a producer who
+ * knows it knows exactly how much to declare.
+ *
+ * ## WHAT IS INCLUDED, AND WHY IT IS AN ALLOWLIST
+ *
+ * Named in, never filtered out — the same construction
+ * `eprPeriods.projectForProducer` uses, for the same reason: a threshold added
+ * to this document later must not reach a producer because nobody remembered
+ * to exclude it.
+ *
+ * `massToleranceFraction` and `massAuditSampleSize` are deliberately INCLUDED
+ * even though they are gameable. They govern the producer's own obligation
+ * under EPR-11, each `skuMassAudits` record already stores the tolerance it
+ * was judged against, and an audit result a producer cannot check the terms of
+ * is one they cannot contest. That is a worse failure than the gaming it
+ * would prevent.
+ */
+function projectPolicyForClient(policy) {
+  const full = policy || DEFAULTS;
+  return {
+    // Read by the client today (`compliance_service.dart`).
+    carbonUncertaintyCeiling: full.carbonUncertaintyCeiling,
+    // Already disclosed with every projected period, and stating it is the
+    // point — a suppressed breakdown has to say what floor suppressed it.
+    kAnonymityFloor: full.kAnonymityFloor,
+    // The producer's own EPR-11 terms.
+    massToleranceFraction: full.massToleranceFraction,
+    massAuditSampleSize: full.massAuditSampleSize,
+    // Whether unrecognised mass is estimated at all. A producer reading a
+    // figure is entitled to know whether anything in it was inferred.
+    estimateUnmatchedMass: full.estimateUnmatchedMass,
+  };
+}
+
 module.exports = {
+  projectPolicyForClient,
   DEFAULTS,
   normalize,
   validate,

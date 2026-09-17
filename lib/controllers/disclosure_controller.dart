@@ -21,9 +21,20 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../models/disclosure_model.dart';
 import '../services/disclosure_service.dart';
+import '../services/location_service.dart';
 
 final disclosureServiceProvider = Provider<DisclosureService>(
   (ref) => DisclosureService(),
+);
+
+/// The device's location, injectable.
+///
+/// Constructed through a provider rather than inline at the call site, so a
+/// test can assert what the screen does when the Admin REFUSES — which is the
+/// case the record depends on and the one a real device will not reproduce on
+/// demand.
+final locationServiceProvider = Provider<LocationService>(
+  (ref) => LocationService(),
 );
 
 /// The server refuses an `auth_time` older than five minutes.

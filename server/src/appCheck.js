@@ -39,17 +39,37 @@ function isEnforced() {
 /**
  * Routes exempt from enforcement even when it is on.
  *
- * Two of them, and each for a stated reason:
+ * Four of them, each for a stated reason.
  *
  * `/health` is what Render pings and what a person curls when the free instance
  * has gone to sleep. An attested health check is a health check that cannot be
  * used to diagnose an outage.
+ *
+ * `/epr/password-policy` is read by the redemption screen before any account
+ * exists, so it shares the reason below.
  *
  * `/epr/invitations/redeem` is reached by someone who has just clicked a link
  * in their email, possibly in a browser that has never loaded the app. There is
  * no app instance to attest. Its protection is the 256-bit single-use token and
  * the per-IP limiter, which is why both of those are as tight as they are
  * (SEC-8).
+ *
+ * `/passports/verify` IS THE ONE THAT CANNOT BE GOT WRONG, and it was missing.
+ *
+ * A Plastic Passport prints its verification URL onto the page. That PDF is in
+ * a regulator's or a customer's hands, and the person who types that URL has
+ * no Chokro app, no account and nothing to attest with — they have a piece of
+ * paper. Enforcing App Check on it refuses every genuine holder.
+ *
+ * And it cannot be repaired afterwards. The URL is rendered into certificates
+ * already issued and already distributed, and the document is content-hashed,
+ * so there is no edition of it to correct. Turning on enforcement without this
+ * exemption would silently invalidate every certificate Chokro has issued, and
+ * the only remedy would be reissuing all of them.
+ *
+ * Its protection is not attestation: it is the unguessable serial, the per-IP
+ * limiter, and a response that is five fields wide by explicit allowlist
+ * (SEC-7).
  */
 const EXEMPT_PATHS = Object.freeze([
   '/health',
@@ -57,8 +77,23 @@ const EXEMPT_PATHS = Object.freeze([
   '/epr/invitations/redeem',
 ]);
 
+/**
+ * Exempt prefixes, for routes that carry a path parameter.
+ *
+ * Separate from the exact list because `/passports/verify/CHKR-PP-ABCD-2345`
+ * is a different string for every certificate ever issued. Adding it to
+ * `EXEMPT_PATHS` would have looked like a fix and matched nothing — the
+ * verification endpoint would still have been refused, and the deploy log
+ * would have said App Check was enforced with an exemption in place.
+ *
+ * A trailing slash is required, so `/passports/verify` cannot be widened by a
+ * later route named `/passports/verify-something-else`.
+ */
+const EXEMPT_PREFIXES = Object.freeze(['/passports/verify/']);
+
 function isExempt(path) {
-  return EXEMPT_PATHS.includes(path);
+  if (EXEMPT_PATHS.includes(path)) return true;
+  return EXEMPT_PREFIXES.some((prefix) => path.startsWith(prefix));
 }
 
 /**
@@ -112,6 +147,7 @@ function describeEnforcement() {
 }
 
 module.exports = {
+  EXEMPT_PREFIXES,
   EXEMPT_PATHS,
   isEnforced,
   isExempt,

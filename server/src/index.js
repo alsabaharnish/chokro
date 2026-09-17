@@ -31,7 +31,7 @@ require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
 
-const { initFirebase } = require('./firebase');
+const { initFirebase, auth } = require('./firebase');
 const {
   requireAuth,
   requireAdmin,
@@ -2055,7 +2055,12 @@ app.get(
       // The signed URL is NOT included here. This endpoint is polled, so
       // embedding one would mint a fresh ten-minute credential on every poll
       // and leave a trail of live URLs in whatever logs the poll (SEC-6).
-      return res.json({ ok: true, job: { ...job, storagePath: undefined } });
+      //
+      // `projectJob` rather than `{ ...job, storagePath: undefined }`. The
+      // spread hid one named field and carried everything else, which is why
+      // the LIST route — which never knew about it — returned the bucket path
+      // this one was careful to strip. One allowlist, at the source.
+      return res.json({ ok: true, job: reportJobs.projectJob(job) });
     } catch (err) {
       console.error('Report poll failed:', err.message);
       return res.status(503).json({ error: 'report_unavailable' });
@@ -2578,7 +2583,16 @@ app.post(
  * declarations are judged against. */
 app.get('/epr/config/policy', requireAuth, readLimit, async (req, res) => {
   const policy = await eprPolicy.readPolicy();
-  return res.json({ ok: true, policy });
+  // An Admin sees the whole document; everyone else sees an explicit
+  // allowlist. Every detection threshold in this file is a control, and a
+  // control whose threshold the adversary can read is one they can sail just
+  // under (SEC-14). See `projectPolicyForClient`.
+  return res.json({
+    ok: true,
+    policy: req.user.role === 'admin'
+      ? policy
+      : eprPolicy.projectPolicyForClient(policy),
+  });
 });
 
 app.post(
@@ -2842,6 +2856,42 @@ app.post(
     }
   },
 );
+
+/**
+ * Revokes this account's refresh tokens (SEC-9).
+ *
+ * "Sign-out revokes refresh tokens server-side, not just locally." Firebase's
+ * client `signOut()` clears the local session and nothing else — the refresh
+ * token stays valid, and so does any ID token already minted from it, for up
+ * to an hour. SEC-9's stated failure mode is an unattended office desktop, and
+ * a session that is only locally ended does not address it.
+ *
+ * This is total rather than partial, because `requireAuth` already calls
+ * `verifyIdToken(token, true)` — the second argument is `checkRevoked`. So
+ * revoking here invalidates every outstanding ID TOKEN as well as the refresh
+ * token, immediately, on the next request.
+ *
+ * Idempotent and never fatal: a client that cannot reach this must still be
+ * able to sign out locally, because a user who taps sign out has to end up
+ * signed out. The route reports the failure; the client proceeds regardless.
+ */
+app.post('/auth/signout', requireAuth, writeLimit, async (req, res) => {
+  try {
+    await auth().revokeRefreshTokens(req.user.uid);
+    return res.json({ ok: true, revoked: true });
+  } catch (err) {
+    console.error(`Token revocation for ${req.user.uid} failed:`, err.message);
+    // 200 with `revoked: false`, not an error status. The client must sign out
+    // locally either way, and a non-2xx here would invite it to retry instead.
+    return res.json({
+      ok: true,
+      revoked: false,
+      message:
+        'Signed out on this device. The session could not be ended on the '
+        + 'server — sign in again to force it.',
+    });
+  }
+});
 
 /**
  * The disclosure register (SEC-13).

@@ -1,0 +1,43 @@
+rules_version = '2';
+
+// Chokro — Cloud Storage (SEC-6).
+//
+// ## EVERY CLIENT PATH IS DENIED, AND THAT IS THE WHOLE FILE
+//
+// One bucket, one writer, one reader. `server/src/reportJobs.js` is the only
+// thing in this repository that puts an object here, and it does so through
+// the Admin SDK, which bypasses these rules entirely. The only way a person
+// reads one back is `POST /epr/reports/{jobId}/download`, which checks the
+// caller's org membership, re-checks the report type's `minRole`, writes an
+// audit entry, and mints a signed URL that expires in ten minutes.
+//
+// So a client has no legitimate reason to address this bucket directly. The
+// Flutter app never does — it holds no `firebase_storage` dependency at all,
+// and its photographs go to Cloudinary.
+//
+// ## WHY THE FILE EXISTS AT ALL, GIVEN IT ONLY SAYS NO
+//
+// It did not, and that was the finding. `firebase.json` declared no `storage`
+// target, so `firebase deploy` never deployed a ruleset and nothing in the
+// repository stated what the bucket's posture was supposed to be. The bucket
+// holds every organisation's report artefacts, including the chain-of-custody
+// export — the one row-level artefact in the product, carrying a bin and a
+// date per disposal.
+//
+// An undeclared posture is not a safe one. It is an unknown one, and the
+// difference matters most on the bucket nobody thought to check.
+//
+// ## IF THIS EVER NEEDS TO CHANGE
+//
+// It should not. A client that needs an artefact should get a signed URL from
+// the route, because that route is where the role check and the audit entry
+// live. Granting a read here would move the decision to a place that cannot
+// log it.
+
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}

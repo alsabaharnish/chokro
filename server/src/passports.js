@@ -197,6 +197,24 @@ function canonicalPayload(figures) {
   }
 
   lines.push(`collectedTotal=${intOr0(figures.collectedMassMg)}`);
+  // Both sides of the corrected ratio, so a certificate cannot be reissued
+  // with a different declared-category set and hash the same. `?? absent` for
+  // figure sets stored before these existed — an older certificate must keep
+  // hashing to the value it was issued with.
+  lines.push(
+    `collectedInDeclared=${
+      figures.collectedInDeclaredMassMg == null
+        ? 'absent'
+        : intOr0(figures.collectedInDeclaredMassMg)
+    }`,
+  );
+  lines.push(
+    `collectedOutsideDeclaration=${
+      figures.collectedOutsideDeclarationMassMg == null
+        ? 'absent'
+        : intOr0(figures.collectedOutsideDeclarationMassMg)
+    }`,
+  );
   // `== null` catches undefined too. `=== null` did not, so a figure set
   // missing the field — one from an older stored certificate, or one built by
   // hand — crashed here instead of reading as absent.
@@ -297,11 +315,52 @@ async function assembleFigures({ orgId, periodId, scope = 'period' }) {
       )
     : null;
 
+  // THE NUMERATOR IS RESTRICTED TO THE CATEGORIES THE PRODUCER DECLARED.
+  //
+  // It was not, and the percentage on the certificate was overstated as a
+  // result. `collectedMassMg` sums EVERY gazette category Chokro collected,
+  // while `declaredMassMg` sums only the categories the producer chose to
+  // declare — so a producer who declared rigid and had flexible collected too
+  // got the flexible kilograms in the numerator and nothing in the denominator
+  // to answer for them.
+  //
+  // On the figures this module's own tests use, that is 5.00 kt over 18.0 kt =
+  // 27.8% where the honest comparison is 4.12 over 18.0 = 22.9%. Against the
+  // year-3 target of 30% those are different stories, and it is printed on a
+  // document a regulator reads.
+  //
+  // EPR-24 makes the target "a percentage of what a producer placed on the
+  // market", declared per gazette category. A ratio across two different
+  // category sets is not that percentage. Both sides now cover the same set.
+  //
+  // The excluded mass is NOT discarded — it is reported below. It is real
+  // material Chokro collected, and the reason it cannot enter the rate is that
+  // the producer never declared the category, which is a fact worth surfacing
+  // rather than hiding inside a flattering number.
+  const declaredCategories = declaredMassMgByCategory
+    ? Object.keys(declaredMassMgByCategory)
+    : null;
+
+  const collectedInDeclaredMassMg = declaredCategories
+    ? declaredCategories.reduce(
+        (sum, category) => sum + intOr0(collectedMassMgByCategory[category]),
+        0,
+      )
+    : 0;
+
+  /// Collected in a gazette category the producer did not declare.
+  ///
+  /// Zero in the ordinary case. Non-zero means the declaration is incomplete,
+  /// and an Admin reviewing the certificate should see that rather than infer
+  /// it from two figures that do not reconcile.
+  const collectedOutsideDeclarationMassMg =
+    declaredCategories === null ? 0 : collectedMassMg - collectedInDeclaredMassMg;
+
   // EPR-24: no percentage without a submitted declaration, and none against a
   // nil denominator either. Null, never zero.
   const collectionRate =
     declaredMassMg !== null && declaredMassMg > 0
-      ? collectedMassMg / declaredMassMg
+      ? collectedInDeclaredMassMg / declaredMassMg
       : null;
 
   const obligationYear = obligationYearAt(organization, periodId);
@@ -352,6 +411,8 @@ async function assembleFigures({ orgId, periodId, scope = 'period' }) {
       declaration?.status === 'submitted' ? declaration.attestedAt ?? null : null,
 
     collectionRate,
+    collectedInDeclaredMassMg,
+    collectedOutsideDeclarationMassMg,
     applicableCollectionTarget,
     obligationYear,
 

@@ -690,3 +690,61 @@ describe('reversal (EPR-21)', () => {
     expect(fs._store.get('eprPeriods/org_cola_2026-09').uncertainMassMg).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// EPR-48 — a check whose starting value the caller chooses is not a check
+// ---------------------------------------------------------------------------
+
+describe('carried totals on a resumed recompute', () => {
+  /**
+   * `carried` arrives in the request body and seeds the running totals that
+   * become the recomputed figure — the independent check on the incremented
+   * counters. It was passed through unvalidated.
+   */
+  const good = {
+    massMgByCategory: { rigid: 1000 },
+    attributionCount: 4,
+    skuIds: ['sku-1'],
+  };
+
+  test('a well-formed partial is accepted and filled out', () => {
+    const out = eprPeriods.validateCarried(good);
+    expect(out.massMgByCategory).toEqual({ rigid: 1000 });
+    expect(out.attributionCount).toBe(4);
+    // Absent totals come back as the empty ones rather than undefined, so the
+    // accumulator never adds to a missing field.
+    expect(out.reversedMassMg).toBe(0);
+    expect(out.disposalIds).toEqual([]);
+  });
+
+  test.each([
+    ['not an object', 'totals'],
+    ['an array', [1, 2]],
+    ['null', null],
+    ['a negative mass', { massMgByCategory: { rigid: -1 } }],
+    ['a fractional mass', { massMgByCategory: { rigid: 1.5 } }],
+    ['a non-numeric mass', { massMgByCategory: { rigid: '1000' } }],
+    ['a negative count', { attributionCount: -3 }],
+    ['a map where a list belongs', { skuIds: { a: 1 } }],
+    ['ids that are not strings', { skuIds: [1, 2] }],
+    ['a map that is not a map', { massMgByPolymer: 'pet' }],
+  ])('%s is refused', (_label, carried) => {
+    expect(() => eprPeriods.validateCarried(carried)).toThrow(/not usable/);
+  });
+
+  test('an unknown key cannot ride into the period document', () => {
+    // An allowlist, not a shape check. The totals object is written onward, so
+    // a field nobody expected must not travel with it.
+    expect(() =>
+      eprPeriods.validateCarried({ ...good, recomputedBy: 'somebody-else' }),
+    ).toThrow(/not a total this recompute keeps/);
+  });
+
+  test('it rejects rather than clamping', () => {
+    // A negative mass silently clamped to zero is a wrong figure that looks
+    // deliberate — and this figure is the one a reconciliation is judged on.
+    expect(() =>
+      eprPeriods.validateCarried({ massMgByCategory: { rigid: -500 } }),
+    ).toThrow();
+  });
+});

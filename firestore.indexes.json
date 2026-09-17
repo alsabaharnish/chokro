@@ -450,36 +450,6 @@
       "density": "SPARSE_ALL"
     },
     {
-      "collectionGroup": "organizations",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "tradeNameKey",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "__name__",
-          "order": "ASCENDING"
-        }
-      ],
-      "density": "SPARSE_ALL"
-    },
-    {
-      "collectionGroup": "organizations",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "legalNameKey",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "__name__",
-          "order": "ASCENDING"
-        }
-      ],
-      "density": "SPARSE_ALL"
-    },
-    {
       "collectionGroup": "orgInvitations",
       "queryScope": "COLLECTION",
       "fields": [
@@ -677,21 +647,6 @@
         {
           "fieldPath": "createdAt",
           "order": "DESCENDING"
-        },
-        {
-          "fieldPath": "__name__",
-          "order": "ASCENDING"
-        }
-      ],
-      "density": "SPARSE_ALL"
-    },
-    {
-      "collectionGroup": "attributions",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "disposalId",
-          "order": "ASCENDING"
         },
         {
           "fieldPath": "__name__",
@@ -1018,39 +973,11 @@
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "periodId",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "attributions",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "orgId",
-          "order": "ASCENDING"
-        },
-        {
           "fieldPath": "disposalId",
           "order": "ASCENDING"
         },
         {
           "fieldPath": "__name__",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "attributionConfirmations",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "status",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "createdAt",
           "order": "ASCENDING"
         }
       ]
@@ -1134,16 +1061,6 @@
         {
           "fieldPath": "issuedAt",
           "order": "DESCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "producerSkus",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
-          "fieldPath": "orgId",
-          "order": "ASCENDING"
         }
       ]
     },

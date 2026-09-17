@@ -27,6 +27,7 @@ jest.mock('../src/firebase', () => {
     },
     serverTimestamp: jest.fn(() => '__TS__'),
     bucket: jest.fn(() => ({
+      exists: async () => [true],
       file: (path) => ({
         save: async (buffer) => saved.set(path, buffer),
         getSignedUrl: async () => [`https://signed.example/${path}?sig=abc`],

@@ -46,7 +46,9 @@ const FIGURES = Object.freeze({
   declaredMassMgByCategory: { rigid: 18000000000 },
   declaredMassMg: 18000000000,
   declarationVersion: 2,
-  collectionRate: 5000000000 / 18000000000,
+  // The fixture declares RIGID only while collecting rigid and flexible, which
+  // is what makes it a useful fixture: the two category sets differ.
+  collectionRate: 4120000000 / 18000000000,
   applicableCollectionTarget: 0.15,
   attributionCount: 224200,
   disposalCount: 198400,
@@ -299,7 +301,24 @@ describe('assembling a period', () => {
     expect(f.uniqueSkuCount).toBe(3);
     expect(f.organizationLegalName).toBe('Coca-Cola Bangladesh Beverages Ltd.');
     expect(f.declarationVersion).toBe(2);
-    expect(f.collectionRate).toBeCloseTo(5000000000 / 18000000000, 10);
+    // 4.12 kt over 18.0 kt, NOT 5.00 over 18.0.
+    //
+    // This assertion used to read `5000000000 / 18000000000` and was pinning a
+    // defect: the numerator summed every collected category while the
+    // denominator summed only the DECLARED ones, so the flexible kilograms
+    // this fixture collects — which the fixture never declares — inflated the
+    // percentage from 22.9% to 27.8%. Against the year-3 target of 30% those
+    // are different stories, on a document a regulator reads.
+    //
+    // EPR-24 makes the target a percentage of what was placed on market,
+    // declared per gazette category. Both sides now cover the same set.
+    expect(f.collectionRate).toBeCloseTo(4120000000 / 18000000000, 10);
+
+    // And the collected mass that cannot enter the ratio is reported rather
+    // than discarded or folded in: it is real material, and the reason it is
+    // excluded is an incomplete declaration, which is worth surfacing.
+    expect(f.collectedInDeclaredMassMg).toBe(4120000000);
+    expect(f.collectedOutsideDeclarationMassMg).toBe(880000000);
   });
 
   test('has no collection rate without a submitted declaration (EPR-24)', async () => {
@@ -1215,4 +1234,64 @@ describe('the issuance register', () => {
     expect(fs._store.get(`plasticPassports/${august.serial}`).status).toBe('issued');
     expect(fs._store.get(`plasticPassports/${pran.serial}`).status).toBe('issued');
   });
+});
+
+// ---------------------------------------------------------------------------
+// EPR-24 — the ratio compares like with like (recovered finding, 2026-09-17)
+// ---------------------------------------------------------------------------
+
+describe('the collection percentage', () => {
+  /**
+   * The defect: the numerator summed every gazette category Chokro collected
+   * while the denominator summed only the categories the producer declared, so
+   * collecting in an undeclared category raised the percentage with nothing in
+   * the denominator to answer for it.
+   *
+   * Raised independently by two audit agents in September 2026 and left
+   * unverified when the run hit a session limit. An existing test had pinned
+   * the inflated value, so nothing failed.
+   */
+  test('an undeclared collected category does not inflate the rate', async () => {
+    const declared = { rigid: 10_000_000_000 };
+    const collected = { rigid: 2_000_000_000, flexible: 3_000_000_000 };
+
+    const rate = ratioFor({ declared, collected });
+
+    // 2.0 / 10.0, not 5.0 / 10.0.
+    expect(rate).toBeCloseTo(0.2, 10);
+    expect(rate).not.toBeCloseTo(0.5, 2);
+  });
+
+  test('matching category sets are unaffected', () => {
+    // The ordinary case must not move. A producer who declares what is
+    // collected sees exactly the figure they saw before.
+    expect(
+      ratioFor({
+        declared: { rigid: 10_000_000_000 },
+        collected: { rigid: 2_000_000_000 },
+      }),
+    ).toBeCloseTo(0.2, 10);
+  });
+
+  test('a declared category with nothing collected still counts against them', () => {
+    // The direction that protects the regulator rather than the producer: an
+    // undeclared collection is excluded, but a declared category that
+    // collected nothing stays in the denominator.
+    expect(
+      ratioFor({
+        declared: { rigid: 5_000_000_000, flexible: 5_000_000_000 },
+        collected: { rigid: 5_000_000_000 },
+      }),
+    ).toBeCloseTo(0.5, 10);
+  });
+
+  /** The arithmetic `assembleFigures` performs, isolated. */
+  function ratioFor({ declared, collected }) {
+    const declaredTotal = Object.values(declared).reduce((s, m) => s + m, 0);
+    const inDeclared = Object.keys(declared).reduce(
+      (s, c) => s + (collected[c] ?? 0),
+      0,
+    );
+    return declaredTotal > 0 ? inDeclared / declaredTotal : null;
+  }
 });

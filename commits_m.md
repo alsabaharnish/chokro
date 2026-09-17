@@ -17,6 +17,325 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-09-17 15:30 (+06) — A root `Focus` that stopped the app booting, and undeployable indexes
+
+Two failures found by actually running the things, not by reading them.
+
+**The idle guard crashed the app on its first frame.** `IdleSessionGuard`
+detected keystrokes with a `Focus` widget, and in `main.dart` that widget wraps
+`MaterialApp.router` — above the Navigator, above the View. Flutter's focus
+traversal then sorted descendants that had not been laid out:
+
+    RenderBox was not laid out: RenderSemanticsAnnotations NEEDS-LAYOUT
+    ... focus_traversal.dart sortDescendants → findFirstFocus
+
+Nothing rendered. Seven widget tests passed throughout, because every one of
+them mounts the guard INSIDE a MaterialApp — which is not how the application
+uses it. A control written this morning to protect an unattended desktop
+instead prevented anyone reaching a desktop at all.
+
+Replaced with `HardwareKeyboard.instance.addHandler`, which is what this always
+wanted: a signal that somebody is at the keyboard, taking no part in the focus
+tree and claiming nothing about where input goes. The handler returns false —
+observed, never consumed — or it would swallow every keystroke in the product.
+
+Two tests now mount the guard in its PRODUCTION shape, wrapping MaterialApp
+rather than living inside one. Verified against the stashed buggy version:
+they fail there, so they catch the regression rather than passing vacuously.
+
+**The index file was correct and undeployable.** `firebase deploy` refused it:
+
+    HTTP Error: 400, this index is not necessary, configure using single field
+    index controls
+
+Firestore maintains a single-field index for every field automatically and
+rejects a composite that declares only one. Four had accumulated
+(`organizations.tradeNameKey`, `organizations.legalNameKey`,
+`attributions.disposalId`, `producerSkus.orgId`), each backing a
+single-equality query the automatic index already serves.
+
+The deploy aborts on the first rejection, so those four were blocking the other
+63 — none of which had ever reached production either. One stale line was
+holding back every index in the project.
+
+The suite already checked that every composite QUERY has an index. Nothing
+checked the reverse — that every declared INDEX is legal. Four tests close it:
+no index with fewer than two real fields, `__name__` last where present, a
+collection group and fields on every entry, and no duplicates (a duplicate is
+accepted and then ignored, so it reads as coverage that is not there). The
+deploy dry run now passes.
+
+**Also diagnosed, no code change:** `flutter run -d chrome` picks a random web
+port, and the server's `ALLOWED_ORIGINS` names `localhost:5000` only — hence
+"Failed to fetch" against a live and healthy API. `--web-port=5000`. Confirmed
+by preflighting three ports against production: 5000 allowed, 5002 and 61234
+refused.
+
+Files: `lib/core/idle_session.dart`, `test/idle_session_test.dart`,
+`firestore.indexes.json`, `server/test/firestoreIndexes.test.js`
+Checks: 1142 Flutter tests, 1202 server tests, analyze clean, deploy dry run
+passes.
+
+## 2026-09-17 14:05 (+06) — Deferring Cloud Storage: make the absence explain itself
+
+Firebase Storage needs the Blaze plan, which is deferred. So the question
+became what breaks, and the answer is narrower than it sounded: **only
+`reportJobs.js` touches Cloud Storage.** Plastic Passports are rendered and
+streamed directly and never go near it, so the flagship deliverable is
+unaffected. What is blocked is EPR-33's eight report types and the audit pack.
+
+**The preflight was checking the wrong thing.** `assertStorageConfigured`
+tested that `FIREBASE_STORAGE_BUCKET` was SET, and its comment promised it
+"fails loudly and names the variable the operator has to set". The variable IS
+set — `chokro-30887.firebasestorage.app` is a perfectly good name — and the
+bucket behind it does not exist. So the preflight passed, the job enqueued,
+reported `running`, and died inside a GCS call with a message naming a bucket
+the operator had never heard of and no mention of the remedy.
+
+`assertStorageExists` now asks whether the bucket is THERE, at enqueue time,
+where the module already intended to refuse. Three states, three answers: the
+variable unset names the variable; the bucket absent says Storage has not been
+set up, that it needs the Blaze plan, and that everything else including
+passports is unaffected; an unreachable bucket says so and says to try again,
+because a network failure must not reach a producer as "your Chokro instance
+is misconfigured".
+
+Cached on success only. A bucket that exists does not stop existing, so one
+round trip per process is enough — and a negative result is deliberately NOT
+cached, because somebody is about to go and create it and should not have to
+redeploy to be believed. `resetStorageCheck` is exported for tests: a
+process-wide cache is invisible to a suite, and without it the first test to
+confirm the bucket silently exempts every test after it.
+
+**An unbounded-read audit, run before recommending billing.** 78 collection
+reads in `server/src`; 71 carry an explicit `limit()` or `count()`. Six of the
+remaining seven are bounded by data shape (`in` chunks of thirty, one user's
+devices, one disposal's attributions). The seventh is the seller-suspension
+sweep in `listings.js`, Admin-triggered and bounded by one seller's catalogue.
+There is no runaway-read exposure in this codebase, which is the thing worth
+knowing before switching on per-read billing.
+
+Files: `server/src/reportJobs.js`,
+`server/test/{reportJobs,zz_scratch_year}.test.js`
+Checks: 1198 server tests (42 suites). `zz_scratch_year.test.js` is a leftover
+scratch file that still runs in the suite — worth deleting or promoting.
+
+## 2026-09-17 11:40 (+06) — Triaging the recovered findings: an overstated percentage on every certificate
+
+Every CRITICAL and HIGH finding from the 127 recovered yesterday, checked
+mechanically against the current tree. Most no longer describe the code. Four
+were live, and one of those is the most serious defect found in this project.
+
+**The collection percentage on the certificate was overstated.** The numerator
+summed every gazette category Chokro collected; the denominator summed only the
+categories the producer DECLARED. A producer who declared rigid and had
+flexible collected too got those kilograms in the numerator with nothing in the
+denominator to answer for them.
+
+On this module's own fixture that is 27.8% against an honest 22.9%, and against
+the year-3 target of 30% those are different stories — printed on a document a
+regulator reads. EPR-24 makes the target a percentage of what was placed on
+market, declared per gazette category; a ratio across two different category
+sets is not that percentage.
+
+Both sides now cover the same set. The excluded mass is reported as
+`collectedOutsideDeclarationMassMg` rather than discarded: it is real material,
+and the reason it cannot enter the ratio is an incomplete declaration, which is
+a fact worth surfacing rather than hiding inside a flattering number. Both new
+figures are in `canonicalPayload`, so a reissue with a different declared set
+cannot hash the same; stored certificates are unaffected because the hash is
+computed once at issue and never recomputed.
+
+**An existing test had pinned the inflated value** — `expect(f.collectionRate)
+.toBeCloseTo(5000000000 / 18000000000)`. Two agents raised this independently
+and neither was believed, because nothing failed. Third time in this project a
+test has pinned a bug.
+
+**`carried` was unvalidated on a resumed recompute.** Those running totals
+arrive in the request body and seed the figure that IS the independent check on
+the incremented counters — so whoever ran the check chose what it started from.
+Now an allowlist of keys with whole non-negative values, rejecting rather than
+clamping, because a negative mass clamped to zero is a wrong figure that looks
+deliberate. Malice was never required: a client resuming with stale state did
+the same thing silently.
+
+**`listJobs` leaked the private bucket path.** The single-job route stripped
+`storagePath` with a spread; the list route never knew the rule existed. One
+allowlist projection at the source, because a rule enforced per route is a rule
+the next route will not know about.
+
+**`localeCompare` made report row order runtime-dependent.** Every sort sat
+under a comment promising "byte-identical across runs". Demonstrated rather
+than argued: on real Bangladeshi district names the default locale sorts Latin
+before Bengali and `bn` sorts Bengali before Latin — same rows, different
+order, different `contentHash`, on a deploy where nothing but `LANG` changed.
+Now code-point order, which is uglier for a reader and identical everywhere.
+
+Also closed by checking: the §6.7 boundary statements ARE on the certificate
+(the first grep missed their wording), the audit digest does cover
+actorName/actorRole/ip/userAgent, `supersedeForPeriod` is called from
+production, and transaction read-before-write ordering is correct.
+
+Files: `server/src/{passports,eprPeriods,reportJobs,skuShortlist,index}.js`,
+`server/test/{passports,eprPeriods,reportJobs}.test.js`,
+`docs/RECOVERED_AUDIT_FINDINGS.md`
+Checks: 1195 server tests (42 suites), analyze clean. MEDIUM/LOW and the
+client-side Dart findings remain untriaged and are listed in the doc.
+
+## 2026-09-17 08:15 (+06) — npm advisories, the SEC-9 session framework, and 127 recovered findings
+
+**The npm advisory refresh, blocked since August, ran.** Its severity ranking
+inverted the real picture: the one HIGH was `js-yaml` under `jest`, a
+devDependency that never ships, while all 11 moderates were production.
+
+`npm audit fix` then did something worth not accepting. It DOWNGRADED gaxios
+6.7.1 → 6.3.0 to escape an advisory range — and that bought nothing: gaxios was
+flagged transitively through `uuid`, and `uuid@9.0.1` stayed in the tree either
+way. The downgrade removed gaxios from the REPORT while leaving the vulnerable
+code installed, at the cost of four minor releases. Reverted; fixed `qs`
+properly with an `overrides` pin to ^6.16.0, which reaches the copy inside
+body-parser that express's own bump leaves behind — the one parsing request
+bodies.
+
+11 → 8, and the 8 are one advisory: uuid's missing buffer bounds check in
+v3/v5/v6 when `buf` is provided. Chokro does not use uuid at all, and the only
+call anywhere in the cloud libraries is `uuid.v4` — not an affected function.
+Clearing it needs firebase-admin 14, a major bump, which is now a planned
+upgrade rather than a security response.
+
+**The audit backlog was not eight findings. It was 127.** Recovered from the
+workflow journals, which persist every agent's structured return value —
+`commits_m.md` had preserved only the sentence "eight lower-severity findings,
+still unverified". Written to `docs/RECOVERED_AUDIT_FINDINGS.md` so they cannot
+evaporate again. Mechanical triage says most are closed by later fix passes.
+Two were not.
+
+**`appCheck.js` — the verification endpoint was not App Check exempt.** The
+urgent one, because `APP_CHECK_ENFORCED` is release-blocking and was about to
+be turned on. The verification URL is printed into every certificate, read by
+someone holding a piece of paper with no app to attest with, in a
+content-hashed document that cannot be reissued with a corrected URL —
+enforcement would have invalidated every certificate already issued. And worse
+than reported: `EXEMPT_PATHS` is exact-match while every serial is a different
+string, so adding the route to that list would have matched nothing while the
+deploy log claimed the exemption was in place. Fixed with a prefix list.
+
+**No `storage.rules`, and no `storage` target in `firebase.json`.** The bucket
+holding every organisation's report artefacts — including the row-level
+chain-of-custody export — had no declared posture at all. Added, denying every
+client path. Also discovered while validating it: **Firebase Storage has never
+been initialised on the project**, so the whole report suite would fail in
+production. Console action, raised for the user.
+
+**SEC-9, split by adversary rather than built as one thing.** The absolute
+session limit bounds a STOLEN CREDENTIAL, where the client is the attacker, so
+it is enforced on the server from `auth_time` — 8 hours for producer and admin
+against 30 days for a Champion, which is what makes "shorter than the consumer
+app's" mean anything, since the consumer app had no limit to be shorter than.
+The idle timeout defends an UNATTENDED DESKTOP, where the client is not the
+attacker and the device is what is at risk, so it runs on the client; enforcing
+it server-side would mean a write on every request in the product to defend
+against someone who is not making them.
+
+Two bugs the tests caught rather than the code review. The guard armed its
+timer only from `ref.listen`, which fires on CHANGES — so every cold start into
+an existing session, the common case, armed nothing and the control did nothing
+at all. And a rebuild must not count as activity: a screen with a stream would
+otherwise hold an empty office signed in forever, so that is now its own test.
+
+Files: `server/{package.json,package-lock.json}`,
+`server/src/{appCheck,auth}.js`, `server/test/{appCheck,auth}.test.js`,
+`storage.rules` (new), `firebase.json`,
+`docs/RECOVERED_AUDIT_FINDINGS.md` (new), `lib/core/idle_session.dart` (new),
+`lib/main.dart`, `test/idle_session_test.dart` (new)
+Checks: 1171 server tests (42 suites), 1140 Flutter tests, analyze clean.
+
+## 2026-09-17 04:20 (+06) — The SEC-1–SEC-14 review, and three real findings
+
+Three jobs: widget tests for the disclosure screen, the SEC penetration
+review, and the audit backlog.
+
+**Disclosure widget tests (20).** The screen had model tests only — the same
+gap I had criticised in Phase E. Writing them exposed a testability bug I had
+introduced: `LocationService` was constructed inline, so the case the whole
+record depends on — the Admin REFUSING to share their location — could not be
+exercised. Made injectable.
+
+**Audit backlog: both named findings tested by rendering, one confirmed.**
+
+`heightOfFlow` under-measuring a mixed-script flow: NOT a defect. It measures
+the whole string once per face and takes the max, which is a real mechanism for
+under-counting if each face measures the other's scripts as zero-width. 432
+combinations of locale, weight, size and width were rendered and compared
+against the prediction. None under-measured; the worst case over-reserves by
+77pt, which is the safe direction. Pinned as a property test.
+
+A corrupt Bengali font breaking the English edition: **CONFIRMED, and worse
+than reported.** BOTH of `registerFonts`' recovery paths were dead code. Each
+catch returned a Latin-only body reading `latin`, `latinBold` and
+`latinCoverage` — declared with `let` AFTER the Bengali block, so at the point
+of the early return they are in the temporal dead zone. The recovery threw
+`Cannot access 'latin' before initialization` instead of recovering, and both
+comments described a degradation that had never once happened. Nothing caught
+it because the tests covered DETECTION of a broken font and never RECOVERY.
+Fixed by hoisting the Latin setup above every early return, and by making the
+pdfkit shaping self-test degrade rather than throw — an English certificate
+uses no Bengali face, so a Bengali face that cannot shape is not a fact about
+it.
+
+Two false starts worth recording. A standalone probe said the English edition
+was fine, because a cold process fails `fontAvailable` and takes the early
+path; the bug only appears warm, when fontkit's by-path cache holds a healthy
+handle and pdfkit reads corrupt bytes from disk — a deploy swapping assets
+under a running server. And my first test CORRUPTED THE REAL FONT ASSET, which
+broke `passports.test.js`: Jest runs files in parallel workers and the font is
+shared state on disk. Rewritten to exercise the recovery path directly, which
+is the defect; the corruption was only its trigger.
+
+**SEC review — two findings.**
+
+SEC-14: `GET /epr/config/policy` is `requireAuth` only and returned the WHOLE
+policy document to every authenticated account — a Champion, a producer's
+viewer, anyone with a login. That document holds every detection threshold in
+the system. Three of SEC-14's own controls are thresholds, and a control whose
+threshold the adversary can read is one they can sail just under;
+`anomalyTargetMargin` is the sharpest, being the margin by which clearing a
+gazette target is treated as suspicious. The client reads exactly two fields
+from this route. Now an explicit allowlist for non-Admins, built the way
+`projectForProducer` is so a threshold added later cannot leak by default.
+`massToleranceFraction` and `massAuditSampleSize` are deliberately included
+despite being gameable: an audit result whose terms a producer cannot check is
+one they cannot contest, which is the worse failure.
+
+SEC-9: "sign-out revokes refresh tokens server-side, not just locally" was not
+implemented — `revokeRefreshTokens` appeared nowhere but a comment. Firebase's
+client `signOut()` left the refresh token, and any ID token minted from it,
+valid for up to an hour. Now `POST /auth/signout`, and the fix is total rather
+than partial because `requireAuth` already verifies with `checkRevoked: true`,
+so revoking invalidates outstanding ID tokens too. Never allowed to block the
+local sign-out: a user who taps sign out must end up signed out with no
+network, so failures are swallowed and reported, not thrown.
+
+**SEC-1 and SEC-2 verified and hold.** `requireOrgRole` reads live membership
+on every request rather than trusting a claim, and `firestore.rules` never
+reads `request.auth.token.orgId`. Membership revocation is immediate
+server-side, which is the failure mode SEC-2 names.
+
+**Still open from SEC-9:** no idle timeout and no absolute session lifetime.
+Both are required and neither exists — and the spec wants them "shorter than
+the consumer app's", which has none either. Raised rather than built: it is a
+session framework, not a patch, and it should be designed rather than bolted
+on at the end of a review.
+
+Files: `server/src/{passportPdf,eprPolicy,index}.js`,
+`server/test/{passportPdf,eprPolicy}.test.js`,
+`lib/services/session_service.dart` (new),
+`lib/controllers/{auth_controller,disclosure_controller}.dart`,
+`lib/views/admin/admin_disclosure_view.dart`,
+`test/{admin_disclosure_view,session_revocation}_test.dart` (new)
+Checks: 1159 server tests (42 suites), 1132 Flutter tests, analyze clean. The
+font asset was verified unmodified after the corruption experiments.
+
 ## 2026-09-17 01:30 (+06) — Disclosure as a guarded power: step-up auth, a written reason, and an open register
 
 The disclosure endpoints existed and only curl could reach them. They are now a

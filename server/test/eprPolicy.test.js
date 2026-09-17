@@ -254,3 +254,83 @@ describe('isWithinTolerance (EPR-11)', () => {
     ).toBe(false);
   });
 });
+
+// ---------------------------------------------------------------------------
+// SEC-14 — the thresholds are controls, and a readable control is no control
+// ---------------------------------------------------------------------------
+
+describe('the policy a non-Admin receives', () => {
+  /**
+   * Found in the SEC-1–SEC-14 review, 2026-09-17. `GET /epr/config/policy` is
+   * `requireAuth` only and returned the WHOLE document to every authenticated
+   * account. The client reads exactly two fields from it; the rest included
+   * every anomaly threshold in the system.
+   */
+  const projected = () => eprPolicy.projectPolicyForClient(eprPolicy.DEFAULTS);
+
+  test('no detection threshold survives the projection', () => {
+    const out = projected();
+    // Each of these tells an adversary where a control fires. The most direct
+    // is `anomalyTargetMargin`: the margin by which clearing a gazette target
+    // is treated as suspicious.
+    for (const secret of [
+      'anomalySkuMassMultiple',
+      'anomalyBinShare',
+      'anomalyAccountShare',
+      'anomalyConfidenceDrift',
+      'anomalyUnitMassIqrMultiple',
+      'anomalyTargetMargin',
+      'anomalyTargetFilingDays',
+      'declarationVarianceThreshold',
+      'reversalMaterialityFraction',
+      'accuracyAuditSampleFraction',
+      'highConfidenceThreshold',
+      'lowConfidenceThreshold',
+      'skuShortlistCap',
+    ]) {
+      expect(out[secret]).toBeUndefined();
+    }
+  });
+
+  test('it is an allowlist, so a new threshold cannot leak by default', () => {
+    // The construction that matters more than the list. A field added to
+    // DEFAULTS later must not reach a producer because nobody remembered to
+    // exclude it.
+    const invented = eprPolicy.projectPolicyForClient({
+      ...eprPolicy.DEFAULTS,
+      anomalySomethingEntirelyNew: 0.42,
+      secretFutureThreshold: 99,
+    });
+    expect(invented.anomalySomethingEntirelyNew).toBeUndefined();
+    expect(invented.secretFutureThreshold).toBeUndefined();
+  });
+
+  test('what the client actually reads still arrives', () => {
+    // `compliance_service.dart` reads these two and nothing else. Dropping
+    // either would silently push the client onto its compiled-in fallback.
+    const out = projected();
+    expect(out.carbonUncertaintyCeiling).toBe(
+      eprPolicy.DEFAULTS.carbonUncertaintyCeiling,
+    );
+    expect(out.kAnonymityFloor).toBe(eprPolicy.DEFAULTS.kAnonymityFloor);
+  });
+
+  test('the producer’s own EPR-11 terms are deliberately included', () => {
+    // Gameable, and included anyway: an audit result whose terms the producer
+    // cannot check is one they cannot contest, which is a worse failure than
+    // the gaming it would prevent.
+    const out = projected();
+    expect(out.massToleranceFraction).toBe(
+      eprPolicy.DEFAULTS.massToleranceFraction,
+    );
+    expect(out.massAuditSampleSize).toBe(eprPolicy.DEFAULTS.massAuditSampleSize);
+  });
+
+  test('an absent policy projects the defaults rather than throwing', () => {
+    // The route calls `readPolicy()` first, which tolerates absence — but a
+    // null reaching here must not become a crash on a read path.
+    expect(eprPolicy.projectPolicyForClient(null).kAnonymityFloor).toBe(
+      eprPolicy.DEFAULTS.kAnonymityFloor,
+    );
+  });
+});

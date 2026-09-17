@@ -11,6 +11,7 @@ import '../core/constants.dart';
 // this file, so the two form a cycle — which Dart permits for library imports
 // (unlike `part` files). Both sides are `show`-scoped to keep the intent legible.
 import 'push_controller.dart' show pushServiceProvider;
+import '../services/session_service.dart';
 
 final authServiceProvider = Provider<AuthService>((ref) => AuthService());
 final userServiceProvider = Provider<UserService>((ref) => UserService());
@@ -252,6 +253,19 @@ class AuthController extends AsyncNotifier<void> {
       if (uid != null) {
         await ref.read(pushServiceProvider).unregisterDevice(uid);
       }
+
+      // SEC-9: end the session on the SERVER as well, not only here.
+      //
+      // Firebase's `signOut()` clears the local session and nothing else. The
+      // refresh token stays valid, and so does any ID token already minted
+      // from it, for up to an hour — which does not address SEC-9's stated
+      // failure mode of an unattended office desktop.
+      //
+      // Before the local sign-out, because the call needs a token to
+      // authenticate with. Never allowed to block it: a user who taps sign out
+      // must end up signed out even with no network, exactly as the device
+      // cleanup above is handled.
+      await ref.read(sessionServiceProvider).revokeServerSession();
 
       await ref.read(authServiceProvider).signOut();
     });

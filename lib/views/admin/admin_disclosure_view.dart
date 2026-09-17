@@ -38,7 +38,6 @@ import '../../controllers/disclosure_controller.dart';
 import '../../core/mass_math.dart';
 import '../../core/theme.dart';
 import '../../models/disclosure_model.dart';
-import '../../services/location_service.dart';
 import '../../services/organization_service.dart' show OrgActionException;
 import '../shared/content_state.dart';
 import '../shared/error_retry.dart';
@@ -103,7 +102,9 @@ class _AdminDisclosureTabState extends ConsumerState<AdminDisclosureTab> {
   /// Asks the device where it is. Records the answer either way.
   Future<void> _locate() async {
     setState(() => _busy = true);
-    final result = await LocationService().getCurrentLocation();
+    final result = await ref
+        .read(locationServiceProvider)
+        .getCurrentLocation();
     if (!mounted) return;
     setState(() {
       _location = DisclosureLocation.fromResult(result);

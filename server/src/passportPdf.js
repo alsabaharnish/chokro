@@ -483,6 +483,39 @@ function registerFonts(doc, locale) {
   let bengaliBold = null;
   let coverage = null;
 
+  // THE LATIN FACE IS SET UP FIRST, AND THAT ORDERING IS LOAD-BEARING.
+  //
+  // Both Bengali failure paths below return a Latin-only body. They were
+  // written after this block and read `latin`, `latinBold` and
+  // `latinCoverage` — which, declared with `let` further down, are in the
+  // temporal dead zone at that point. Either path threw
+  // `Cannot access 'latin' before initialization` instead of degrading, so the
+  // degradation that both comments describe had never actually happened.
+  //
+  // Nothing exercised it: the tests covered the DETECTION of a broken font and
+  // not the RECOVERY from one.
+  //
+  // Noto Sans where it is bundled, Helvetica where it is not — see
+  // `LATIN_FONT`. `latinCoverage` is the fontkit handle used to answer "can
+  // this face draw that character", and is null on the Helvetica path because
+  // an AFM font has no glyph table to ask; `latinCovers` falls back to the
+  // WinAnsi repertoire there.
+  let latin = 'Helvetica';
+  let latinBold = 'Helvetica-Bold';
+  let latinCoverage = null;
+
+  if (fontAvailable(LATIN_FONT, 200000)) {
+    doc.registerFont('latin', LATIN_FONT);
+    latin = 'latin';
+    latinBold = 'latin';
+    latinCoverage = loadFont(LATIN_FONT, 200000);
+
+    if (fontAvailable(LATIN_FONT_BOLD, 200000)) {
+      doc.registerFont('latin-bold', LATIN_FONT_BOLD);
+      latinBold = 'latin-bold';
+    }
+  }
+
   if (bengaliFontAvailable()) {
     // Before the font is registered, and so before pdfkit can shape anything
     // with it. `registerFont` is lazy, but `heightOfString` is not.
@@ -527,13 +560,41 @@ function registerFonts(doc, locale) {
       doc.font('bn').fontSize(10)
         .widthOfString(fontkitNullAnchorFix.SELF_TEST_STRING);
     } catch (err) {
-      throw new Error(
-        'pdfkit cannot shape Bengali even though the fontkit NULL-anchor fix '
-          + `reported success: ${err.message}. This process almost certainly `
-          + 'has two fontkit copies, and the patched one is not the one pdfkit '
-          + 'uses. Refusing to render rather than emitting a certificate with '
-          + 'missing text.',
+      // DEGRADE, do not throw — the same decision the `install` failure above
+      // makes, and for the same reason.
+      //
+      // This used to throw, which killed the ENGLISH edition too. An English
+      // certificate uses no Bengali face at all, so a Bengali face that cannot
+      // shape is not a fact about it.
+      //
+      // The case that exposed it is not exotic: `fontAvailable` opens the file
+      // through fontkit, which caches by path, so a process that opened a
+      // HEALTHY font and then had the file replaced underneath it — a deploy
+      // swapping assets under a running server — sees the cached font pass
+      // every check while pdfkit reads the corrupt bytes from disk and fails
+      // here. Cold start degrades correctly; a warm process did not.
+      //
+      // The diagnosis is kept: it goes to the log, where an operator will look
+      // after seeing the Bangla edition refuse. Only the FATALITY is dropped.
+      console.error(
+        '[passportPdf] pdfkit cannot shape Bengali even though the fontkit '
+          + `NULL-anchor fix reported success: ${err.message}. This process `
+          + 'almost certainly has two fontkit copies and the patched one is '
+          + 'not the one pdfkit uses, or the font file changed after this '
+          + 'process opened it. Bengali is unavailable in this process; '
+          + 'Latin-only certificates are unaffected.',
       );
+      return {
+        latin,
+        latinBold,
+        latinCoverage,
+        bengali: null,
+        bengaliBold: null,
+        coverage: null,
+        primaryScript: locale === 'bn' ? 'bengali' : 'latin',
+        regular: latin,
+        bold: latinBold,
+      };
     }
 
     bengali = 'bn';
@@ -543,27 +604,6 @@ function registerFonts(doc, locale) {
       bengaliBold = 'bn-bold';
     }
     coverage = loadFont(BENGALI_FONT, 50000);
-  }
-
-  // The Latin face. Noto Sans where it is bundled, Helvetica where it is not —
-  // see `LATIN_FONT`. `latinCoverage` is the fontkit handle used to answer
-  // "can this face draw that character", and is null on the Helvetica path
-  // because an AFM font has no glyph table to ask; `latinCovers` falls back to
-  // the WinAnsi repertoire there.
-  let latin = 'Helvetica';
-  let latinBold = 'Helvetica-Bold';
-  let latinCoverage = null;
-
-  if (fontAvailable(LATIN_FONT, 200000)) {
-    doc.registerFont('latin', LATIN_FONT);
-    latin = 'latin';
-    latinBold = 'latin';
-    latinCoverage = loadFont(LATIN_FONT, 200000);
-
-    if (fontAvailable(LATIN_FONT_BOLD, 200000)) {
-      doc.registerFont('latin-bold', LATIN_FONT_BOLD);
-      latinBold = 'latin-bold';
-    }
   }
 
   const primaryScript = locale === 'bn' ? 'bengali' : 'latin';

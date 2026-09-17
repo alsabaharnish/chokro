@@ -216,7 +216,11 @@ async function enqueue({
   // that runs for a minute and then cannot hand anything over. Named
   // explicitly, because the operator reading this is the person who has to
   // configure it.
-  assertStorageConfigured();
+  //
+  // `assertStorageExists`, not `assertStorageConfigured`: the variable being
+  // set is not the same as the bucket being there, and the second is the state
+  // a project has before Cloud Storage is provisioned at all.
+  await assertStorageExists();
 
   await ref.set({
     jobId: ref.id,
@@ -295,6 +299,76 @@ function isStale(job) {
   return Date.now() - startedAt.getTime() > STALE_AFTER_MINUTES * 60 * 1000;
 }
 
+/**
+ * A deterministic string order, for anything that goes into a report.
+ *
+ * NOT `localeCompare`. Every ordering in this module sits under a comment
+ * promising output that is "byte-identical across runs", and a report carries a
+ * `contentHash` — so the sort order decides the hash, and a report that
+ * reordered itself would stop matching the copy a producer already holds.
+ * NFR-E-8 requires every report ever issued to remain reproducible.
+ *
+ * `localeCompare` cannot promise that. It reads the runtime's collation, which
+ * varies with the process locale and with the ICU data compiled into Node. On
+ * real Bangladeshi district names the difference is not subtle: the default
+ * locale sorts Latin before Bengali and `bn` sorts Bengali before Latin, so
+ * the same rows serialise in a completely different order and hash
+ * differently — on a deploy where nothing but `LANG` changed.
+ *
+ * Code-point order is ugly for a human reader (`SKU-B` before `sku-a`) and it
+ * is the same everywhere, forever. For a document whose purpose is to be
+ * checkable against a hash, that trade is the right way round.
+ */
+function byCodePoint(a, b) {
+  const x = String(a ?? '');
+  const y = String(b ?? '');
+  if (x < y) return -1;
+  if (x > y) return 1;
+  return 0;
+}
+
+/**
+ * A job as a client may see it (SEC-6).
+ *
+ * `storagePath` is the object's path in the private bucket. It is not a
+ * credential — a read still needs a signed URL, which needs the download route,
+ * which re-checks the report type's `minRole` and writes an audit entry. But
+ * SEC-6 says "no guessable path", and handing out the exact path of every
+ * artefact makes the bucket's own access rules the only thing standing between
+ * a member and a report their role does not allow. Those rules should be the
+ * last line, not the first.
+ *
+ * It lived in the download route as `{ ...job, storagePath: undefined }`, on
+ * ONE of the two routes that return jobs. `listJobs` returned the document
+ * verbatim, so the list leaked exactly what the poll deliberately hid. A
+ * projection at the source is the fix, because a rule enforced per route is a
+ * rule the next route will not know about.
+ *
+ * An allowlist, not a delete: a field added to the job document later must not
+ * reach a client because nobody remembered to strip it.
+ */
+function projectJob(job) {
+  if (!job) return null;
+  return {
+    jobId: job.jobId ?? null,
+    orgId: job.orgId ?? null,
+    reportType: job.reportType ?? null,
+    format: job.format ?? null,
+    status: job.status ?? null,
+    scope: job.scope ?? null,
+    periodId: job.periodId ?? null,
+    year: job.year ?? null,
+    requestedAt: job.requestedAt ?? null,
+    requestedBy: job.requestedBy ?? null,
+    completedAt: job.completedAt ?? null,
+    rowsRead: job.rowsRead ?? null,
+    bytes: job.bytes ?? null,
+    contentHash: job.contentHash ?? null,
+    error: job.error ?? null,
+    truncated: job.truncated ?? null,
+  };
+}
+
 async function listJobs({ orgId, limit = 25 }) {
   const snap = await db()
     .collection(JOBS)
@@ -305,9 +379,11 @@ async function listJobs({ orgId, limit = 25 }) {
 
   return snap.docs.map((d) => {
     const job = d.data();
-    return job.status === 'running' && isStale(job)
-      ? { ...job, status: 'stalled' }
-      : job;
+    return projectJob(
+      job.status === 'running' && isStale(job)
+        ? { ...job, status: 'stalled' }
+        : job,
+    );
   });
 }
 
@@ -590,7 +666,7 @@ async function skuPerformance(job) {
 
   // Sorted by id, not by mass: a tie in mass would order two SKUs
   // arbitrarily, and the report has to be byte-identical across runs.
-  const rows = [...bySku.values()].sort((a, b) => a.skuId.localeCompare(b.skuId));
+  const rows = [...bySku.values()].sort((a, b) => byCodePoint(a.skuId, b.skuId));
 
   const skus = await readSkus(job.orgId, rows.map((r) => r.skuId));
   for (const row of rows) {
@@ -632,7 +708,7 @@ async function geographicRecovery(job) {
 
   const rows = Object.entries(projected.massMgByDistrict ?? {})
     .map(([district, massMg]) => ({ district, massMg: intOr0(massMg) }))
-    .sort((a, b) => a.district.localeCompare(b.district));
+    .sort((a, b) => byCodePoint(a.district, b.district));
 
   return serialise(
     job,
@@ -1048,7 +1124,7 @@ async function readSkuRevisions(orgId) {
   }
 
   return out.sort((a, b) =>
-    a.skuId === b.skuId ? a.revision - b.revision : a.skuId.localeCompare(b.skuId));
+    a.skuId === b.skuId ? a.revision - b.revision : byCodePoint(a.skuId, b.skuId));
 }
 
 /** The weighings behind every verified unit mass (EPR-9, EPR-10). */
@@ -1405,6 +1481,74 @@ function assertStorageConfigured() {
   }
 }
 
+/**
+ * Whether the bucket named by the variable actually exists.
+ *
+ * `assertStorageConfigured` checks that somebody SET the variable. It does not
+ * check that the bucket is there, and those are different states — a project
+ * where Cloud Storage was never provisioned has a perfectly good bucket NAME
+ * in its environment and no bucket behind it.
+ *
+ * That is the state this project is in, and the failure it produced was an
+ * opaque GCS error thrown from inside a running job: the report enqueued,
+ * reported `running`, and then died with a message about a bucket the operator
+ * had never heard of. The remedy — enabling billing and clicking Get Started
+ * in the Firebase console — appeared nowhere in it.
+ *
+ * Cached on success only. A bucket that exists does not stop existing, so one
+ * round trip per process is enough; a negative result is NOT cached, because
+ * the whole point is that somebody is about to go and create it and should not
+ * have to redeploy to be believed.
+ */
+let bucketConfirmed = false;
+
+/**
+ * Forgets that the bucket was confirmed.
+ *
+ * Exported for tests, which is a compromise worth naming: a process-wide cache
+ * is right in production and invisible to a test suite, so without this the
+ * first test to confirm the bucket silently exempts every test after it, and
+ * the absent-bucket cases pass for the wrong reason.
+ */
+function resetStorageCheck() {
+  bucketConfirmed = false;
+}
+
+async function assertStorageExists() {
+  assertStorageConfigured();
+  if (bucketConfirmed) return;
+
+  let exists = false;
+  try {
+    [exists] = await bucket().exists();
+  } catch (err) {
+    // Reachability, not existence. A network failure must not be reported to a
+    // producer as "your Chokro instance is misconfigured".
+    const error = new Error(
+      `Cloud Storage could not be reached: ${err.message}. The report was not `
+        + 'generated. Try again.',
+    );
+    error.code = 'reports_unavailable';
+    throw error;
+  }
+
+  if (!exists) {
+    const error = new Error(
+      'Reports are unavailable: Cloud Storage has not been set up on this '
+        + `Firebase project. The bucket '${process.env.FIREBASE_STORAGE_BUCKET}' `
+        + 'does not exist. An operator has to enable billing on the project '
+        + '(Firebase Storage requires the Blaze plan) and create the default '
+        + 'bucket, after which reports work with no code change. Everything '
+        + 'else — including Plastic Passports, which are streamed and never '
+        + 'stored — is unaffected.',
+    );
+    error.code = 'reports_unconfigured';
+    throw error;
+  }
+
+  bucketConfirmed = true;
+}
+
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
@@ -1525,6 +1669,10 @@ function conflict(message) {
 }
 
 module.exports = {
+  assertStorageExists,
+  resetStorageCheck,
+  projectJob,
+  byCodePoint,
   JOBS,
   JOB_STATUSES,
   REPORT_TYPES,
