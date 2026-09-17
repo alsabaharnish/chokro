@@ -511,3 +511,152 @@ describe('verifyChain', () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+
+describe('an empty chain is not a broken one (SEC-12)', () => {
+  const original = process.env.AUDIT_LOG_EPOCH;
+
+  const EPOCH = '2026-09-17T00:00:00Z';
+
+  afterEach(() => {
+    if (original === undefined) {
+      delete process.env.AUDIT_LOG_EPOCH;
+    } else {
+      process.env.AUDIT_LOG_EPOCH = original;
+    }
+  });
+
+  /** An organisation record with a creation date and nothing else that matters. */
+  function seedOrg(orgId, createdAtIso) {
+    fs._store.set(`organizations/${orgId}`, {
+      legalName: orgId,
+      createdAt: { toDate: () => new Date(createdAtIso) },
+    });
+  }
+
+  async function seedChain(orgId) {
+    for (const action of [audit.ACTIONS.ORG_APPROVED, audit.ACTIONS.MEMBER_INVITED]) {
+      await audit.append({ orgId, action, actorUid: 'admin_1', summary: action });
+    }
+  }
+
+  test('an organisation older than the log reports noChain, not broken', async () => {
+    // The real case this was written for: a producer created before
+    // producerAudit.js existed showed "The chain is BROKEN — treat this
+    // organisation's history as unreliable and escalate" on a record that had
+    // never had a chain to break.
+    process.env.AUDIT_LOG_EPOCH = EPOCH;
+    seedOrg('org_old', '2026-09-09T12:00:55Z');
+
+    const result = await audit.verifyChain({ orgId: 'org_old' });
+
+    expect(result.state).toBe('noChain');
+    expect(result.intact).toBe(false);
+    expect(result.entriesChecked).toBe(0);
+    expect(result.findings.some((f) => f.problem === 'predatesAuditLog')).toBe(true);
+    // Not reported as a missing head, because that is the wording that sends
+    // an auditor looking for a deletion that did not happen.
+    expect(result.findings.some((f) => f.problem === 'headMissing')).toBe(false);
+  });
+
+  test('deleting a post-epoch organisation’s chain still reports broken', async () => {
+    // THE ATTACK THIS EXCUSE MUST NOT REOPEN. An insider deletes every entry
+    // and the head; if "no entries and no head" were innocent on its own, the
+    // most complete attack available would score best.
+    process.env.AUDIT_LOG_EPOCH = EPOCH;
+    seedOrg('org_new', '2026-09-20T09:00:00Z');
+    await seedChain('org_new');
+
+    [...fs._store.keys()]
+      .filter((k) => k.startsWith('producerAuditLog/'))
+      .forEach((k) => fs._store.delete(k));
+    fs._store.delete('producerAuditHeads/org_new');
+
+    const result = await audit.verifyChain({ orgId: 'org_new' });
+
+    expect(result.state).toBe('broken');
+    expect(result.intact).toBe(false);
+    expect(result.findings.some((f) => f.problem === 'headMissing')).toBe(true);
+    expect(result.findings.some((f) => f.problem === 'predatesAuditLog')).toBe(false);
+  });
+
+  test('an organisation created exactly at the epoch is not excused', async () => {
+    // Strictly earlier, not "at or before". The epoch is the instant the log
+    // came into force, so a record created at that instant should have one.
+    process.env.AUDIT_LOG_EPOCH = EPOCH;
+    seedOrg('org_edge', EPOCH);
+
+    expect((await audit.verifyChain({ orgId: 'org_edge' })).state).toBe('broken');
+  });
+
+  test('with no epoch asserted, an empty chain stays broken', async () => {
+    // The safe direction. Unset must not quietly become "excuse everything",
+    // and the missing configuration is named rather than left to be inferred
+    // from a result that looks like tampering.
+    delete process.env.AUDIT_LOG_EPOCH;
+    seedOrg('org_old', '2026-09-09T12:00:55Z');
+
+    const result = await audit.verifyChain({ orgId: 'org_old' });
+
+    expect(result.state).toBe('broken');
+    expect(result.epochAsserted).toBe(false);
+    expect(result.findings.some((f) => f.problem === 'auditLogEpochUnset')).toBe(true);
+  });
+
+  test('a malformed epoch is reported, not silently ignored', async () => {
+    // A typo that read as "unset and therefore strict" would be a
+    // misconfiguration changing what the log claims, with nothing on screen.
+    process.env.AUDIT_LOG_EPOCH = 'last Tuesday';
+    seedOrg('org_old', '2026-09-09T12:00:55Z');
+
+    const result = await audit.verifyChain({ orgId: 'org_old' });
+
+    expect(result.state).toBe('broken');
+    expect(result.epochAsserted).toBe(false);
+    expect(result.findings.some((f) => f.problem === 'auditLogEpochMalformed')).toBe(true);
+  });
+
+  test('an organisation with no record at all is not excused', async () => {
+    // Absence of evidence is not evidence of innocence: with no organisation
+    // document there is no creation date to weigh, so the empty chain stands
+    // unexplained.
+    process.env.AUDIT_LOG_EPOCH = EPOCH;
+
+    expect((await audit.verifyChain({ orgId: 'org_ghost' })).state).toBe('broken');
+  });
+
+  test('an unusable createdAt is not excused', async () => {
+    process.env.AUDIT_LOG_EPOCH = EPOCH;
+    fs._store.set('organizations/org_junk', { legalName: 'x', createdAt: 'not a date' });
+
+    expect((await audit.verifyChain({ orgId: 'org_junk' })).state).toBe('broken');
+  });
+
+  test('a log longer than one pass reports partial, not broken', async () => {
+    // The same conflation, one step along: "the first N entries are intact" is
+    // not a broken chain either, and rendering it as one taught the reader to
+    // distrust a control that had found nothing wrong.
+    process.env.AUDIT_LOG_EPOCH = EPOCH;
+    seedOrg('org_cola', '2026-09-20T09:00:00Z');
+    await seedChain('org_cola');
+
+    const result = await audit.verifyChain({ orgId: 'org_cola', limit: 1 });
+
+    expect(result.state).toBe('partial');
+    expect(result.complete).toBe(false);
+    expect(result.intact).toBe(false);
+  });
+
+  test('a sound chain still reports intact', async () => {
+    process.env.AUDIT_LOG_EPOCH = EPOCH;
+    seedOrg('org_cola', '2026-09-20T09:00:00Z');
+    await seedChain('org_cola');
+
+    const result = await audit.verifyChain({ orgId: 'org_cola' });
+
+    expect(result.state).toBe('intact');
+    expect(result.intact).toBe(true);
+    expect(result.findings).toHaveLength(0);
+  });
+});

@@ -43,6 +43,16 @@ const COLLECTION = 'producerAuditLog';
 const HEAD_COLLECTION = 'producerAuditHeads';
 
 /**
+ * The organisations collection, named here rather than imported.
+ *
+ * `organizations.js` requires this module, so importing it back would be a
+ * cycle. `verifyChain` needs exactly one field from one document — the
+ * organisation's `createdAt` — and a string constant is the cheaper price than
+ * restructuring two modules around a single read.
+ */
+const ORGS_COLLECTION = 'organizations';
+
+/**
  * Separates the fields inside a digest input.
  *
  * ASCII unit separator (U+001F). It cannot occur in any of the values being
@@ -87,6 +97,68 @@ function chainKey() {
 /** Whether the chain is keyed. Surfaced in every verification result. */
 function isKeyed() {
   return chainKey() !== null;
+}
+
+/**
+ * The instant the operator asserts the audit log has been in force from
+ * (`AUDIT_LOG_EPOCH`, an ISO 8601 date-time).
+ *
+ * ===========================================================================
+ * WHY THIS CANNOT BE DERIVED FROM THE LOG
+ * ===========================================================================
+ *
+ * An organisation older than the log has no chain, and that is a different
+ * statement from a broken one. Telling the two apart needs a trustworthy date
+ * for when the log started — and the obvious source, the earliest entry in the
+ * log, is the one source that must not be used: it is derived from the very
+ * data whose integrity is in question. An insider who deleted an organisation's
+ * entries would move the apparent start date later and thereby manufacture the
+ * excuse for the deletion they just performed.
+ *
+ * So the date is asserted by the operator, who is stating a fact about
+ * deployment history that no query can establish, and is deliberately UNSET by
+ * default. Unset means `verifyChain` cannot excuse an empty chain and reports
+ * it as broken — the safe direction, and the one that makes the missing
+ * configuration visible instead of silently widening what counts as innocent.
+ *
+ * A LATER epoch is more permissive, not less: it excuses every organisation
+ * created before it. Set it to the earliest date the log can be shown to have
+ * been running, never to a convenient round number after the fact.
+ */
+function logEpoch() {
+  const raw = String(process.env.AUDIT_LOG_EPOCH || '').trim();
+  if (!raw) return { configured: false, at: null, malformed: false };
+
+  const ms = Date.parse(raw);
+  // A typo must not read as "unset and therefore strict" without saying so —
+  // that is a misconfiguration silently changing what the log claims. It is
+  // reported as a finding so it surfaces on the screen that depends on it.
+  if (!Number.isFinite(ms)) return { configured: false, at: null, malformed: true };
+
+  return { configured: true, at: new Date(ms), malformed: false };
+}
+
+/**
+ * Whether the organisation demonstrably predates the audit log.
+ *
+ * Every branch that cannot PROVE it answers false. No asserted epoch, no
+ * organisation record, no usable `createdAt` — each of those is an absence of
+ * evidence, and an absence of evidence is not a reason to excuse a missing
+ * chain. Only a recorded creation date strictly earlier than the operator's
+ * asserted start date earns the benefit of the doubt.
+ */
+async function organisationPredatesLog(firestore, orgId, epoch) {
+  if (!epoch.configured) return false;
+
+  const snap = await firestore.collection(ORGS_COLLECTION).doc(orgId).get();
+  if (!snap.exists) return false;
+
+  const created = snap.data()?.createdAt;
+  const at = created?.toDate?.()
+    ?? (typeof created === 'string' ? new Date(Date.parse(created)) : null);
+  if (!at || !Number.isFinite(at.getTime())) return false;
+
+  return at.getTime() < epoch.at.getTime();
 }
 
 /**
@@ -538,18 +610,80 @@ async function verifyChain({ orgId, limit = 500 }) {
   // above — guarded on `head` being present — was skipped, so the result read
   // `intact: true` over an empty log.
   //
-  // Every organisation that exists has a head, because `createOrganization`
-  // writes its first audit entry in the same transaction as the organisation
-  // record. So an absent head is never the innocent state it looks like.
+  // `createOrganization` writes the first audit entry in the same transaction
+  // as the organisation record, so for anything created since the log existed
+  // an absent head is never the innocent state it looks like. The exception is
+  // an organisation OLDER than the log — see below.
+  const epoch = logEpoch();
+  let predatesLog = false;
+
   if (!head) {
-    findings.push({ problem: 'headMissing' });
+    // AN ORGANISATION OLDER THAN THE LOG HAS NO CHAIN, WHICH IS NOT A BROKEN
+    // ONE.
+    //
+    // The two look identical from here — no entries, no head — and reporting
+    // both as "BROKEN, treat this history as unreliable and escalate" made the
+    // console cry wolf over a non-event on every record that predates the
+    // feature. An auditor who is escalated to twice over nothing stops reading
+    // the third one, which is the actual cost.
+    //
+    // The excuse is granted only against an operator-asserted start date, and
+    // only on a recorded creation date strictly earlier than it. Deleting the
+    // entries and the head of an organisation created SINCE that date still
+    // reports broken, which is the attack this check must not reopen.
+    predatesLog = await organisationPredatesLog(firestore, orgId, epoch);
+
+    if (predatesLog) {
+      findings.push({ problem: 'predatesAuditLog' });
+    } else {
+      findings.push({ problem: 'headMissing' });
+      // Said out loud rather than inferred from silence: with no asserted
+      // start date, an organisation that genuinely predates the log cannot be
+      // told apart from one whose chain was deleted, and this result is the
+      // strict reading of that ambiguity.
+      if (epoch.malformed) {
+        findings.push({ problem: 'auditLogEpochMalformed' });
+      } else if (!epoch.configured) {
+        findings.push({ problem: 'auditLogEpochUnset' });
+      }
+    }
   }
+
+  // `predatesAuditLog` is an explanation, not a defect, and the other two ride
+  // with it rather than standing on their own. Separating them keeps a missing
+  // configuration from being counted as tampering.
+  const defects = findings.filter(
+    (f) => f.problem !== 'predatesAuditLog'
+      && f.problem !== 'auditLogEpochUnset'
+      && f.problem !== 'auditLogEpochMalformed',
+  );
+
+  // FOUR ANSWERS, BECAUSE THERE ARE FOUR SITUATIONS.
+  //
+  // `intact` alone had to carry all of them, so everything that was not a
+  // clean bill rendered as tampering: an organisation older than the log, and
+  // a log longer than one pass, both arrived on screen as "BROKEN". Neither is
+  // evidence of anything, and a control that reports non-events at the same
+  // severity as an attack teaches its reader to ignore it.
+  let state;
+  if (predatesLog && defects.length === 0) state = 'noChain';
+  else if (defects.length > 0) state = 'broken';
+  else if (!complete) state = 'partial';
+  else state = 'intact';
 
   return {
     orgId,
     entriesChecked: entries.length,
-    intact: complete && findings.length === 0,
+    // Unchanged in meaning: true only for a chain checked end to end with
+    // nothing wrong. Every existing caller reads this and keeps its behaviour;
+    // `state` is what tells the three non-intact cases apart.
+    intact: state === 'intact',
+    state,
     complete,
+    // Whether the log has an asserted start date at all. A `noChain` result is
+    // only as good as this, so it travels with it rather than being looked up
+    // separately by whatever renders the answer.
+    epochAsserted: epoch.configured,
     // Whether the chain is an HMAC under an operator-held key or a bare hash
     // anyone with read access can recompute. A console that printed "intact"
     // without saying which would be overstating the control.

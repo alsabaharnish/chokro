@@ -17,6 +17,105 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-09-17 20:40 (+06) — "The chain is BROKEN" on an organisation that never had a chain
+
+With the index built, verification ran for the first time and reported the
+wrong thing about both organisations in production.
+
+`A. Munem` was created 2026-09-09, eight days before the log's earliest entry.
+It has no entries and no head because it predates the audit log entirely.
+`verifyChain` reported `intact: false`, and the card rendered that as **"The
+chain is BROKEN — treat this organisation's history as unreliable and
+escalate."** An auditor escalated twice over a non-event stops reading the
+third one, which is the cost.
+
+`intact` was a boolean carrying four situations, so everything that was not a
+clean bill arrived on screen as tampering. A log longer than one 500-entry pass
+did the same thing — latent today, wrong for the same reason.
+
+**Four states now, because there are four situations:** `intact`, `broken`,
+`noChain` (older than the log), `partial` (scan hit its limit). `intact` keeps
+its exact former meaning, so every existing caller and test is untouched.
+
+**The excuse is earned, not assumed.** `noChain` requires `AUDIT_LOG_EPOCH` —
+an operator-asserted date, deliberately unset by default, with no fallback to
+the log's own earliest entry. That fallback was the tempting one and it is the
+trap: an insider who deleted an organisation's entries would move the apparent
+start date later and manufacture the excuse for the deletion just performed.
+Unset means empty chains stay `broken`, and the result names the missing
+configuration rather than leaving it to be inferred from a result that looks
+like an attack. Every branch that cannot PROVE the organisation is older —
+no epoch, no organisation record, an unparseable `createdAt`, a creation date
+at or after the epoch — answers false.
+
+The client takes `chainState` as a raw string that only ever refines the
+message when `verified` is false, so a state a future server adds falls through
+to the strictest wording rather than a reassuring one. A test pins that, and
+another pins that `chainState: 'intact'` alongside `verified: false` still
+reads BROKEN — the boolean wins, not the string.
+
+Verified by mutation: forcing the excuse to always apply fails 8 tests,
+including the two pre-existing ones that guard the delete-everything attack.
+
+Also confirmed read-only against production: the 11-entry chain is structurally
+perfect (contiguous links, head matching) and its digests match neither plain
+SHA-256 nor an empty-key HMAC — Render holds `AUDIT_CHAIN_KEY`, so the chain is
+a genuine keyed HMAC and real evidence under SEC-12.
+
+Files: server/src/producerAudit.js, server/src/viewAsOrganization.js,
+lib/models/admin_oversight_model.dart,
+lib/views/admin/admin_producer_detail_view.dart,
+server/test/producerAudit.test.js, test/admin_producer_detail_view_test.dart
+Checks: 1215 server tests (43 suites), 1146 Flutter tests, analyze clean.
+Outstanding: set AUDIT_LOG_EPOCH in Render — unset, A. Munem still reads broken.
+
+## 2026-09-17 19:20 (+06) — Four index directions pointing the wrong way, and a test that could not see direction
+
+The History tab showed no chain card. Read-only query against production named
+it in one line:
+
+    FAILED_PRECONDITION: The query requires an index.
+
+`listForOrg` runs `.where('orgId','==',x).orderBy('sequence','desc')`. The
+declared index was `(orgId ASC, sequence ASC)`. Firestore composite indexes are
+DIRECTION-SPECIFIC — an ascending index does not serve a descending order — so
+the query failed, the provider errored, and the tab rendered its error state
+rather than the card. I had guessed earlier that Firestore "usually" serves a
+descending order from an ascending index. It does not, and the guess cost an
+afternoon.
+
+**Sweeping every query found four, not one.** Each declared in the exact
+opposite direction from the query that needs it:
+
+    putOnMarketVersions   version    query asc   declared DESC
+    producerAuditLog      sequence   query desc  declared ASC
+    skuRevisions          revision   query desc  declared ASC
+    skuMassAudits         createdAt  query asc   declared DESC
+
+Four for four is not coincidence — these were written from intuition about what
+an index "should" sort by rather than from the queries. All four would fail in
+production the first time anyone opened the screen behind them.
+
+Added rather than corrected: both directions are genuinely in use for
+`sequence` (verifyChain ascends, the timeline descends) and for `revision`
+(one path descends, two ascend).
+
+**`isCovered` matched field NAMES and ignored direction entirely.** It asked
+whether an index mentioned the right fields, which every one of these did — so
+all four read as covered while none of them worked. The parser now captures the
+direction argument, defaulting to ascending exactly as Firestore does, and
+coverage requires every ordered field to point the same way. Verified by
+stashing the new indexes: the strengthened test fails on all four modules
+without them.
+
+**What the production read also showed:** two organisations exist, eleven audit
+entries, and one head at sequence 11 — so `producerAuditHeads` was legitimately
+recreated by organisation creation, as designed. The second organisation has no
+head and no entries, which is worth a look but is not this bug.
+
+Files: `firestore.indexes.json`, `server/test/firestoreIndexes.test.js`
+Checks: 1206 server tests (43 suites), deploy dry run passes.
+
 ## 2026-09-17 17:10 (+06) — The "Their view" tab could never have worked
 
 The producer detail screen showed three tabs and no content. The cause was a

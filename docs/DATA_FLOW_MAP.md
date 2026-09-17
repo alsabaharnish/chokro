@@ -378,14 +378,44 @@ controls would be the wrong document:
 period with very few disposals; the PDPA's guidance on minimisation is
 published; or a Champion asks what a producer can see about them.
 
-### 6.2 `AUDIT_CHAIN_KEY` unset
+### 6.2 `AUDIT_CHAIN_KEY` — set in production, unset locally
 
-Unset today. Two consequences: the audit chain is not evidence against an
-insider who can rewrite history and recompute digests, and the chain-of-custody
-pseudonym is unkeyed and therefore reversible by disposal-id guessing.
-Release-blocking.
+**Set in the deployed environment.** Confirmed 2026-09-17 by a read-only check:
+the stored digests of the production chain match neither a plain SHA-256 nor an
+empty-key HMAC of the canonical string, which leaves a non-empty key as the
+only explanation. So the audit chain IS evidence against an insider, and the
+chain-of-custody pseudonym is not reversible by disposal-id guessing.
 
-### 6.3 Aggregation across periods
+Two things follow that are easy to misread:
+
+- **A local or CI verification of production data will report the chain broken**
+  — every entry as `digestMismatch`, with links and sequence sound. That is the
+  key doing its job, not a finding. Only an environment holding the key can
+  verify the chain, which is the entire point of keying it.
+- **The key is now load-bearing.** Losing it makes every existing entry
+  permanently unverifiable; the chain cannot be re-keyed without rewriting the
+  history it exists to defend. It belongs wherever the deployment's other
+  irreplaceable secrets are backed up.
+
+### 6.3 `AUDIT_LOG_EPOCH` unset
+
+Unset today. Without it, `verifyChain` cannot distinguish an organisation
+created before the audit log existed from one whose chain was deleted, and
+reports both as broken. One real record is affected (`A. Munem`, created
+2026-09-09, eight days before the log's earliest entry).
+
+The date is asserted by the operator and has no default, deliberately. Deriving
+it from the log's own earliest entry would let an insider who deleted an
+organisation's entries move the apparent start date later and manufacture the
+excuse for the deletion just performed. A LATER epoch is more permissive, not
+less — it excuses every organisation created before it — so it should be set to
+the earliest date the log can be shown to have been running, never to a
+convenient round number after the fact.
+
+Not release-blocking: unset fails in the safe direction and names itself in the
+result (`auditLogEpochUnset`).
+
+### 6.4 Aggregation across periods
 
 Each period is floored independently. A producer holding twelve monthly
 exports can sum them. Twelve sparse months of the same district disclose more
@@ -393,7 +423,7 @@ than the floor intends to allow in any one of them. Not currently controlled;
 raised here rather than solved, because the fix (a floor on cumulative
 disclosure) is a policy design question, not a patch.
 
-### 6.4 A producer that is also a Champion
+### 6.5 A producer that is also a Champion
 
 Prevented structurally: `producer` is disjoint from `citizen`, and
 `firestore.rules:631` requires `isActiveCitizen()` to create a disposal, so a

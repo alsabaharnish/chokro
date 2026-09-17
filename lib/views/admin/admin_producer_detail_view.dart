@@ -358,6 +358,7 @@ class _ChainCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final verified = timeline.verified;
+    final chainState = timeline.chainState;
 
     // Null is not false. "Not checked" and "checked and failed" are different
     // statements, and a card that conflated them would either alarm nobody or
@@ -389,6 +390,42 @@ class _ChainCard extends StatelessWidget {
             ],
           ),
         ),
+      );
+    }
+
+    // NOT VERIFIED IS NOT ONE SITUATION.
+    //
+    // An organisation older than the audit log has no chain, and a scan that
+    // stopped at its limit has checked only part of one. Neither is evidence of
+    // anything, and both used to arrive here as "The chain is BROKEN — treat
+    // this organisation's history as unreliable and escalate". A control that
+    // reports non-events at the severity of an attack is one an auditor learns
+    // to scroll past, which costs exactly when it is finally right.
+    //
+    // Matched on `verified == false` first, so an unrecognised state from a
+    // newer server falls through to the strictest wording below rather than to
+    // a reassuring one.
+    if (!verified && chainState == 'noChain') {
+      return NoticeCard(
+        icon: Icons.history_toggle_off_outlined,
+        tone: NoticeTone.info,
+        title: 'No chain recorded',
+        message:
+            'This organisation was created before the audit log existed, so '
+            'there is no chain to check. Everything recorded since is covered '
+            'by the log; nothing before it is. This is not a sign of tampering.',
+      );
+    }
+
+    if (!verified && chainState == 'partial') {
+      return NoticeCard(
+        icon: Icons.rule_outlined,
+        tone: NoticeTone.info,
+        title: 'Checked as far as the limit',
+        message:
+            'Every entry checked links to the one before it, but this history '
+            'is longer than a single pass covers, so this is not a statement '
+            'about the whole log. The audit pack verifies it end to end.',
       );
     }
 

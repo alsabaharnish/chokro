@@ -266,6 +266,12 @@ async function verifiedTimeline({ orgId, limit = 500 }) {
   return {
     ...timeline,
     verified: verification.intact === true,
+    // Which of the three non-intact answers this is: `broken` (a defect was
+    // found), `noChain` (the organisation predates the log) or `partial` (the
+    // scan hit its limit). `verified` stays the authoritative signal — a client
+    // that does not understand a future value here still reads `false` and
+    // treats it as unverified.
+    chainState: verification.state,
     // Whether the chain is an HMAC under an operator-held key or a bare hash
     // anyone with read access can recompute. `producerAudit` makes the point
     // itself: a console that printed "intact" without saying which would be

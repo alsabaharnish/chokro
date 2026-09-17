@@ -68,9 +68,23 @@ function queriesIn(source) {
     const filters = [...chain.matchAll(/\.where\(\s*([^,]+),\s*['"`]([^'"`]+)['"`]/g)].map(
       (m) => ({ field: fieldNameOf(m[1]), op: m[2] }),
     );
-    const orders = [...chain.matchAll(/\.orderBy\(\s*([^,)]+)/g)].map((m) =>
-      fieldNameOf(m[1]),
-    );
+    // DIRECTION IS CAPTURED, not just the field.
+    //
+    // Firestore composite indexes are direction-specific: an index on
+    // `(orgId ASC, sequence ASC)` does NOT serve `orderBy('sequence','desc')`.
+    // This used to record the field name alone, so four queries whose declared
+    // index pointed the opposite way all read as covered — and every one of
+    // them failed in production with FAILED_PRECONDITION. The producer
+    // timeline was one; it meant the History tab never rendered.
+    const orders = [
+      ...chain.matchAll(
+        /\.orderBy\(\s*([^,)]+?)\s*(?:,\s*['"`](asc|desc)['"`]\s*)?\)/g,
+      ),
+    ].map((m) => ({
+      field: fieldNameOf(m[1]),
+      // Firestore's own default when the argument is omitted.
+      direction: (m[2] || 'asc') === 'desc' ? 'DESCENDING' : 'ASCENDING',
+    }));
 
     if (filters.length > 0 || orders.length > 0) {
       queries.push({ collection: resolveName(rawName), filters, orders, chain });
@@ -136,9 +150,10 @@ function isCovered(query) {
   const ranges = query.filters
     .filter((f) => f.op !== '==' && f.field)
     .map((f) => f.field);
-  const ordered = query.orders.filter(Boolean);
+  const ordered = query.orders.filter((o) => o && o.field);
+  const orderedFields = ordered.map((o) => o.field);
 
-  const needed = [...new Set([...equality, ...ranges, ...ordered])];
+  const needed = [...new Set([...equality, ...ranges, ...orderedFields])];
 
   // A single-field query is served by the automatic single-field index.
   if (needed.length <= 1) return true;
@@ -151,7 +166,19 @@ function isCovered(query) {
   return declared.some((index) => {
     if (index.collectionGroup !== query.collection) return false;
     const fields = index.fields.map((f) => f.fieldPath);
-    return required.every((f) => fields.includes(f));
+    if (!required.every((f) => fields.includes(f))) return false;
+
+    // AND the ordered fields must point the same way. An index is not a set of
+    // field names — `(skuId ASC, revision ASC)` and `(skuId ASC, revision
+    // DESC)` are two different indexes and Firestore serves two different
+    // queries with them.
+    const direction = new Map(
+      index.fields.map((f) => [f.fieldPath, f.order]),
+    );
+    return ordered.every((o) => {
+      if (o.field === '__name__') return true;
+      return direction.get(o.field) === o.direction;
+    });
   });
 }
 

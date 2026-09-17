@@ -61,6 +61,7 @@ const _view = OrganizationView(
 
 ActivityTimeline _timeline({
   bool? verified,
+  String? chainState,
   bool keyed = false,
   String? caveat,
   List<TimelineEntry> entries = const [],
@@ -69,6 +70,7 @@ ActivityTimeline _timeline({
     orgId: _orgId,
     entries: entries,
     verified: verified,
+    chainState: chainState,
     keyed: keyed,
     verificationCaveat: caveat,
   );
@@ -269,6 +271,103 @@ void main() {
 
     expect(find.text('The chain is BROKEN'), findsOneWidget);
     expect(find.textContaining('escalate'), findsOneWidget);
+  });
+
+  testWidgets('an organisation older than the log is not called broken', (
+    tester,
+  ) async {
+    // The real case: a producer created before the audit log existed showed
+    // "The chain is BROKEN — treat this organisation's history as unreliable
+    // and escalate" on a record that never had a chain to break. An auditor
+    // escalated twice over nothing stops reading the third one.
+    await _pumpDetail(
+      tester,
+      timeline: _timeline(),
+      verifiedTimeline: _timeline(
+        verified: false,
+        chainState: 'noChain',
+        keyed: true,
+      ),
+    );
+    await _openTab(tester, 'History');
+
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Verify the chain'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('No chain recorded'), findsOneWidget);
+    expect(find.text('The chain is BROKEN'), findsNothing);
+    expect(find.textContaining('escalate'), findsNothing);
+    // And it does not read as a clean bill either — nothing before the log is
+    // covered, and the card has to say so.
+    expect(find.text('The chain is intact'), findsNothing);
+  });
+
+  testWidgets('a scan that hit its limit is not called broken', (tester) async {
+    await _pumpDetail(
+      tester,
+      timeline: _timeline(),
+      verifiedTimeline: _timeline(
+        verified: false,
+        chainState: 'partial',
+        keyed: true,
+      ),
+    );
+    await _openTab(tester, 'History');
+
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Verify the chain'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Checked as far as the limit'), findsOneWidget);
+    expect(find.text('The chain is BROKEN'), findsNothing);
+    expect(find.text('The chain is intact'), findsNothing);
+  });
+
+  testWidgets('an unrecognised state falls through to the strict wording', (
+    tester,
+  ) async {
+    // A state added server-side that this build does not know must not land on
+    // a reassuring message. `verified` stays the authoritative signal and
+    // anything unrecognised reads as unverified.
+    await _pumpDetail(
+      tester,
+      timeline: _timeline(),
+      verifiedTimeline: _timeline(
+        verified: false,
+        chainState: 'somethingNewerServersSay',
+        keyed: true,
+      ),
+    );
+    await _openTab(tester, 'History');
+
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Verify the chain'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('The chain is BROKEN'), findsOneWidget);
+  });
+
+  testWidgets('a state cannot dress up a chain the server did not verify', (
+    tester,
+  ) async {
+    // `noChain` alongside `verified: true` is a contradiction, and the branch
+    // order decides which half wins. It must be the server's boolean — a
+    // client that let the refining string promote an unverified chain to a
+    // verified one would be the whole control undone by a string compare.
+    await _pumpDetail(
+      tester,
+      timeline: _timeline(),
+      verifiedTimeline: _timeline(
+        verified: false,
+        chainState: 'intact',
+        keyed: true,
+      ),
+    );
+    await _openTab(tester, 'History');
+
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Verify the chain'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('The chain is BROKEN'), findsOneWidget);
+    expect(find.text('The chain is intact'), findsNothing);
   });
 
   testWidgets('an empty history is not a verified one', (tester) async {

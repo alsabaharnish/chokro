@@ -608,6 +608,7 @@ class ActivityTimeline {
     required this.orgId,
     required this.entries,
     this.verified,
+    this.chainState,
     this.keyed = false,
     this.verificationCaveat,
   });
@@ -620,6 +621,16 @@ class ActivityTimeline {
   /// "Not checked" and "checked and failed" are different statements, and a
   /// screen that conflated them would either alarm nobody or alarm everybody.
   final bool? verified;
+
+  /// Which kind of not-verified this is: `broken`, `noChain` or `partial`.
+  ///
+  /// Deliberately a raw string and not an enum. It only ever REFINES the
+  /// message shown when [verified] is false, so a value this build does not
+  /// recognise — a state added server-side later — falls through to the
+  /// strictest wording rather than to a reassuring one. An enum with a
+  /// fallback value would have to choose that fallback, and every safe choice
+  /// is the one this achieves by not parsing at all.
+  final String? chainState;
 
   /// Whether the chain is an HMAC under an operator-held key, or a bare hash
   /// anyone with read access could recompute.
@@ -642,6 +653,7 @@ class ActivityTimeline {
                 .toList(growable: false)
           : const <TimelineEntry>[],
       verified: json['verified'] is bool ? json['verified'] as bool : null,
+      chainState: _stringOrNull(json['chainState']),
       keyed: json['keyed'] == true,
       verificationCaveat: _stringOrNull(json['verificationCaveat']),
     );
