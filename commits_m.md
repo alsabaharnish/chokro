@@ -17,6 +17,46 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-09-17 17:10 (+06) — The "Their view" tab could never have worked
+
+The producer detail screen showed three tabs and no content. The cause was a
+method mismatch that had been there since Phase E shipped.
+
+`admin_oversight_service.dart` called `GET
+/epr/admin/organizations/{id}/view`. The server registers that route as
+`app.post` — correctly, because opening a producer's workspace appends an audit
+entry BEFORE it assembles anything (EPR-46), so it is side-effecting however
+much it reads like a fetch. Express matched no GET route and answered 404 every
+time.
+
+**Both sides were tested and the seam between them was not.** The widget tests
+override `organizationViewProvider` and never reach the service; the server
+tests call the handler directly and never see the client's spelling of the
+path. Each half was green while the feature had never once worked.
+
+Found by curling the deployed routes unauthenticated and reading the status
+codes: `/timeline` answered 401 — the route exists, you are not signed in —
+while `/view` beside it answered 404. A 404 next to a 401 on two routes
+registered in the same commit is the whole diagnosis.
+
+**`clientServerRoutes.test.js` now checks the seam.** It extracts every
+`app.<verb>('<path>')` from the server and every `_authed<Verb>('<path>')` from
+`lib/services`, normalises `:orgId` and `$orgId` to the same token, and asserts
+that each client call reaches a route that exists BY THE METHOD IT USES. Two
+guards on the scanner itself: it asserts it found both sides, so a broken regex
+cannot pass over an empty list; and it COUNTS the paths it cannot parse rather
+than skipping them, because a scanner that silently ignores what it cannot read
+claims coverage it does not have — which is how the original bug survived.
+
+Swept the whole boundary while the scanner was written: 92 server routes, 43
+client calls, exactly one mismatch. The one remaining unparseable path was a
+ternary inside a string literal in `loadTimeline`; the query is now built on
+the line above, because a path a scanner cannot read is a path nothing checks.
+
+Files: `lib/services/admin_oversight_service.dart`,
+`server/test/clientServerRoutes.test.js` (new)
+Checks: 1206 server tests (43 suites), 1142 Flutter tests, analyze clean.
+
 ## 2026-09-17 15:30 (+06) — A root `Focus` that stopped the app booting, and undeployable indexes
 
 Two failures found by actually running the things, not by reading them.

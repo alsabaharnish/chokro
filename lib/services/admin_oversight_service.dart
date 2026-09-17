@@ -365,11 +365,23 @@ class AdminOversightService {
     String? periodId,
   }) async {
     try {
+      // POST, not GET.
+      //
+      // The route is `app.post` on the server and it is right to be: opening a
+      // producer's workspace appends an audit entry BEFORE it assembles
+      // anything (EPR-46), so it is a side-effecting action however much it
+      // reads like a fetch. This called `_authedGet`, Express matched no GET
+      // route, and every attempt came back 404 — the "Their view" tab could
+      // never have worked.
+      //
+      // Invisible to the widget tests, which override `organizationViewProvider`
+      // and never reach this method. Found by curling the deployed routes: the
+      // timeline beside it answered 401 and this one answered 404.
       final query = periodId == null || periodId.isEmpty
           ? ''
           : '?periodId=$periodId';
       final response =
-          await _authedGet('/epr/admin/organizations/$orgId/view$query');
+          await _authedPost('/epr/admin/organizations/$orgId/view$query');
 
       if (response.statusCode != 200) {
         return OrganizationViewResult.failed(_messageFor(response));
@@ -410,8 +422,15 @@ class AdminOversightService {
     required String orgId,
     bool verify = false,
   }) async {
+    // The query built before the path, not inline.
+    //
+    // A ternary inside the string is the one call site in this file that
+    // `clientServerRoutes.test.js` cannot parse — and that test exists because
+    // a method mismatch on the route directly above this one went unnoticed
+    // for weeks. A path a scanner cannot read is a path nothing checks.
+    final query = verify ? '?verify=true' : '';
     final response = await _authedGet(
-      '/epr/admin/organizations/$orgId/timeline${verify ? '?verify=true' : ''}',
+      '/epr/admin/organizations/$orgId/timeline$query',
     );
     if (response.statusCode != 200) throw _exceptionFor(response);
 
