@@ -89,7 +89,18 @@ const render = (overrides) =>
 /** Every fixed string this module can put on a page, per locale. */
 function allStrings(locale) {
   const out = [];
-  for (const [k, v] of Object.entries(pdf.STRINGS[locale])) out.push([`STRINGS.${k}`, v]);
+  for (const [k, v] of Object.entries(pdf.STRINGS[locale])) {
+    // Some entries are lists — `carbonCaveats` is three sentences. Flattened
+    // so each one is checked and NAMED individually: passed as an array the
+    // coverage loop below stringifies it, which still checks the characters
+    // but reports a failure against the whole block rather than the sentence
+    // that carries the bad code point.
+    if (Array.isArray(v)) {
+      v.forEach((item, i) => out.push([`STRINGS.${k}[${i}]`, item]));
+    } else {
+      out.push([`STRINGS.${k}`, v]);
+    }
+  }
   for (const [k, v] of Object.entries(pdf.CATEGORY_NAMES[locale])) out.push([`CATEGORY.${k}`, v]);
   for (const [k, v] of Object.entries(pdf.POLYMER_NAMES[locale])) out.push([`POLYMER.${k}`, v]);
   for (const [k, v] of Object.entries(pdf.SIZE_CLASS_NAMES[locale])) out.push([`SIZE.${k}`, v]);
@@ -1208,5 +1219,133 @@ describe('a broken Bengali face degrades instead of killing the page', () => {
     // log; the refusal message itself cannot carry it.
     expect(logged).toHaveBeenCalled();
     expect(logged.mock.calls.flat().join(' ')).toMatch(/Latin-only/);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// EPR-38's three caveats, on the artefact and not only on the screen
+// ---------------------------------------------------------------------------
+
+describe('the carbon figure carries its caveats (EPR-38)', () => {
+  test('all three are defined in both editions', () => {
+    // EPR-38: "Three honest caveats must travel with it in the interface and
+    // in every report." The client carried them (lib/core/carbon_math.dart);
+    // the certificate a regulator reads carried none of the three — only the
+    // boundary statement saying the figure is indicative, which is EPR-39's
+    // no-offset prohibition and a different point.
+    for (const locale of ['en', 'bn']) {
+      expect(pdf.STRINGS[locale].carbonCaveats).toHaveLength(3);
+      for (const caveat of pdf.STRINGS[locale].carbonCaveats) {
+        expect(typeof caveat).toBe('string');
+        expect(caveat.length).toBeGreaterThan(30);
+      }
+    }
+  });
+
+  test('the English wording names each of the three', () => {
+    const joined = pdf.STRINGS.en.carbonCaveats.join(' ');
+    expect(joined).toMatch(/UK-derived/);
+    expect(joined).toMatch(/polymer-specific/);
+    expect(joined).toMatch(/downstream recycling/i);
+  });
+
+  test('the Bangla edition renders with them', async () => {
+    // The real check. `splitRuns` refuses rather than emitting mojibake, so a
+    // code point neither bundled face covers would throw here rather than
+    // print as boxes — which is why this test is the one that matters for
+    // newly written Bengali.
+    const buffer = await pdf.renderPassportPdf({
+      passport: passport({ locale: 'bn' }),
+      verifyBaseUrl: 'https://chokro.app',
+    });
+
+    expect(buffer.slice(0, 5).toString('latin1')).toBe('%PDF-');
+    expect(buffer.toString('latin1')).toMatch(/NotoSansBengali/);
+  });
+
+  test('all three are attached when there is a figure', () => {
+    // The decision, not the pixels. PDFKit writes text as positioned glyph
+    // runs inside compressed streams, so "does the page say UK-derived" is not
+    // a question the rendered artefact answers to a grep — a regression here
+    // would render perfectly, say nothing, and pass every render test.
+    for (const locale of ['en', 'bn']) {
+      const t = pdf.STRINGS[locale];
+      expect(pdf.carbonCaveatsFor(t, { carbonKgCo2eAvoided: 5120 })).toEqual(
+        t.carbonCaveats,
+      );
+    }
+  });
+
+  test('none are attached when there is no figure', () => {
+    const t = pdf.STRINGS.en;
+    expect(pdf.carbonCaveatsFor(t, { carbonKgCo2eAvoided: null })).toEqual([]);
+    expect(pdf.carbonCaveatsFor(t, {})).toEqual([]);
+  });
+
+  test('a zero figure still carries them', () => {
+    // Zero is a stated estimate, not an absent one, and EPR-38 attaches the
+    // caveats to the estimate rather than to its magnitude.
+    const t = pdf.STRINGS.en;
+    expect(pdf.carbonCaveatsFor(t, { carbonKgCo2eAvoided: 0 })).toHaveLength(3);
+  });
+
+  test('a certificate with no carbon figure renders without them', async () => {
+    // Three caveats about a number the page does not state would be answering
+    // a question nobody asked, and the boundary block earns its weight by
+    // every statement being about something on the page.
+    const buffer = await pdf.renderPassportPdf({
+      passport: passport({
+        figures: { carbonKgCo2eAvoided: null, carbonAbsenceReason: 'tooUncertain' },
+      }),
+      verifyBaseUrl: 'https://chokro.app',
+    });
+
+    expect(buffer.slice(0, 5).toString('latin1')).toBe('%PDF-');
+  });
+
+  test('every caveat is renderable in both faces', () => {
+    // Belt and braces over the coverage sweep above, which now names each
+    // sentence individually rather than the block.
+    for (const locale of ['en', 'bn']) {
+      const { body } = newBody(locale);
+      for (const caveat of pdf.STRINGS[locale].carbonCaveats) {
+        expect(() => pdf.splitRuns(body, caveat)).not.toThrow();
+      }
+    }
+  });
+});
+
+describe('the carbon figure is rounded like every other figure', () => {
+  test('a five-digit estimate is cut to three significant figures', async () => {
+    // This was `Math.round`, printing every digit the arithmetic produced. The
+    // client states the rule in `carbon_math.dart`: the same precision as the
+    // masses, "because the factor is an estimate derived from a different
+    // country's electricity mix, so a fourth digit would claim a precision
+    // nothing in the chain supports". The certificate claimed it anyway, and
+    // disagreed with the producer's own screen over identical stored inputs.
+    expect(pdf.formatCarbonKg(51234, 'en')).toBe('51200');
+    expect(pdf.formatCarbonKg(5120, 'en')).toBe('5120');
+    expect(pdf.formatCarbonKg(4.567, 'en')).toBe('4.57');
+  });
+
+  test('it matches how the same number would be shown as a mass', () => {
+    // 51234 kg is 51234000000 mg. Both renderings of one quantity must agree;
+    // a reader seeing two has no way to tell which is wrong.
+    expect(pdf.formatCarbonKg(51234, 'en')).toBe(
+      pdf.formatKg(51234 * 1000000, 'en'),
+    );
+  });
+
+  test('the Bangla edition gets Bengali numerals', () => {
+    expect(pdf.formatCarbonKg(5120, 'bn')).toBe('৫১২০');
+  });
+
+  test('a missing figure renders a dash rather than NaN', () => {
+    expect(pdf.formatCarbonKg(null, 'en')).toBe('—');
+    expect(pdf.formatCarbonKg(undefined, 'en')).toBe('—');
+  });
+
+  test('zero is zero, not rounded away', () => {
+    expect(pdf.formatCarbonKg(0, 'en')).toBe('0');
   });
 });

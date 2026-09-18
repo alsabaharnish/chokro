@@ -289,6 +289,34 @@ function contentHash(figures) {
  * NOTHING IS TAKEN FROM THE REQUEST. The caller names an organisation, a period
  * and a scope; every number comes from here.
  */
+/**
+ * The organisation, refusing anything but an active one (EPR-47).
+ *
+ * `pendingReview` is refused as firmly as `suspended`: a certificate for a
+ * company whose registration has not been approved asserts a relationship
+ * Chokro has not yet agreed to, and a reader of the public endpoint has no way
+ * to tell the two apart.
+ */
+async function readOrganizationForIssuance(orgId) {
+  const snap = await db().collection(ORGS).doc(orgId).get();
+  if (!snap.exists) throw badRequest('That organisation does not exist.');
+
+  const organization = snap.data();
+  const status = organization.status ?? 'unknown';
+
+  if (status !== 'active') {
+    throw conflict(
+      status === 'suspended'
+        ? 'This organisation is suspended. Existing certificates stay valid '
+          + 'and downloadable; no new one can be issued while it is.'
+        : `This organisation is ${status}, not active, so no certificate can `
+          + 'be issued for it.',
+    );
+  }
+
+  return organization;
+}
+
 async function assembleFigures({ orgId, periodId, scope = 'period' }) {
   const [period, declaredMassMgByCategory, declaration, policy, orgSnap] =
     await Promise.all([
@@ -538,6 +566,27 @@ async function issuePassport({ orgId, periodId, scope = 'period', adminUid, admi
     throw badRequest('That is not a reporting period.');
   }
 
+  // ==========================================================================
+  // ONLY AN ACTIVE ORGANISATION GETS A CERTIFICATE (EPR-47)
+  // ==========================================================================
+  //
+  // EPR-47 makes a suspended producer's workspace read-only with "no new
+  // issuance", and `requireActiveOrganization` enforces exactly that on every
+  // producer route — by checking `orgWritable`, which `organizations.js:545`
+  // defines as `status === 'active'`.
+  //
+  // None of that reached here. The issuing route is an ADMIN route, so there
+  // is no `req.orgMembership` for that middleware to read, and `issuePassport`
+  // checked only that the organisation document EXISTED. A suspended, closed
+  // or never-approved company could therefore be handed a fresh Chokro-signed
+  // certificate that the public endpoint reports as `issued` — the one
+  // artefact in this product that a third party relies on without being able
+  // to ask us anything about it.
+  //
+  // Checked in the module rather than as route middleware, so it holds for
+  // every caller rather than for the one route that exists today.
+  const organization = await readOrganizationForIssuance(orgId);
+
   const figures = await assembleFigures({ orgId, periodId, scope });
   const hash = contentHash(figures);
 
@@ -634,6 +683,46 @@ async function issuePassport({ orgId, periodId, scope = 'period', adminUid, admi
             .where('status', '==', 'issued')
             .limit(20),
         );
+
+        // ===================================================================
+        // A RETRY IS NOT A REISSUE
+        // ===================================================================
+        //
+        // Every call minted a fresh serial and superseded whatever stood
+        // before it. So a lost response, a client retry, or an Admin clicking
+        // twice produced a second certificate over BYTE-IDENTICAL figures and
+        // marked the first `superseded` — and a third party holding the first
+        // then reads "superseded" from the public endpoint, which says the
+        // evidence changed when nothing did. That is the one signal this
+        // product asks outsiders to act on, spent on a double-click.
+        //
+        // `contentHash` is a pure function of the figures, so identity is
+        // already decidable here: if a standing certificate carries the same
+        // hash, this call has nothing to add and returns it. A genuine reissue
+        // — different figures, therefore a different hash — supersedes as
+        // before.
+        const identical = previous.docs.find(
+          (doc) => doc.data().contentHash === hash,
+        );
+        if (identical) {
+          return {
+            serial: identical.id,
+            orgId,
+            periodId,
+            scope,
+            contentHash: hash,
+            supersededCount: 0,
+            // Stated rather than left for the caller to infer from
+            // `supersededCount: 0`, which is also what a first issuance
+            // returns. A screen saying "issued" for a call that issued nothing
+            // is a small lie that becomes the explanation for a serial the
+            // Admin cannot find.
+            alreadyIssued: true,
+            issuedAt:
+              identical.data().issuedAt?.toDate?.().toISOString()
+              ?? now.toDate().toISOString(),
+          };
+        }
 
         await audit.appendInTransaction(txn, {
           orgId,
@@ -984,40 +1073,60 @@ async function supersedeForPeriod({ orgId, periodId, reason, actorUid }) {
 
   const firestore = db();
 
-  const affected = await firestore
+  // ==========================================================================
+  // ONE TRANSACTION, BECAUSE A SUPERSESSION NOBODY RECORDED DID NOT HAPPEN
+  // ==========================================================================
+  //
+  // This was a `batch.commit()` followed by a separate `audit.append()`. Two
+  // commits, and the second one is allowed to fail: a certificate a third
+  // party is relying on could be marked `superseded` with NOTHING in the audit
+  // chain saying who did it, why, or when.
+  //
+  // That is the exact failure `producerAudit.js` is built to refuse — "an
+  // action that could not be logged has not happened as far as this system is
+  // concerned, so the transaction that would have recorded it rolls back with
+  // it" — and invalidating somebody's certificate is not the operation to make
+  // an exception for.
+  //
+  // Reads first, writes after, as the Admin SDK requires: the query, then the
+  // chain head inside `appendInTransaction`, then every write.
+  const query = firestore
     .collection(PASSPORTS)
     .where('orgId', '==', orgId)
     .where('periodId', '==', periodId)
+    // Only certificates that currently STAND. A revoked one has already been
+    // withdrawn for a stronger reason, and overwriting its status with
+    // `superseded` would quietly downgrade a revocation to a replacement.
     .where('status', '==', 'issued')
-    .limit(50)
-    .get();
+    .limit(50);
 
-  if (affected.empty) return { superseded: 0 };
+  return firestore.runTransaction(async (txn) => {
+    const affected = await txn.get(query);
+    if (affected.empty) return { superseded: 0 };
 
-  const batch = firestore.batch();
-  for (const doc of affected.docs) {
-    batch.update(doc.ref, {
-      status: 'superseded',
-      supersededAt: serverTimestamp(),
-      supersededReason: String(reason || 'The underlying evidence changed.').slice(0, 500),
-      supersededBy: null,
+    await audit.appendInTransaction(txn, {
+      orgId,
+      action: audit.ACTIONS.PASSPORT_SUPERSEDED,
+      actorUid: actorUid || 'system',
+      actorRole: 'admin',
+      targetType: 'passport',
+      targetId: periodId,
+      summary:
+        `${affected.size} ${affected.size === 1 ? 'passport' : 'passports'} for ` +
+        `${periodId} superseded: ${reason}`,
     });
-  }
-  await batch.commit();
 
-  await audit.append({
-    orgId,
-    action: audit.ACTIONS.PASSPORT_SUPERSEDED,
-    actorUid: actorUid || 'system',
-    actorRole: 'admin',
-    targetType: 'passport',
-    targetId: periodId,
-    summary:
-      `${affected.size} ${affected.size === 1 ? 'passport' : 'passports'} for ` +
-      `${periodId} superseded: ${reason}`,
+    for (const doc of affected.docs) {
+      txn.update(doc.ref, {
+        status: 'superseded',
+        supersededAt: serverTimestamp(),
+        supersededReason: String(reason || 'The underlying evidence changed.').slice(0, 500),
+        supersededBy: null,
+      });
+    }
+
+    return { superseded: affected.size };
   });
-
-  return { superseded: affected.size };
 }
 
 /**

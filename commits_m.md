@@ -17,6 +17,123 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-09-18 12:20 (+06) — The certificate stated a carbon figure and none of its caveats
+
+MEDIUM triage, `passportPdf.js`: eleven findings, eight distinct. Six already
+closed — the §6.7 boundary statements are on the page, `splitRuns`' neutral
+branch asks both faces now, `absentRateSentence` tells a nil declaration from an
+absent one, `heightOfFlow` measures across every face, the gazette target is
+drawn in the no-rate branch, and `registerFonts`' recovery no longer breaks the
+English edition.
+
+**Two were live.**
+
+**EPR-38's three caveats were on the screen and not on the artefact.** The spec
+is unambiguous — "Three honest caveats must travel with it in the interface and
+in every report" — and a certificate is the most report-like thing here.
+`lib/core/carbon_math.dart` carried all three for the producer's own dashboard;
+the document a regulator reads carried none of them. The boundary block's
+"indicative ... not a verified carbon credit or offset" is EPR-39's no-offset
+prohibition, a different point. All three now sit beside the figure in both
+editions, because EPR-38 says "on the same screen, not behind a tooltip".
+
+**The carbon figure was rounded unlike every other number on the page.**
+`Math.round` prints whatever the arithmetic produced, so 51,234 kg printed in
+full beside masses rounded to 51,200. `carbon_math.dart` states the rule for the
+client — three significant figures, "because the factor is an estimate derived
+from a different country's electricity mix, so a fourth digit would claim a
+precision nothing in the chain supports" — and the certificate both overstated
+the precision and disagreed with the producer's own screen over identical stored
+inputs.
+
+**A note on testing the caveats, because the obvious test does not work.**
+PDFKit writes text as positioned glyph runs inside compressed streams, so "does
+the page say UK-derived" is not a question the rendered PDF answers to a grep —
+I tried, and inflating every stream finds no `Tj` operator to match against. A
+regression would render perfectly, say nothing, and pass every render test. So
+the decision is split into `carbonCaveatsFor` and asserted directly. Both
+editions were also rendered to PDF and inspected by eye: the Bengali sets
+correctly, no mojibake.
+
+**The Bengali is mine and has not been reviewed by a native speaker.** It
+renders — `splitRuns` refuses rather than emitting mojibake, and the coverage
+sweep now names each sentence individually rather than the block — but
+renderable is not the same as idiomatic, and this is a regulator-facing
+document. Flagged rather than assumed.
+
+**A correction to yesterday's entry.** I recorded that the certificate "says
+nothing" about mass collected in undeclared categories. Rendering it showed
+that is wrong: the By gazette category table lists every category's collected
+mass against its declared mass and prints "not declared" where there is none —
+880 kg of flexible packaging against "not declared", on the face of the
+document. What is actually missing is only a summary line tying that to the
+percentage. Much smaller than I recorded, and corrected in the findings doc.
+
+Files: server/src/passportPdf.js, server/test/passportPdf.test.js,
+docs/RECOVERED_AUDIT_FINDINGS.md
+Checks: 1251 server tests (43 suites). Both fixes verified by mutation.
+Remaining untriaged: 16 MEDIUM, 22 LOW.
+
+## 2026-09-18 01:30 (+06) — A certificate for a company we had suspended
+
+MEDIUM triage, `passports.js`: ten findings, seven distinct. Four already
+closed — `supersedeForPeriod` has three production call sites now,
+`canonicalPayload` carries producer identity, the collection rate was fixed in
+the second pass, and the supersession query filters `status == 'issued'` so it
+cannot strip a revocation.
+
+**Three were live.**
+
+**A suspended organisation could be issued a certificate.** EPR-47 makes a
+suspended workspace read-only with "no new issuance", and
+`requireActiveOrganization` enforces that on every producer route. Issuance is
+an ADMIN route, so that middleware never ran, and `issuePassport` checked only
+that the organisation document EXISTED — not its status. A suspended, closed or
+never-approved company could be handed a Chokro-signed certificate that the
+public endpoint reports as `issued`: the one artefact here that a third party
+relies on without being able to ask us anything about it. Refused in the module
+rather than as route middleware, so it holds for every caller rather than the
+one route that exists today.
+
+**A retry was a reissue.** Every call minted a fresh serial and superseded what
+stood before it, so a lost response, a client retry or a double-click produced a
+second certificate over byte-identical figures and marked the first
+`superseded`. A third party holding the first then reads "superseded" from the
+public endpoint — which says the evidence changed when nothing did, spending the
+one signal this product asks outsiders to act on. `contentHash` is a pure
+function of the figures, so identity was already decidable: an identical
+standing certificate is now returned with `alreadyIssued: true` instead of being
+replaced.
+
+**A supersession could commit with nothing in the audit chain.** A
+`batch.commit()` followed by a separate `audit.append()` — two commits, and the
+second allowed to fail on its own, leaving a certificate marked `superseded`
+with no record of who did it or why. Now one transaction: query, then the chain
+head, then every write. `producerAudit.js` states the rule — an action that
+could not be logged has not happened — and invalidating somebody's certificate
+is not the operation to make an exception for.
+
+**Two existing tests had to change, and that is worth stating.** Both reissued
+with unchanged fixtures and expected supersession, which the idempotency guard
+now makes a no-op. Their intent was to prove supersession works, so they now
+move the figures between the two issuances — the realistic reissue. A test that
+had been passing on the path it was not testing.
+
+**One adjacent gap, recorded not fixed.** The certificate says nothing about
+`collectedOutsideDeclarationMassMg` — mass collected in categories the producer
+did not declare, excluded from the percentage. It is in `figures` and hashed,
+just not printed, and disclosing it would tell a regulator the declaration is
+incomplete. Left alone because it means new Bengali on a regulator-facing
+certificate in the module with three prior font-handling bugs, which deserves a
+deliberate change with reviewed wording rather than a line slipped into a
+triage pass.
+
+Files: server/src/passports.js, server/test/passports.test.js,
+docs/RECOVERED_AUDIT_FINDINGS.md
+Checks: 1238 server tests (43 suites). Both guards verified by mutation —
+removing the active-organisation check fails 3, removing idempotency fails 2.
+Remaining untriaged: 24 MEDIUM, 22 LOW.
+
 ## 2026-09-18 00:15 (+06) — Reports that did not say what they meant
 
 Continued the MEDIUM triage into `reportJobs.js`: ten findings, two of them

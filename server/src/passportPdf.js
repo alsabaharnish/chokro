@@ -214,6 +214,25 @@ const STRINGS = Object.freeze({
     reversed: 'Reversed attributions',
     carbon: 'Indicative avoided emissions',
     carbonFactor: 'Emission factor version',
+    // EPR-38: "Three honest caveats must travel with it in the interface and
+    // in every report." Drawn beside the figure rather than in the boundary
+    // block at the foot, because the requirement says "on the same screen, not
+    // behind a tooltip" — and a caveat a reader meets three sections after the
+    // number it qualifies has already done its work as an unqualified number.
+    //
+    // The wording mirrors `lib/core/carbon_math.dart`, which carries the same
+    // three for the producer's own screen. The client had them; the artefact a
+    // regulator reads did not.
+    carbonCaveats: [
+      'UK-derived. Bangladesh’s electricity mix, transport distances and '
+        + 'reprocessing routes differ, so this figure is indicative rather '
+        + 'than national.',
+      'Mixed plastics, not polymer-specific. Polymer-specific factors will '
+        + 'replace it as they are sourced.',
+      'Conditional on downstream recycling. The avoided emission is realised '
+        + 'only if the material is actually reprocessed, and Chokro’s evidence '
+        + 'does not yet observe material arriving at a recycler.',
+    ],
     verifyTitle: 'Verification',
     verifyBody: 'Confirm this certificate at',
     contentHash: 'Content hash (SHA-256)',
@@ -266,6 +285,15 @@ const STRINGS = Object.freeze({
     reversed: 'বাতিলকৃত সংযুক্তি',
     carbon: 'পরিহারকৃত নিঃসরণের সূচক হিসাব',
     carbonFactor: 'নিঃসরণ গুণকের সংস্করণ',
+    carbonCaveats: [
+      'যুক্তরাজ্য-ভিত্তিক গুণক। বাংলাদেশের বিদ্যুৎ মিশ্রণ, পরিবহন দূরত্ব ও '
+        + 'পুনঃপ্রক্রিয়াকরণ পদ্ধতি ভিন্ন, তাই এই হিসাব জাতীয় নয় — সূচক মাত্র।',
+      'মিশ্র প্লাস্টিকের গুণক, পলিমার-ভিত্তিক নয়। পলিমার-ভিত্তিক গুণক পাওয়া '
+        + 'গেলে তা এটির স্থলাভিষিক্ত হবে।',
+      'পরবর্তী ধাপের পুনঃচক্রায়নের উপর শর্তাধীন। উপাদান প্রকৃতপক্ষে '
+        + 'পুনঃপ্রক্রিয়াজাত হলেই কেবল নিঃসরণ পরিহার ঘটে, এবং উপাদান '
+        + 'পুনঃচক্রায়নকারীর কাছে পৌঁছেছে এমন প্রমাণ চক্রের কাছে এখনও নেই।',
+    ],
     verifyTitle: 'যাচাইকরণ',
     verifyBody: 'এই সনদ যাচাই করুন',
     contentHash: 'বিষয়বস্তুর হ্যাশ (SHA-256)',
@@ -1337,7 +1365,7 @@ function drawPolymerTable(ctx) {
 }
 
 function drawEvidence(ctx) {
-  const { doc, t, f, locale } = ctx;
+  const { doc, t, f, locale, body } = ctx;
 
   doc.moveDown(1);
   sectionHeading(ctx, t.evidence);
@@ -1364,7 +1392,18 @@ function drawEvidence(ctx) {
       t.carbon,
       // The localised unit, like every other mass on the page. Hardcoding `kg`
       // printed an English unit on the Bangla edition beside Bengali numerals.
-      `${localeNumber(Math.round(f.carbonKgCo2eAvoided), locale)} ${t.kg} CO₂e`,
+      //
+      // THREE SIGNIFICANT FIGURES, like every other figure here.
+      //
+      // This was `Math.round`, which prints every digit the arithmetic
+      // produced — so a period avoiding 51,234 kg printed exactly that beside
+      // masses rounded to 51,200. `carbon_math.dart` states the rule for the
+      // client: the same precision as the mass figures, "because the factor is
+      // an estimate derived from a different country's electricity mix, so a
+      // fourth digit would claim a precision nothing in the chain supports."
+      // The certificate claimed it anyway, and disagreed with the producer's
+      // own screen over identical stored inputs.
+      `${formatCarbonKg(f.carbonKgCo2eAvoided, locale)} ${t.kg} CO₂e`,
     ]);
     rows.push([t.carbonFactor, f.carbonFactorVersion ?? '—']);
   } else {
@@ -1377,6 +1416,41 @@ function drawEvidence(ctx) {
   for (const [label, value] of rows) {
     labelled(ctx, label, value);
   }
+
+  const caveats = carbonCaveatsFor(t, f);
+  if (caveats.length > 0) {
+    const left = doc.page.margins.left;
+    const width = doc.page.width - left - doc.page.margins.right;
+
+    doc.moveDown(0.3);
+    for (const caveat of caveats) {
+      writeFlow(doc, body, `•  ${caveat}`, left + 12, doc.y, width - 24, {
+        size: 8,
+        color: '#B45309',
+      });
+      doc.moveDown(0.25);
+    }
+  }
+}
+
+/**
+ * The caveats this certificate must carry, which is all three or none.
+ *
+ * Split out from the drawing so the DECISION is testable. A test over the
+ * rendered PDF cannot see this: PDFKit writes text as positioned glyph runs
+ * inside compressed streams, so "does the page say UK-derived" is not a
+ * question the artefact answers to a grep — which means a regression here
+ * would render perfectly and say nothing, and every render test would pass.
+ *
+ * Empty where there is no figure. EPR-38 attaches the caveats to the estimate,
+ * and three caveats about a number the page does not state would be answering
+ * a question nobody asked — the boundary statements earn their weight by all
+ * being about something on the page.
+ */
+function carbonCaveatsFor(t, f) {
+  const hasFigure =
+    f.carbonKgCo2eAvoided !== null && f.carbonKgCo2eAvoided !== undefined;
+  return hasFigure ? t.carbonCaveats : [];
 }
 
 function drawBoundaries(ctx) {
@@ -1635,6 +1709,24 @@ function formatKg(mg, locale) {
 }
 
 /**
+ * A carbon figure, already in kilograms, at the same precision as every mass.
+ *
+ * Separate from [formatKg] only because that one takes milligrams. The
+ * rounding is deliberately identical: `carbon_math.dart` formats the client's
+ * copy with the same three significant figures, and two renderings of one
+ * stored number that disagree give a reader no way to tell which is wrong.
+ */
+function formatCarbonKg(kg, locale) {
+  // `Number(null)` is 0, not NaN — so absence has to be checked before the
+  // coercion, or "no estimate" prints as a measured zero.
+  if (kg === null || kg === undefined) return '—';
+  const value = Number(kg);
+  if (!Number.isFinite(value)) return '—';
+  const text = value === 0 ? '0' : significantFigures(value, 3);
+  return locale === 'bn' ? toBengaliDigits(text) : text;
+}
+
+/**
  * Rounds to significant figures — the leading digits too, not just the
  * decimals.
  *
@@ -1754,6 +1846,8 @@ module.exports = {
   LATIN_FONT,
   renderPassportPdf,
   formatKg,
+  formatCarbonKg,
+  carbonCaveatsFor,
   formatPercent,
   formatPeriod,
   formatDateTime,

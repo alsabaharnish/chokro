@@ -245,6 +245,54 @@ attempts, which is an EPR-34 determinism question rather than a pagination one.
 The module header claimed the cursor worked; that claim is now corrected, since
 a comment describing a capability the code lacks stops anyone looking for it.
 
+### MEDIUM, `passports.js` — ten findings, seven distinct
+
+**Four were already closed.** `supersedeForPeriod` now has three production
+call sites (`index.js:2233`, `passports.js:1069`, `passports.js:1118`).
+`canonicalPayload` carries `legalName`, `doeRegistrationNo` and
+`obligationYear`, so two figure sets naming different producers no longer hash
+identically. The collection percentage was fixed in the second pass. And
+`supersedeForPeriod`'s query filters `status == 'issued'`, so it cannot strip a
+revocation.
+
+**Three were live and are fixed.**
+
+*A suspended organisation could be issued a certificate.* EPR-47 makes a
+suspended workspace read-only with "no new issuance", and
+`requireActiveOrganization` enforces that on every producer route — but issuance
+is an ADMIN route, so that middleware never ran, and `issuePassport` checked
+only that the organisation document existed. A suspended, closed or
+never-approved company could be handed a Chokro-signed certificate that the
+public endpoint reports as `issued`. Now refused in the module rather than at
+the route, so it holds for every caller.
+
+*A retry was a reissue.* Every call minted a fresh serial and superseded what
+stood before it, so a lost response or a double-click produced a second
+certificate over byte-identical figures and marked the first `superseded` — and
+a third party holding the first reads that as "the evidence changed" when
+nothing did. `contentHash` already decides identity, so an identical standing
+certificate is now returned rather than replaced.
+
+*A supersession could commit with nothing in the audit chain.* This was a
+`batch.commit()` followed by a separate `audit.append()`, and the second was
+allowed to fail on its own. Now one transaction: query, chain head, then every
+write. `producerAudit.js` states the rule — an action that could not be logged
+has not happened — and invalidating somebody's certificate is not the operation
+to except from it.
+
+**One adjacent gap, smaller than first recorded.** With the rate corrected, the
+certificate no longer prints an inflated figure. It was noted here that it
+"says nothing" about the mass collected in undeclared categories — *that was
+wrong, and rendering the certificate showed it.* The **By gazette category**
+table lists every gazette category with its collected mass beside its declared
+mass, and prints **"not declared"** in the declared column where the producer
+declared none. A reader sees 880 kg of flexible packaging collected against
+"not declared" on the face of the document.
+
+What is genuinely absent is only a summary line tying that to the percentage —
+saying that the figure excludes it and by how much. Worth considering, much
+smaller than recorded, and not release-blocking.
+
 ---
 
 ## The findings
@@ -390,3 +438,42 @@ Ordered by severity, then file. Duplicates retained.
 - `server/test/eprRouteGuards.test.js:185` — 'every admin EPR route requires an admin' filters `adminRoutes()` — itself defined at line 80 as the routes that `has('requireAdmin')` — by `!r.has('requireAdmin')`, so the result is empty by construction and the expectation cannot fail.
 - `test/epr_claim_boundaries_test.dart:23` — The QA-4 prohibited-claims scan lists no Phase D screen, so the two most claim-sensitive new surfaces — the declaration form and the passports list — are not checked at all, and adding them would immediately fail on inline copy that duplicates rather than reuses the shared constants.
 - `test/producer_sdg_model_test.dart:96` — The 'never claim recycling, a credit, an offset, or jobs' test accepts any sentence containing the bare substring 'not', which matches inside 'another', 'note', 'cannot' and 'nothing', so a sentence making the forbidden claim can satisfy the denial check.
+
+### MEDIUM, `passportPdf.js` — eleven findings, eight distinct
+
+**Six were already closed.** The §6.7 boundary statements are on the
+certificate. `splitRuns`' neutral branch now asks BOTH faces, with a comment
+naming the exact 17 code points the old version mis-routed. `absentRateSentence`
+distinguishes a nil declaration from an absent one. `heightOfFlow` measures
+across every face the string uses and takes the maximum. The gazette target is
+drawn in the no-rate branch too. And `registerFonts`' recovery path no longer
+breaks the Latin-only English edition when the Bengali file is unusable.
+
+**Two were live and are fixed.**
+
+*The carbon figure carried none of EPR-38's three caveats.* The spec is
+unambiguous — "Three honest caveats must travel with it in the interface and in
+every report" — and the certificate is the most report-like artefact there is.
+`lib/core/carbon_math.dart` carried all three for the producer's own screen;
+the document a regulator reads carried none. The boundary block's
+"indicative... not a verified carbon credit or offset" is EPR-39's
+no-offset prohibition, which is a different point. All three are now drawn
+beside the figure, in both editions, because EPR-38 says "on the same screen,
+not behind a tooltip".
+
+*The carbon figure was rounded differently from every other number on the page.*
+`Math.round` prints every digit the arithmetic produced, so an estimate of
+51,234 kg printed exactly that beside masses rounded to 51,200.
+`carbon_math.dart` states the rule for the client — the same three significant
+figures as the masses, "because the factor is an estimate derived from a
+different country's electricity mix, so a fourth digit would claim a precision
+nothing in the chain supports" — and the certificate both claimed it and
+disagreed with the producer's own screen over identical stored inputs.
+
+**A note on how the caveats are tested.** Not by reading the rendered PDF:
+PDFKit writes text as positioned glyph runs inside compressed streams, so "does
+the page say UK-derived" is not a question the artefact answers to a grep, and
+a regression would render perfectly, say nothing, and pass every render test.
+The decision is split into `carbonCaveatsFor` and asserted directly; the
+rendering path is the same `writeFlow` loop every other block uses. Both
+editions were also rendered and inspected by eye.

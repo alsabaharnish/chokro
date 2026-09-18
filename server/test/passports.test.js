@@ -532,6 +532,16 @@ describe('issuing', () => {
     const first = await passports.issuePassport({
       orgId: 'org_cola', periodId: '2026-09', adminUid: 'uid_admin',
     });
+
+    // The figures have to actually MOVE between the two issuances. Reissuing
+    // identical content is a no-op by design — see the idempotency test below
+    // — so a fixture left unchanged would exercise that path instead of this
+    // one and prove nothing about supersession.
+    fs._seed('eprPeriods', 'org_cola_2026-09', {
+      ...fs._store.get('eprPeriods/org_cola_2026-09'),
+      massMgByCategory: { rigid: 4500000000, flexible: 880000000 },
+    });
+
     const second = await passports.issuePassport({
       orgId: 'org_cola', periodId: '2026-09', adminUid: 'uid_admin',
     });
@@ -875,6 +885,12 @@ describe('verification', () => {
   });
 
   test('points a superseded certificate at its replacement', async () => {
+    // Figures moved, so this is a genuine reissue rather than a retry.
+    fs._seed('eprPeriods', 'org_cola_2026-09', {
+      ...fs._store.get('eprPeriods/org_cola_2026-09'),
+      massMgByCategory: { rigid: 4500000000, flexible: 880000000 },
+    });
+
     const second = await passports.issuePassport({
       orgId: 'org_cola', periodId: '2026-09', adminUid: 'uid_admin',
     });
@@ -1294,4 +1310,185 @@ describe('the collection percentage', () => {
     );
     return declaredTotal > 0 ? inDeclared / declaredTotal : null;
   }
+});
+
+// ---------------------------------------------------------------------------
+// Third triage pass: MEDIUM findings against this module
+// ---------------------------------------------------------------------------
+
+describe('a certificate is only issued when it should be (MEDIUM triage)', () => {
+  test('a suspended organisation gets no new certificate (EPR-47)', async () => {
+    // EPR-47 makes a suspended workspace read-only with "no new issuance", and
+    // `requireActiveOrganization` enforces that on every producer route. The
+    // issuing route is an ADMIN route, so that middleware never ran — and
+    // `issuePassport` checked only that the organisation EXISTED. A suspended
+    // company could be handed a Chokro-signed certificate that the public
+    // endpoint reports as `issued`.
+    fs._seed('organizations', 'org_cola', {
+      ...fs._store.get('organizations/org_cola'),
+      status: 'suspended',
+    });
+
+    await expect(
+      passports.issuePassport({
+        orgId: 'org_cola', periodId: '2026-09', adminUid: 'uid_admin',
+      }),
+    ).rejects.toThrow(/suspended/i);
+  });
+
+  test('an unapproved organisation gets no certificate either', async () => {
+    // `pendingReview` asserts a relationship Chokro has not agreed to yet, and
+    // a reader of the public endpoint cannot tell it from an approved one.
+    fs._seed('organizations', 'org_cola', {
+      ...fs._store.get('organizations/org_cola'),
+      status: 'pendingReview',
+    });
+
+    await expect(
+      passports.issuePassport({
+        orgId: 'org_cola', periodId: '2026-09', adminUid: 'uid_admin',
+      }),
+    ).rejects.toThrow(/not active/i);
+  });
+
+  test('a closed organisation gets no certificate', async () => {
+    fs._seed('organizations', 'org_cola', {
+      ...fs._store.get('organizations/org_cola'),
+      status: 'closed',
+    });
+
+    await expect(
+      passports.issuePassport({
+        orgId: 'org_cola', periodId: '2026-09', adminUid: 'uid_admin',
+      }),
+    ).rejects.toThrow(/not active/i);
+  });
+
+  test('an active organisation still gets one', async () => {
+    // The guard must not refuse the ordinary case.
+    const result = await passports.issuePassport({
+      orgId: 'org_cola', periodId: '2026-09', adminUid: 'uid_admin',
+    });
+    expect(result.serial).toMatch(/^CHKR-PP-/);
+  });
+
+  test('issuing twice over identical figures returns the first, not a second', async () => {
+    // A lost response, a client retry or an Admin double-click used to mint a
+    // fresh serial and mark the previous one `superseded` — over byte-identical
+    // figures. A third party holding the first then reads "superseded" from the
+    // public endpoint, which says the evidence changed when nothing did: the
+    // one signal this product asks outsiders to act on, spent on a double-click.
+    const first = await passports.issuePassport({
+      orgId: 'org_cola', periodId: '2026-09', adminUid: 'uid_admin',
+    });
+    const retry = await passports.issuePassport({
+      orgId: 'org_cola', periodId: '2026-09', adminUid: 'uid_admin',
+    });
+
+    expect(retry.serial).toBe(first.serial);
+    expect(retry.alreadyIssued).toBe(true);
+    expect(retry.supersededCount).toBe(0);
+
+    // And the first is untouched — not superseded by itself.
+    const stored = fs._store.get(`plasticPassports/${first.serial}`);
+    expect(stored.status).toBe('issued');
+    expect(stored.supersededBy).toBeNull();
+  });
+
+  test('a retry writes no second audit entry', async () => {
+    // The chain records actions. A retry that took no action and logged one
+    // would put a supersession in the history that never happened.
+    await passports.issuePassport({
+      orgId: 'org_cola', periodId: '2026-09', adminUid: 'uid_admin',
+    });
+    const after = [...fs._store.keys()].filter((k) =>
+      k.startsWith('producerAuditLog/'),
+    ).length;
+
+    await passports.issuePassport({
+      orgId: 'org_cola', periodId: '2026-09', adminUid: 'uid_admin',
+    });
+
+    expect(
+      [...fs._store.keys()].filter((k) => k.startsWith('producerAuditLog/'))
+        .length,
+    ).toBe(after);
+  });
+});
+
+describe('a supersession that cannot be logged does not happen (SEC-12)', () => {
+  test('supersedeForPeriod records the supersession in the chain', async () => {
+    await passports.issuePassport({
+      orgId: 'org_cola', periodId: '2026-09', adminUid: 'uid_admin',
+    });
+
+    const result = await passports.supersedeForPeriod({
+      orgId: 'org_cola',
+      periodId: '2026-09',
+      reason: 'A re-verified mass changed the period.',
+      actorUid: 'uid_admin',
+    });
+
+    expect(result.superseded).toBe(1);
+    const entries = [...fs._store.entries()]
+      .filter(([k]) => k.startsWith('producerAuditLog/'))
+      .map(([, v]) => v);
+    expect(entries.some((e) => e.action === 'passport.superseded')).toBe(true);
+  });
+
+  test('a failed audit append leaves every certificate standing', async () => {
+    // This was a `batch.commit()` followed by a separate `audit.append()`, so
+    // the log write was allowed to fail on its own: a certificate a third party
+    // relies on could be marked `superseded` with nothing in the chain saying
+    // who did it or why. `producerAudit.js` refuses exactly that — an action
+    // that could not be logged has not happened.
+    const issued = await passports.issuePassport({
+      orgId: 'org_cola', periodId: '2026-09', adminUid: 'uid_admin',
+    });
+
+    const spy = jest
+      .spyOn(audit, 'appendInTransaction')
+      .mockRejectedValueOnce(new Error('the chain is unavailable'));
+
+    await expect(
+      passports.supersedeForPeriod({
+        orgId: 'org_cola',
+        periodId: '2026-09',
+        reason: 'A re-verified mass changed the period.',
+        actorUid: 'uid_admin',
+      }),
+    ).rejects.toThrow(/unavailable/i);
+
+    // Still issued. A supersession nobody recorded did not happen.
+    expect(fs._store.get(`plasticPassports/${issued.serial}`).status).toBe(
+      'issued',
+    );
+    spy.mockRestore();
+  });
+
+  test('a revoked certificate is not quietly downgraded to superseded', async () => {
+    // Revocation is the stronger withdrawal and was decided for its own
+    // reason; overwriting its status with `superseded` would present it as a
+    // routine replacement.
+    const issued = await passports.issuePassport({
+      orgId: 'org_cola', periodId: '2026-09', adminUid: 'uid_admin',
+    });
+    await passports.revokePassport({
+      serial: issued.serial,
+      reason: 'An audit invalidated the batch.',
+      adminUid: 'uid_admin',
+    });
+
+    const result = await passports.supersedeForPeriod({
+      orgId: 'org_cola',
+      periodId: '2026-09',
+      reason: 'A re-verified mass changed the period.',
+      actorUid: 'uid_admin',
+    });
+
+    expect(result.superseded).toBe(0);
+    expect(fs._store.get(`plasticPassports/${issued.serial}`).status).toBe(
+      'revoked',
+    );
+  });
 });
