@@ -113,6 +113,17 @@ async function seedAuditEntry(entryId, orgId) {
   });
 }
 
+async function seedAuditHead(orgId, sequence) {
+  await testEnv.withSecurityRulesDisabled(async (ctx) => {
+    await setDoc(doc(ctx.firestore(), 'producerAuditHeads', orgId), {
+      orgId,
+      sequence,
+      digest: 'b'.repeat(64),
+      updatedAt: new Date(),
+    });
+  });
+}
+
 async function seedBin(binId, active = true) {
   await testEnv.withSecurityRulesDisabled(async (ctx) => {
     await setDoc(doc(ctx.firestore(), 'bins', binId), {
@@ -172,6 +183,8 @@ beforeEach(async () => {
 
   await seedAuditEntry('audit_cola_1', COLA);
   await seedAuditEntry('audit_pran_1', PRAN);
+  await seedAuditHead(COLA, 3);
+  await seedAuditHead(PRAN, 2);
 
   await seedBin(OPEN_BIN, true);
 });
@@ -390,6 +403,66 @@ describe('organizationMembers', () => {
 // ===========================================================================
 // SEC-12 — the audit log is append-only for every principal
 // ===========================================================================
+
+
+describe('producerAuditHeads', () => {
+  test('a member reads its own chain head', async () => {
+    // The head is what makes a TRUNCATION detectable: a head at 41 over 38
+    // surviving entries is three that were removed. Admin-only, the producer
+    // could read every entry and still not make the one check it can make
+    // alone — which contradicts the design producerAudit.js states, that
+    // tampering is detectable "by anyone holding the log, including the
+    // producer whose history it is".
+    await assertSucceeds(
+      getDoc(doc(db(COLA_VIEWER), 'producerAuditHeads', COLA)),
+    );
+  });
+
+  test("a member cannot read another company's chain head", async () => {
+    // The sequence alone tells a rival how much activity a company has had.
+    await assertFails(
+      getDoc(doc(db(COLA_OWNER), 'producerAuditHeads', PRAN)),
+    );
+  });
+
+  test('a signed-out reader gets nothing', async () => {
+    await assertFails(
+      getDoc(doc(testEnv.unauthenticatedContext().firestore(),
+        'producerAuditHeads', COLA)),
+    );
+  });
+
+  test('an administrator reads any chain head', async () => {
+    await assertSucceeds(getDoc(doc(db(ADMIN), 'producerAuditHeads', COLA)));
+  });
+
+  test('no client writes a head, its own included', async () => {
+    // Rewriting a head cannot forge a chain, but it CAN hide a truncation by
+    // winding the sequence back to match what survives.
+    await assertFails(
+      setDoc(doc(db(COLA_OWNER), 'producerAuditHeads', COLA), {
+        orgId: COLA,
+        sequence: 1,
+        digest: 'c'.repeat(64),
+        updatedAt: new Date(),
+      }),
+    );
+  });
+
+  test('an administrator cannot write one either', async () => {
+    await assertFails(
+      updateDoc(doc(db(ADMIN), 'producerAuditHeads', COLA), { sequence: 1 }),
+    );
+  });
+
+  test('no client deletes a head', async () => {
+    // Deleting the head AND the entries is the most complete attack available;
+    // verifyChain reports a missing head as a finding for exactly this reason.
+    await assertFails(
+      deleteDoc(doc(db(COLA_OWNER), 'producerAuditHeads', COLA)),
+    );
+  });
+});
 
 describe('producerAuditLog', () => {
   test('a member reads its own organisation history', async () => {

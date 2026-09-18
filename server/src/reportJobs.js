@@ -27,8 +27,24 @@
  * the read times out. Which is why `runJob` is resumable and idempotent on the
  * job document, and why a job that has been `running` past
  * `STALE_AFTER_MINUTES` is reported as `stalled` rather than left spinning
- * forever in a progress bar. `POST /epr/reports/{jobId}/resume` picks it back
- * up from its cursor.
+ * forever in a progress bar. `POST /epr/reports/{jobId}/resume` RE-RUNS it from
+ * the beginning.
+ *
+ * NOT from a cursor, and this paragraph used to say otherwise. The job document
+ * carries a `cursor` field, written `null` at enqueue and never advanced by
+ * anything; `readAllAttributions` paginates with a LOCAL cursor that lives for
+ * one run and accumulates the whole period in memory. Re-running is correct —
+ * the read is idempotent and the output is deterministic, so a resumed job
+ * produces the same bytes — but it is not cheap, and it does not help the case
+ * the cursor was meant for: a period too large to read inside one instance
+ * lifetime cannot be completed by resuming, because each attempt starts over.
+ *
+ * That limit is recorded rather than fixed here. Durable cursors mean deciding
+ * what a partially-read report means when the underlying rows have changed
+ * between attempts, which is a determinism question (EPR-34) and not a
+ * pagination one. What is fixed is the header: a comment claiming a capability
+ * the code does not have is worse than the missing capability, because it stops
+ * anyone looking for it.
  *
  * ===========================================================================
  * DETERMINISM (EPR-34)
@@ -654,9 +670,39 @@ async function skuPerformance(job) {
       units: 0,
       massMg: 0,
       unitMassMgUsed: row.unitMassMgUsed ?? null,
+      // Whether the rows folded into this one used the SAME unit mass.
+      //
+      // `units` and `massMg` accumulate across every attribution for the SKU,
+      // but `unitMassMgUsed` and `skuRevision` were taken from whichever one
+      // was read first. A mass re-verified mid-period (EPR-12 makes that an
+      // ordinary event) therefore produced a row whose units × unitMassMgUsed
+      // did not equal its massMg — an arithmetic inconsistency in a report an
+      // auditor checks by multiplying the columns.
+      //
+      // Stating "the unit mass changed during this period" is the honest
+      // answer. A weighted average would be a number that was never used to
+      // attribute anything, which is worse: it reconciles, and it is fiction.
+      unitMassVaried: false,
+      revisionVaried: false,
       highConfidence: 0,
       mediumConfidence: 0,
     };
+
+    if (
+      row.unitMassMgUsed != null
+      && current.unitMassMgUsed != null
+      && intOr0(row.unitMassMgUsed) !== intOr0(current.unitMassMgUsed)
+    ) {
+      current.unitMassVaried = true;
+    }
+    if (
+      row.skuRevision != null
+      && current.skuRevision != null
+      && row.skuRevision !== current.skuRevision
+    ) {
+      current.revisionVaried = true;
+    }
+
     current.units += intOr0(row.units);
     current.massMg += intOr0(row.massMg);
     if (row.confidenceTier === 'high') current.highConfidence += 1;
@@ -667,6 +713,14 @@ async function skuPerformance(job) {
   // Sorted by id, not by mass: a tie in mass would order two SKUs
   // arbitrarily, and the report has to be byte-identical across runs.
   const rows = [...bySku.values()].sort((a, b) => byCodePoint(a.skuId, b.skuId));
+
+  // Blanked rather than left showing one of several values. A column that
+  // silently names one of the masses in play reads as "this is the mass", and
+  // the reader has no way to know it is one of two.
+  for (const row of rows) {
+    if (row.unitMassVaried) row.unitMassMgUsed = null;
+    if (row.revisionVaried) row.skuRevision = null;
+  }
 
   const skus = await readSkus(job.orgId, rows.map((r) => r.skuId));
   for (const row of rows) {
@@ -684,6 +738,12 @@ async function skuPerformance(job) {
     'gazetteCategory',
     'skuRevision',
     'unitMassMgUsed',
+    // In the CSV too, not only the JSON. A blank `unitMassMgUsed` with no
+    // column to explain it reads as missing data rather than as a figure that
+    // changed during the period, and the CSV edition is the one a spreadsheet
+    // multiplies.
+    'unitMassVaried',
+    'revisionVaried',
     'massStatus',
     'units',
     'massMg',
@@ -745,7 +805,18 @@ async function chainOfCustody(job) {
     binId: row.binId ?? '',
     // Date only, not a timestamp. A second-precision time plus a bin location
     // identifies the person who was standing there (SEC-3).
-    date: dhakaDate(row.createdAt),
+    //
+    // `disposalDecidedAt`, NOT `createdAt`. `attribute.js:205` derives the
+    // period from `decidedAt` and stores it as `disposalDecidedAt`, while
+    // `createdAt` is when the attribution document happened to be written.
+    // They differ across a period boundary — a disposal decided at 23:50 on
+    // the last of the month and attributed minutes later belongs to the month
+    // that ended, and dating it from `createdAt` put a row in the export
+    // carrying a date OUTSIDE the period the export covers. An auditor
+    // reconciling the two has to be able to tell that is not an error.
+    //
+    // Falls back for rows written before the field existed.
+    date: dhakaDate(row.disposalDecidedAt ?? row.createdAt),
     district: row.district ?? '',
     skuId: row.skuId ?? '',
     skuRevision: row.skuRevision ?? '',
@@ -803,7 +874,22 @@ async function doeAnnualProgress(job) {
     periods.push({ periodId, ...summarise(projected, declared) });
   }
 
-  const issued = await passports.listPassports({ orgId: job.orgId, limit: 50 });
+  // SCOPED TO THE TWELVE PERIODS THIS RETURN COVERS.
+  //
+  // This was `listPassports({ orgId, limit: 50 })` — the fifty most recent
+  // across all time, in a document that reports one registration year. For a
+  // producer past its first year that is a register listing certificates from
+  // outside the year while omitting ones inside it, in the annual return a
+  // regulator reads.
+  //
+  // Filtered here rather than in the query: twelve `in` values plus an
+  // ordering would need a composite index that does not exist, and the fetch
+  // is bounded either way. The limit is raised because the previous one was
+  // sized for "recent", not for "a year's worth".
+  const periodSet = new Set(periodIds);
+  const issued = (
+    await passports.listPassports({ orgId: job.orgId, limit: 500 })
+  ).filter((p) => periodSet.has(p.periodId));
 
   // The measured recognition accuracy over the same window the report covers
   // (EPR-17). Never allowed to fail the report: a methodology section without a
@@ -1343,7 +1429,29 @@ function serialise(job, payload, csvColumns = null) {
       throw badRequest(`${job.label} is not produced as CSV.`);
     }
     const rows = payload.rows ?? [];
+
+    // A QUALIFICATION THAT SURVIVES THE FORMAT.
+    //
+    // The CSV branch used to emit `payload.rows` and nothing else, so anything
+    // the payload said ABOUT those rows was dropped — and the case that
+    // matters is the one where there are no rows to say it about.
+    //
+    // When the k-anonymity floor suppresses the district breakdown (SEC-3),
+    // `projectForProducer` returns an empty map, so the geographic report's
+    // CSV was a header line and nothing under it. `eprPeriods.js` is explicit
+    // that this must not happen: "a quietly absent district list reads as 'no
+    // geography recorded', which is a different and false claim." The JSON
+    // edition stated it; the CSV edition of the same report did not.
+    //
+    // Read off `payload.note` rather than passed in, so a report that gains a
+    // qualification later cannot ship a CSV that omits it because nobody
+    // changed a call site.
+    const notes = typeof payload.note === 'string' && payload.note.trim()
+      ? payload.note.trim().split('\n').map((line) => `# ${line}`)
+      : [];
+
     text = [
+      ...notes,
       csvColumns.join(','),
       ...rows.map((row) => csvColumns.map((c) => csvCell(row[c])).join(',')),
     ].join('\n');

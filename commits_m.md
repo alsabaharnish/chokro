@@ -17,6 +17,124 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-09-18 00:15 (+06) — Reports that did not say what they meant
+
+Continued the MEDIUM triage into `reportJobs.js`: ten findings, two of them
+duplicates. Four already closed — both index findings are covered by declared
+indexes and by `firestoreIndexes.test.js`, and `localeCompare` survives only in
+a comment explaining why it is not used.
+
+**Four were live.**
+
+**Chain-of-custody rows carried dates outside their own period.**
+`attribute.js:205` derives the period from `decidedAt`, stored as
+`disposalDecidedAt`; `createdAt` is merely when the document was written. A
+disposal decided at 23:00 on the 30th and attributed minutes later exported
+with October's date in September's report — and an auditor reconciling the
+export against the period has to be able to tell that is not an error.
+
+**SKU performance columns did not multiply out.** `units` and `massMg`
+accumulated across every attribution while `unitMassMgUsed` and `skuRevision`
+came from whichever was read first, so a mass re-verified mid-period (ordinary
+under EPR-12) gave a row where units × unitMassMgUsed ≠ massMg. Now blanked,
+with `unitMassVaried` / `revisionVaried` saying why — in the CSV columns too,
+since the CSV is the edition a spreadsheet multiplies. A weighted average was
+rejected: it reconciles, and it is a number that was never used to attribute
+anything.
+
+**The geographic CSV dropped its suppression notice.** With the k-anonymity
+floor biting, `projectForProducer` returns an empty district map, so the CSV
+was a column header with nothing under it — reading as "no geography
+recorded", which `eprPeriods.js:485` says in as many words must never happen.
+The JSON edition stated it; the CSV edition of the same report did not.
+`serialise` now emits `payload.note` as `#` lines, read off the payload rather
+than passed in, so a report that gains a qualification later cannot ship a CSV
+without it. Inside the hashed body deliberately — a qualification excluded from
+the hash can be stripped without invalidating it.
+
+**The DoE annual return registered the wrong passports.** Fifty most recent
+across all time, in a document reporting one registration year. Now filtered to
+the twelve periods it covers.
+
+**One recorded rather than fixed.** The job `cursor` is written `null` and
+never advanced, so `resume` re-runs from the start. That is correct — the read
+is idempotent and the output deterministic — but it does not help a period too
+large for one instance lifetime, and durable cursors mean deciding what a
+partially-read report means when rows changed between attempts (an EPR-34
+question, not a pagination one). The header claimed the cursor worked; that
+claim is corrected, because a comment describing a capability the code lacks
+stops anyone looking for it.
+
+**Two process notes, both mine.** I dropped `highConfidence`/`mediumConfidence`
+from an object initialiser while editing it — `undefined += 1` is NaN, which
+JSON renders as null — and an existing test caught it immediately. And two of
+my first mutation checks survived: one because the fixture put both timestamps
+on the same Dhaka date so the assertion could not tell the fields apart, one
+because my mutation script silently failed to match. Both were my errors rather
+than the code's; all four fixes now have tests verified to fail on reversal.
+
+Files: server/src/reportJobs.js, server/test/reportJobs.test.js,
+docs/RECOVERED_AUDIT_FINDINGS.md
+Checks: 1229 server tests (43 suites).
+Remaining untriaged: 31 MEDIUM, 22 LOW.
+
+## 2026-09-17 23:20 (+06) — The producer could read its own audit log and not check it
+
+Third triage pass over the recovered findings, starting with the four MEDIUM
+ones in `firestore.rules` — the boundary that survives when the Node service is
+bypassed.
+
+**Three were already closed, by a stronger fix than any of them proposed.** All
+three described the `producerSkus` client write path: a `hasOnly` allowlist that
+could not match a server-created document, an authorisation chain with no notion
+of a suspended tenant, and a `massStatus` lock the other two made unreachable.
+The write path is now `allow create, update, delete: if false`. Nothing left to
+get wrong — which closes the CRITICAL field-deletion finding at the same line too.
+
+**One was live.** `producerAuditHeads` was `allow read: if isAdmin()`, and the
+only verification endpoint was behind `requireAdmin`. So a producer could read
+every entry of its own history and had no way to check any of it — and could
+not detect a truncation at all, since truncation is only visible as a head whose
+sequence runs past the surviving entries.
+
+That contradicts the sentence the whole design rests on, in `producerAudit.js`:
+tampering is "detectable, by anyone holding the log — including the producer
+whose history it is". A tamper-evident log only the operator can check is a log
+the subject is asked to trust, which is the arrangement the chain exists to
+replace.
+
+Both halves, because the producer needs both:
+
+- **The head is readable by the organisation it belongs to.** Nothing new is
+  disclosed — it holds `orgId`, `sequence`, `digest`, `updatedAt`, all of which
+  the organisation already reads off its own entries. What it gains is the
+  pointer to compare them against, which is the structural check it can make
+  alone. Writes stay denied to everyone, administrators included.
+- **`GET /epr/audit/verify`**, at `orgViewer`, scoped to the caller's own
+  organisation from the membership and never from a parameter — there is no
+  orgId in the path precisely so there is nothing to tamper with. Verifying a
+  KEYED chain is impossible without the key by design, so this is the half the
+  producer cannot do for itself.
+
+`projectVerification` is an explicit allowlist, like every other client-facing
+projection in the service, with a test asserting an added field does not reach a
+producer by default. `keyed` travels with the verdict: the producer is the party
+that would be disputing with the operator, so it is the reader it is least fair
+to report "intact" to without saying what that proves.
+
+Also corrected a misleading sentence in the findings doc, which said the
+client-side Dart findings were unchecked. They were checked, and the two at
+CRITICAL are closed — verified against the tree rather than taken on the doc's
+word.
+
+Files: firestore.rules, server/src/producerAudit.js, server/src/index.js,
+server/test/producerAudit.test.js, rules_test/epr_tenancy.rules.test.js,
+docs/RECOVERED_AUDIT_FINDINGS.md
+Checks: 1221 server tests (43 suites), 44 tenancy rules tests, analyze clean.
+Rule verified by mutation against the emulator: reverting the head read to
+`isAdmin()` fails the member-read test and nothing else.
+Remaining untriaged: 41 MEDIUM, 22 LOW.
+
 ## 2026-09-17 22:30 (+06) — App Check on the client, attesting before enforcement
 
 The server has held `APP_CHECK_ENFORCED` since Phase A and the client had

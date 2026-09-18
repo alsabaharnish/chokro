@@ -145,8 +145,105 @@ go through `projectForProducer`.
 
 ### Not triaged
 
-The MEDIUM and LOW findings, and the client-side Dart findings, have not been
-checked. They are the residue, and they are listed below.
+The MEDIUM and LOW findings have not been checked. They are the residue, and
+they are listed below.
+
+*Corrected 17 September 2026 (evening): this paragraph previously also excluded
+"the client-side Dart findings", which was wrong and misleading — the Dart
+findings at CRITICAL were checked in this pass like every other, and both are
+closed (`compliance_controller.dart` carries an explicit "a failed read is not
+an absent declaration" guard; `declaration_view.dart`'s one-shot `_hydrated`
+bool is now `String? _hydratedFor`, keyed by period). The sentence implied two
+CRITICAL defects were unexamined when they were fixed.*
+
+---
+
+## Third triage pass, 2026-09-17 (evening) — MEDIUM, `firestore.rules`
+
+Four MEDIUM findings named `firestore.rules`. Taken first because the rules are
+the boundary that survives when the Node service is bypassed.
+
+**Three are closed, by a stronger fix than any of them proposed.** They all
+described the `producerSkus` client write path — a `hasOnly` allowlist that
+could not match a server-created document, an authorisation chain with no
+notion of a suspended tenant, and a `massStatus` lock rendered unreachable by
+the first two. The write path no longer exists: `allow create, update, delete:
+if false`. There is nothing left to get wrong, which also closes the CRITICAL
+field-deletion finding at the same line.
+
+**One was live and is now fixed: `producerAuditHeads` was admin-only.**
+
+`producerAudit.js` justifies the whole design on the grounds that tampering is
+"detectable, by anyone holding the log — including the producer whose history
+it is". That was not true. A producer could read every entry and still had no
+way to check them: no verification endpoint outside `requireAdmin`, and no
+sight of the chain head — and truncation is only visible as a head whose
+sequence runs past the entries that survive. The one check a producer could
+make alone was the one the rules withheld.
+
+Two changes, because the producer needs both halves:
+
+- `producerAuditHeads` is readable by the organisation whose head it is.
+  Nothing new is disclosed — the head holds `orgId`, `sequence`, `digest` and
+  `updatedAt`, all of which the organisation already reads off its own entries.
+  What it gains is the pointer to compare them against. Writes stay denied to
+  everyone, administrators included.
+- `GET /epr/audit/verify`, at `orgViewer`, scoped to the caller's own
+  organisation from the membership and never from a parameter. Full
+  verification of a keyed chain is impossible without the key by design, so
+  this is the half the producer cannot do alone.
+
+`projectVerification` is an explicit allowlist like every other client-facing
+projection here, and `keyed` travels with the verdict: the producer is the
+party that would be disputing with the operator, and is the reader it is least
+fair to overstate the control to.
+
+### MEDIUM, `reportJobs.js` — ten findings, two of them duplicates
+
+**Four were already closed.** Both index findings (`listJobs` on
+`reportJobs`, `reconciliationVariance` on `plasticPassports`) are covered by
+declared indexes and by `firestoreIndexes.test.js`, which parses every query in
+`src/` and asserts `reportJobs` among them. `localeCompare` survives only in a
+comment explaining why it is not used.
+
+**Four were live and are fixed.**
+
+*Chain-of-custody rows carried dates outside their own period.* `attribute.js`
+derives the period from `decidedAt` and stores it as `disposalDecidedAt`;
+`createdAt` is when the document happened to be written. Across a month
+boundary they differ, so a disposal decided at 23:00 on the 30th and attributed
+minutes later exported with October's date in September's report. Now dated
+from `disposalDecidedAt`, falling back for rows written before the field.
+
+*SKU performance columns did not multiply out.* `units` and `massMg`
+accumulated across every attribution while `unitMassMgUsed` and `skuRevision`
+were taken from whichever was read first, so a mass re-verified mid-period —
+an ordinary event under EPR-12 — produced a row where units × unitMassMgUsed ≠
+massMg. Now blanked, with `unitMassVaried` / `revisionVaried` saying why. A
+weighted average was rejected: it reconciles, and it is a figure that was never
+used to attribute anything.
+
+*The geographic CSV dropped its suppression notice.* When the k-anonymity floor
+bites, `projectForProducer` returns an empty district map — so the CSV was a
+column header with nothing under it, reading as "no geography recorded", which
+`eprPeriods.js:485` states explicitly must never happen. `serialise` now emits
+`payload.note` as `#` lines, read off the payload rather than passed in so a
+report that gains a qualification later cannot ship a CSV without it. Inside
+the hashed body, deliberately: a qualification excluded from the hash can be
+stripped without invalidating it.
+
+*The DoE annual return registered the wrong passports.* Fifty most recent
+across all time, in a document reporting one registration year. Now filtered to
+the twelve periods the return covers.
+
+**One is recorded rather than fixed.** The job document's `cursor` is written
+`null` and never advanced, so `resume` re-runs from the beginning — correct,
+since the read is idempotent and the output deterministic, but it does not help
+a period too large to read inside one instance lifetime. Durable cursors mean
+deciding what a partially-read report means when the rows changed between
+attempts, which is an EPR-34 determinism question rather than a pagination one.
+The module header claimed the cursor worked; that claim is now corrected, since
+a comment describing a capability the code lacks stops anyone looking for it.
 
 ---
 

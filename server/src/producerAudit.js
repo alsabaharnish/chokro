@@ -694,6 +694,51 @@ async function verifyChain({ orgId, limit = 500 }) {
 }
 
 /**
+ * A verification result as a producer may see it (SEC-12).
+ *
+ * An explicit allowlist, like every other client-facing projection in this
+ * service — fields are named IN, so a field added to `verifyChain` later does
+ * not reach a producer because nobody remembered to exclude it.
+ *
+ * Everything here is already the producer's own: it reads its entries through
+ * `/epr/audit` and the rules, and each entry carries the sequence and digest
+ * these findings refer to. What is withheld is nothing, because there is
+ * nothing in a verification of your own chain that belongs to anyone else.
+ *
+ * `keyed` travels with the verdict deliberately. An unkeyed chain is
+ * tamper-evident against anyone WITHOUT write access and is not evidence
+ * against the operator — and the operator is the party a producer would be
+ * disputing with. Reporting "intact" to them without saying which would be
+ * overstating the control to the one reader it is least fair to overstate it
+ * to.
+ */
+function projectVerification(result) {
+  return {
+    orgId: result.orgId,
+    entriesChecked: result.entriesChecked,
+    intact: result.intact,
+    state: result.state,
+    complete: result.complete,
+    keyed: result.keyed,
+    headPresent: result.headPresent,
+    epochAsserted: result.epochAsserted,
+    // The problem names only. `expected`/`found` carry digests and sequence
+    // numbers the producer can already read off its own entries, but the name
+    // is what a screen renders and what a dispute cites, and a narrower
+    // payload is the easier one to keep honest.
+    findings: (result.findings || []).map((f) => ({
+      problem: f.problem,
+      entryId: f.entryId ?? null,
+    })),
+    verificationCaveat: result.keyed
+      ? null
+      : 'This chain is an unkeyed hash. It detects tampering by anyone without '
+        + 'write access to the database, and is NOT evidence against whoever '
+        + 'holds the database credential.',
+  };
+}
+
+/**
  * One organisation's recent history, newest first.
  *
  * Bounded (QA-10). The whole log is an audit-pack job (EPR-35), not a screen.
@@ -732,5 +777,6 @@ module.exports = {
   appendInTransaction,
   append,
   verifyChain,
+  projectVerification,
   listForOrg,
 };

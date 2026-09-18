@@ -1087,3 +1087,212 @@ describe('report row order does not depend on the runtime (NFR-E-8)', () => {
     expect(reportJobs.byCodePoint(undefined, '')).toBe(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Third triage pass: four MEDIUM findings against this module
+// ---------------------------------------------------------------------------
+
+describe('a report says what it means (MEDIUM triage, 2026-09-17)', () => {
+  test('a chain-of-custody row is dated by the disposal, not by the write', async () => {
+    // `attribute.js` derives the period from `decidedAt` and stores it as
+    // `disposalDecidedAt`; `createdAt` is merely when the document was
+    // written. Across a period boundary they differ — a disposal decided at
+    // 23:50 on the last of the month and attributed minutes later belongs to
+    // the month that ended — and dating the row from `createdAt` put a date in
+    // the export that falls OUTSIDE the period the export covers.
+    // Chosen so the two fields give DIFFERENT Dhaka dates, which is the whole
+    // point — 17:00Z is 23:00 on the 30th in Dhaka, 02:10Z is 08:10 on the
+    // 1st. A fixture where both land on the same day cannot tell the two
+    // readings apart and passes whichever field the code uses.
+    fs._seed('attributions', 'attr_a', {
+      ...fs._store.get('attributions/attr_a'),
+      disposalDecidedAt: { toDate: () => new Date('2026-09-30T17:00:00Z') },
+      createdAt: { toDate: () => new Date('2026-10-01T02:10:00Z') },
+    });
+
+    const { artefact } = await run({ reportType: 'chainOfCustody' });
+    const rows = JSON.parse(artefact).data.rows;
+    const row = rows.find((r) => r.attributionId === 'attr_a');
+
+    // September, which is the period this report covers.
+    expect(row.date).toBe('2026-09-30');
+    // Not the October write date, which would fall outside it.
+    expect(row.date).not.toBe('2026-10-01');
+  });
+
+  test('a row with no disposalDecidedAt still carries a date', async () => {
+    // Rows written before the field existed must not export blank.
+    const existing = { ...fs._store.get('attributions/attr_a') };
+    delete existing.disposalDecidedAt;
+    fs._seed('attributions', 'attr_a', existing);
+
+    const { artefact } = await run({ reportType: 'chainOfCustody' });
+    const row = JSON.parse(artefact).data.rows.find(
+      (r) => r.attributionId === 'attr_a',
+    );
+
+    expect(row.date).toBe('2026-09-14');
+  });
+
+  test('a unit mass that changed mid-period is stated, not picked', async () => {
+    // EPR-12 makes a re-verification an ordinary event. `units` and `massMg`
+    // accumulate across every attribution for the SKU while `unitMassMgUsed`
+    // was taken from whichever was read first, so units × unitMassMgUsed did
+    // not equal massMg — an arithmetic inconsistency in a report an auditor
+    // checks by multiplying the columns.
+    fs._seed('attributions', 'attr_b', {
+      ...fs._store.get('attributions/attr_b'),
+      unitMassMgUsed: 10400,
+      skuRevision: 2,
+    });
+
+    const { artefact } = await run({ reportType: 'skuPerformance' });
+    const skuA = JSON.parse(artefact).data.rows.find((r) => r.skuId === 'sku_a');
+
+    expect(skuA.unitMassVaried).toBe(true);
+    expect(skuA.revisionVaried).toBe(true);
+    // Blanked rather than showing one of the two, which would read as "this is
+    // the mass" with no way to know it is one of several.
+    expect(skuA.unitMassMgUsed).toBeNull();
+    expect(skuA.skuRevision).toBeNull();
+    // The totals still accumulate — the figures are right, it is the per-unit
+    // column that cannot be stated.
+    expect(skuA.units).toBe(4);
+  });
+
+  test('an unchanged unit mass is still reported as a figure', async () => {
+    // The guard must not blank the ordinary case.
+    const { artefact } = await run({ reportType: 'skuPerformance' });
+    const skuA = JSON.parse(artefact).data.rows.find((r) => r.skuId === 'sku_a');
+
+    expect(skuA.unitMassVaried).toBe(false);
+    expect(skuA.unitMassMgUsed).toBe(9800);
+    expect(skuA.skuRevision).toBe(1);
+  });
+
+  test('a suppressed district breakdown says so in the CSV too', async () => {
+    // `projectForProducer` returns an empty district map when the k-anonymity
+    // floor bites (SEC-3), so the CSV was a header line and nothing under it —
+    // which `eprPeriods.js` is explicit must not happen: "a quietly absent
+    // district list reads as 'no geography recorded', which is a different and
+    // false claim." The JSON edition stated it; the CSV edition did not.
+    fs._seed('eprPeriods', `${ORG}_${PERIOD}`, {
+      ...fs._store.get(`eprPeriods/${ORG}_${PERIOD}`),
+      disposalCount: 1,
+      attributionCount: 1,
+    });
+
+    const { artefact } = await run({
+      reportType: 'geographicRecovery',
+      format: 'csv',
+    });
+
+    // The suppression sentence itself, not merely "a # line" — the CSV always
+    // opens with a # header block, so a looser assertion would pass on the
+    // generator banner and prove nothing.
+    expect(artefact).toContain('# Some districts are withheld');
+    // Above the data, where it qualifies what follows.
+    expect(artefact.indexOf('# Some districts are withheld'))
+      .toBeLessThan(artefact.indexOf('district,massMg'));
+    // Still a CSV.
+    expect(artefact).toContain('district,massMg');
+    // And the rows really are gone, so the note is not decorating a full
+    // table. Checked on the data section only: the `#` header carries
+    // "Asia/Dhaka", so searching the whole artefact for a district name finds
+    // the timezone.
+    const body = artefact.slice(artefact.indexOf('district,massMg'));
+    expect(body.trim()).toBe('district,massMg');
+  });
+
+  test('the suppression note is inside the hashed body', async () => {
+    // Deliberately not in the `#` generator header, which is excluded from the
+    // content hash. A qualification that can be stripped without changing the
+    // hash is one an intermediary can strip and still present the report as
+    // verified.
+    const suppressed = await run({
+      reportType: 'geographicRecovery',
+      format: 'csv',
+    });
+
+    fs._seed('eprPeriods', `${ORG}_${PERIOD}`, {
+      ...fs._store.get(`eprPeriods/${ORG}_${PERIOD}`),
+      disposalCount: 40,
+      attributionCount: 40,
+    });
+    const open = await run({ reportType: 'geographicRecovery', format: 'csv' });
+
+    expect(suppressed.job.contentHash).not.toBe(open.job.contentHash);
+  });
+
+  test('an unsuppressed geographic CSV carries no note line', async () => {
+    // The shared fixture seeds `disposalCount: 3`, under the default floor of
+    // 5 — so the suppressed case is the DEFAULT here and this one has to be
+    // asked for. Worth stating: a note that appeared unconditionally would
+    // have passed the test above while telling every reader their districts
+    // were withheld when they were not.
+    fs._seed('eprPeriods', `${ORG}_${PERIOD}`, {
+      ...fs._store.get(`eprPeriods/${ORG}_${PERIOD}`),
+      disposalCount: 40,
+      attributionCount: 40,
+    });
+
+    const { artefact } = await run({
+      reportType: 'geographicRecovery',
+      format: 'csv',
+    });
+
+    expect(artefact).not.toContain('Some districts are withheld');
+    // The rows are actually there, so this is not passing on an empty report.
+    expect(artefact).toContain('Dhaka');
+    expect(artefact).toContain('Chattogram');
+  });
+});
+
+describe('the DoE annual return registers the year it reports on', () => {
+  test('a passport from outside the twelve periods is not listed', async () => {
+    // The register was `listPassports({ orgId, limit: 50 })` — the fifty most
+    // recent across ALL time, in a document that reports one registration
+    // year. For a producer past its first year that lists certificates from
+    // outside the year while omitting ones inside it, in the return a
+    // regulator reads.
+    //
+    // Obligation starts 2026-07, so year 1 is 2026-07 .. 2027-06.
+    fs._seed('plasticPassports', 'CHKR-PP-INSIDE-01', {
+      serial: 'CHKR-PP-INSIDE-01',
+      orgId: ORG,
+      periodId: '2026-09',
+      status: 'issued',
+      contentHash: 'a'.repeat(64),
+      issuedAt: { toDate: () => new Date('2026-10-03T05:12:00Z') },
+    });
+    fs._seed('plasticPassports', 'CHKR-PP-BEFORE-01', {
+      serial: 'CHKR-PP-BEFORE-01',
+      orgId: ORG,
+      periodId: '2026-05',
+      status: 'issued',
+      contentHash: 'b'.repeat(64),
+      issuedAt: { toDate: () => new Date('2026-06-03T05:12:00Z') },
+    });
+    fs._seed('plasticPassports', 'CHKR-PP-AFTER-01', {
+      serial: 'CHKR-PP-AFTER-01',
+      orgId: ORG,
+      periodId: '2027-08',
+      status: 'issued',
+      contentHash: 'c'.repeat(64),
+      issuedAt: { toDate: () => new Date('2027-09-03T05:12:00Z') },
+    });
+
+    const { artefact } = await run({
+      reportType: 'doeAnnualProgress',
+      periodId: null,
+      year: 1,
+    });
+    const serials = JSON.parse(artefact).data.passportRegister.map(
+      (p) => p.serial,
+    );
+
+    expect(serials).toContain('CHKR-PP-INSIDE-01');
+    expect(serials).not.toContain('CHKR-PP-BEFORE-01');
+    expect(serials).not.toContain('CHKR-PP-AFTER-01');
+  });
+});

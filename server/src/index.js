@@ -1240,6 +1240,43 @@ app.get(
   },
 );
 
+/**
+ * A producer verifying its OWN chain (SEC-12).
+ *
+ * `producerAudit` justifies the whole design on the grounds that a removal or
+ * an edit is "detectable, by anyone holding the log — including the producer
+ * whose history it is". That was not true: verification existed only behind
+ * `requireAdmin`, and `producerAuditHeads` was unreadable to org members, so a
+ * producer could read every entry and still had no way to check them or to
+ * detect a truncation. A tamper-evident log only the operator can check is a
+ * log the subject is asked to trust — which is the arrangement the chain
+ * exists to replace.
+ *
+ * Scoped to the caller's own organisation from the membership, never from a
+ * parameter: there is no orgId in this path precisely so that there is nothing
+ * to tamper with.
+ *
+ * `orgViewer`, the lowest role. Checking whether your own history is intact is
+ * not a privileged operation within the company whose history it is.
+ */
+app.get(
+  '/epr/audit/verify',
+  requireAuth,
+  requireOrgRole('orgViewer'),
+  readLimit,
+  async (req, res) => {
+    try {
+      const result = await producerAudit.verifyChain({
+        orgId: req.orgMembership.orgId,
+      });
+      return res.json({ ok: true, ...producerAudit.projectVerification(result) });
+    } catch (err) {
+      console.error('Producer chain verification failed:', err.message);
+      return res.status(503).json({ error: 'verification_unavailable' });
+    }
+  },
+);
+
 // ---------------------------------------------------------------------------
 // The product registry (EPR-9 to EPR-14)
 // ---------------------------------------------------------------------------

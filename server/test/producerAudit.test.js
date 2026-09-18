@@ -660,3 +660,90 @@ describe('an empty chain is not a broken one (SEC-12)', () => {
     expect(result.findings).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+
+describe('what a producer may see of its own verification (SEC-12)', () => {
+  const full = {
+    orgId: 'org_cola',
+    entriesChecked: 11,
+    intact: false,
+    state: 'broken',
+    complete: true,
+    keyed: true,
+    headPresent: true,
+    epochAsserted: true,
+    findings: [
+      { entryId: 'e1', problem: 'digestMismatch' },
+      { problem: 'truncated', expected: 11, found: 8 },
+    ],
+  };
+
+  test('the verdict and the reasons reach the producer', () => {
+    // A tamper-evident log only the operator can check is a log the subject is
+    // asked to trust, which is the arrangement the chain exists to replace.
+    const seen = audit.projectVerification(full);
+
+    expect(seen.state).toBe('broken');
+    expect(seen.intact).toBe(false);
+    expect(seen.entriesChecked).toBe(11);
+    expect(seen.findings.map((f) => f.problem)).toEqual([
+      'digestMismatch',
+      'truncated',
+    ]);
+  });
+
+  test('a field added to verifyChain does not reach a producer by default', () => {
+    // The reason this is an allowlist. Fields are named IN, so the next field
+    // added upstream is withheld until somebody decides otherwise, rather than
+    // disclosed until somebody remembers to exclude it.
+    const seen = audit.projectVerification({
+      ...full,
+      internalNote: 'an operator remark',
+      storagePath: 'reports/org_cola/secret.pdf',
+    });
+
+    expect(seen.internalNote).toBeUndefined();
+    expect(seen.storagePath).toBeUndefined();
+    expect(Object.keys(seen).sort()).toEqual([
+      'complete',
+      'entriesChecked',
+      'epochAsserted',
+      'findings',
+      'headPresent',
+      'intact',
+      'keyed',
+      'orgId',
+      'state',
+      'verificationCaveat',
+    ]);
+  });
+
+  test('a finding is reduced to its name and its entry', () => {
+    const seen = audit.projectVerification(full);
+
+    expect(Object.keys(seen.findings[1]).sort()).toEqual([
+      'entryId',
+      'problem',
+    ]);
+    expect(seen.findings[1].expected).toBeUndefined();
+  });
+
+  test('an unkeyed chain says so to the producer too', () => {
+    // The producer is the party that would be DISPUTING with the operator, so
+    // it is the reader it is least fair to overstate the control to.
+    const seen = audit.projectVerification({ ...full, keyed: false });
+
+    expect(seen.keyed).toBe(false);
+    expect(seen.verificationCaveat).toContain('NOT evidence');
+  });
+
+  test('a keyed chain carries no caveat', () => {
+    expect(audit.projectVerification(full).verificationCaveat).toBeNull();
+  });
+
+  test('a result with no findings projects to an empty list, not undefined', () => {
+    const seen = audit.projectVerification({ ...full, findings: undefined });
+    expect(seen.findings).toEqual([]);
+  });
+});

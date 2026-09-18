@@ -1463,11 +1463,33 @@ service cloud.firestore {
     // an appended entry can link to its predecessor in a single read. Not
     // evidence in itself — rewriting a head cannot forge a chain, only make the
     // next entry link to the wrong place, which `verifyChain` then reports —
-    // but it is what makes a *truncated* log detectable, so no client touches
-    // it either.
+    // but it is what makes a *truncated* log detectable, so no client writes
+    // it.
+    //
+    // READABLE BY THE ORGANISATION WHOSE HEAD IT IS, and that is the point of
+    // the chain rather than a relaxation of it.
+    //
+    // `producerAudit.js` justifies the design on the grounds that tampering is
+    // "detectable, by anyone holding the log — including the producer whose
+    // history it is". Admin-only, that was false. A producer could read every
+    // entry (`producerAuditLog`, below) and still not detect a TRUNCATION,
+    // because truncation is only visible as a head whose sequence runs past
+    // the entries that survive. The one check it could make alone was the one
+    // the rules withheld.
+    //
+    // Nothing new is disclosed: the head holds `orgId`, `sequence`, `digest`
+    // and `updatedAt`, and the organisation already reads all four off its own
+    // entries. What it gains is the pointer to compare them against.
+    //
+    // Full verification of a KEYED chain remains impossible without the key,
+    // by design — that is what keying buys. This gives the producer the
+    // structural check (contiguous sequence, links that match, a head that
+    // agrees with the last entry) and `/epr/audit/verify` gives it the keyed
+    // one, so it is not reduced to trusting a verdict it cannot examine.
 
     match /producerAuditHeads/{orgId} {
-      allow read: if isAdmin();
+      allow read: if isSignedIn()
+        && (isOrgMember(orgId) || isAdmin());
       allow create, update, delete: if false;
     }
 
