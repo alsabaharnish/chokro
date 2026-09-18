@@ -39,6 +39,7 @@ jest.mock('../src/eprPolicy', () => ({
 const firebase = require('../src/firebase');
 const eprPolicy = require('../src/eprPolicy');
 const attribute = require('../src/attribute');
+const eprPeriods = require('../src/eprPeriods');
 
 const POLICY = {
   highConfidenceThreshold: 0.85,
@@ -837,5 +838,47 @@ describe('a disposal holding two of a producer’s products', () => {
     expect(result.attributions).toBe(2);
     expect(period.massMgByDistrict.Dhaka).toBe(rowTotal);
     expect(period.massMgByCategory.rigid).toBe(rowTotal);
+  });
+});
+
+describe('the bins a period drew from (EPR-28.2)', () => {
+  test('the set grows as distinct bins contribute', async () => {
+    // "number of distinct bins and districts" is required certificate content
+    // and neither was derivable: districts come from `massMgByDistrict`'s
+    // keys, but nothing recorded which bins. A counter cannot do it for the
+    // same reason it could not do `skuIds` — `increment(1)` counts rows, not
+    // distinct values.
+    seedWorkedExample();
+    await attribute.attributeDisposal({ disposalId: 'disposal_anik' });
+
+    const period = fs._store.get('eprPeriods/org_cola_2026-09');
+    expect(period.binIds).toEqual(['MHP-014']);
+  });
+
+  test('the same bin twice does not count twice', async () => {
+    // `arrayUnion` adds only what is absent, which also makes it idempotent —
+    // and attribution can be retried.
+    seedWorkedExample();
+    await attribute.attributeDisposal({ disposalId: 'disposal_anik' });
+    await attribute.attributeDisposal({ disposalId: 'disposal_anik' });
+
+    const period = fs._store.get('eprPeriods/org_cola_2026-09');
+    expect(period.binIds).toEqual(['MHP-014']);
+  });
+
+  test('the ids are stored, and stay out of the producer projection', async () => {
+    // A bin id is a location. The COUNT is what the certificate owes; the
+    // members would be a finer disclosure than the district breakdown the
+    // k-anonymity floor exists to bound.
+    seedWorkedExample();
+    await attribute.attributeDisposal({ disposalId: 'disposal_anik' });
+
+    const period = fs._store.get('eprPeriods/org_cola_2026-09');
+    const projected = eprPeriods.projectForProducer(period, {
+      kAnonymityFloor: 5,
+    });
+
+    expect(period.binIds).toBeDefined();
+    expect(projected.binIds).toBeUndefined();
   });
 });

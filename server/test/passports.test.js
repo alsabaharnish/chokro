@@ -1552,3 +1552,98 @@ describe('supersession after a mass change reaches every period', () => {
     );
   });
 });
+
+// ---------------------------------------------------------------------------
+// EPR-28.2's required figures
+// ---------------------------------------------------------------------------
+
+describe('the certificate carries what EPR-28.2 requires', () => {
+  beforeEach(() => {
+    fs._seed('eprPeriods', 'org_cola_2026-09', {
+      ...fs._store.get('eprPeriods/org_cola_2026-09'),
+      unitsByCategory: { rigid: 168000, flexible: 44000 },
+      binIds: ['MHP-014', 'MHP-022', 'MHP-031'],
+      massMgByDistrict: { Dhaka: 3000000000, Chattogram: 2000000000 },
+      unattributedDisposalCount: 1840,
+    });
+  });
+
+  test('units, distinct bins and districts, and the unattributed pool', async () => {
+    // EPR-28.2 lists these by name. Three of them were absent from the
+    // figures entirely, and `unattributedDisposalCount` was not read at all —
+    // so the certificate had no way to say that anything in the period went
+    // unattributed, and read as though everything was accounted for.
+    const figures = await passports.assembleFigures({
+      orgId: 'org_cola',
+      periodId: '2026-09',
+    });
+
+    expect(figures.totalUnits).toBe(212000);
+    expect(figures.distinctBinCount).toBe(3);
+    expect(figures.distinctDistrictCount).toBe(2);
+    expect(figures.unattributedDisposalCount).toBe(1840);
+  });
+
+  test('each of them is covered by the content hash', async () => {
+    // A figure printed on the page and absent from the digest is a figure the
+    // hash does not defend — the same argument this payload already makes
+    // about the producer-identity fields.
+    const figures = await passports.assembleFigures({
+      orgId: 'org_cola',
+      periodId: '2026-09',
+    });
+    const payload = passports.canonicalPayload(figures);
+
+    expect(payload).toContain('totalUnits=212000');
+    expect(payload).toContain('distinctBinCount=3');
+    expect(payload).toContain('distinctDistrictCount=2');
+    expect(payload).toContain('unattributedDisposalCount=1840');
+  });
+
+  test('changing the unattributed pool changes the hash', async () => {
+    const before = passports.contentHash(
+      await passports.assembleFigures({ orgId: 'org_cola', periodId: '2026-09' }),
+    );
+
+    fs._seed('eprPeriods', 'org_cola_2026-09', {
+      ...fs._store.get('eprPeriods/org_cola_2026-09'),
+      unattributedDisposalCount: 1841,
+    });
+
+    const after = passports.contentHash(
+      await passports.assembleFigures({ orgId: 'org_cola', periodId: '2026-09' }),
+    );
+
+    expect(after).not.toBe(before);
+  });
+
+  test('the bin IDENTIFIERS never reach the certificate', async () => {
+    // A bin id is a location. The count is required content; the members are
+    // a finer-grained disclosure than the district breakdown the k-anonymity
+    // floor exists to bound (SEC-3, §6.1).
+    const figures = await passports.assembleFigures({
+      orgId: 'org_cola',
+      periodId: '2026-09',
+    });
+
+    expect(figures.binIds).toBeUndefined();
+    expect(JSON.stringify(figures)).not.toContain('MHP-014');
+    expect(passports.canonicalPayload(figures)).not.toContain('MHP-014');
+  });
+
+  test('an empty period reports zero rather than omitting the figures', async () => {
+    // Zero unattributed is a CLAIM about completeness and has to be made, not
+    // left to be inferred from a missing line.
+    fs._store.delete('eprPeriods/org_cola_2026-09');
+
+    const figures = await passports.assembleFigures({
+      orgId: 'org_cola',
+      periodId: '2026-09',
+    });
+
+    expect(figures.totalUnits).toBe(0);
+    expect(figures.distinctBinCount).toBe(0);
+    expect(figures.distinctDistrictCount).toBe(0);
+    expect(figures.unattributedDisposalCount).toBe(0);
+  });
+});

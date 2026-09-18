@@ -466,6 +466,24 @@ async function commitAttributions({
         // were in the photograph — otherwise "distinct disposal events" on a
         // passport would overcount.
         disposalCount: increment(1),
+
+        // THE BINS, AS A SET, FOR A COUNT THE CERTIFICATE OWES (EPR-28.2).
+        //
+        // "number of distinct bins and districts" is required content on the
+        // passport, and neither was derivable: districts come out of
+        // `massMgByDistrict`'s keys, but nothing recorded which bins a period
+        // drew from. A counter cannot do it for the same reason it could not
+        // do `skuIds` — `increment(1)` counts rows, not distinct values.
+        //
+        // The IDS are stored; only the COUNT is ever projected or printed.
+        // A bin id is a location, and `massMgByDistrict` already carries the
+        // geography a producer is allowed (SEC-3, §6.1) — handing over the
+        // specific bins would be a finer-grained disclosure than the district
+        // breakdown the k-anonymity floor exists to bound.
+        ...(bin && disposal.binId
+          ? { binIds: admin.firestore.FieldValue.arrayUnion(disposal.binId) }
+          : {}),
+
         lastAttributionAt: serverTimestamp(),
       };
 

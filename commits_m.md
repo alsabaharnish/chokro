@@ -17,6 +17,63 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-09-18 21:15 (+06) — The certificate read as though every disposal was accounted for
+
+EPR-28.2 lists the certificate's required figures by name: "units; number of
+distinct disposal events; number of distinct bins and districts; the
+unattributed pool". Three were missing, and one of them changes what the
+document SAYS rather than what it omits.
+
+**The unattributed pool.** `assembleFigures` never read
+`unattributedDisposalCount`, so a reader had no way to tell a period where
+everything matched a registered product from one where a third of it did not.
+The mass on the page was correct and the page was silent about what it did not
+cover.
+
+Printed even at zero, unlike the reversal count beside it. The two look alike
+and are not: "no attribution was reversed" is the ordinary case and says
+nothing a reader needs, while "no disposal went unattributed" is a CLAIM about
+completeness — and it is the claim the certificate was making silently by
+leaving the line out. A note under the figure says what it means, drawn only
+where there is a pool to explain.
+
+**Units** were already in the figures and hashed, and simply never printed.
+
+**Distinct bins** needed a new stored set. Districts come out of
+`massMgByDistrict`'s keys; nothing recorded which bins a period drew from, and
+a counter cannot do it for the same reason it could not do `skuIds` —
+`increment(1)` counts rows, not distinct values. `binIds` now uses
+`arrayUnion`, which is a set and idempotent, and attribution can be retried.
+
+**The ids are stored and the count is all that leaves.** A bin id is a
+location, and `massMgByDistrict` already carries the geography a producer is
+allowed under the k-anonymity floor — the specific bins would be a finer
+disclosure than the breakdown that floor exists to bound. `projectForProducer`
+is an allowlist so it excluded them already; a test pins that, and another pins
+that no bin id reaches the canonical payload.
+
+All four figures are hashed. A number printed on the page and absent from the
+digest is a number the hash does not defend, which is the argument the payload
+already makes about the producer-identity fields.
+
+**Both editions rendered and read.** The note initially landed under the
+emission factor version, several lines from the figure it explains, where "they
+are not counted in the mass above" reads as though it were about the carbon
+estimate — it now travels with its row. I also misread ৩ as ০ in the
+small render and re-checked at full size rather than chasing a bug that was not
+there.
+
+`contentHash` moves for every certificate issued from here. That costs nothing:
+production has issued none, which is the cheapest this change was ever going to
+be.
+
+Files: server/src/attribute.js, server/src/passports.js,
+server/src/passportPdf.js, server/test/attribute.test.js,
+server/test/passports.test.js, server/test/passportPdf.test.js
+Checks: 1285 server tests (44 suites). Both halves verified by mutation —
+stubbing the pool fails 3, dropping the bin set fails 3.
+Outstanding on the certificate: the Bengali wording is mine and unreviewed.
+
 ## 2026-09-18 19:10 (+06) — Unit bounds on a figure that was never a unit
 
 Second pass over LOW, and the end of the recovered-findings backlog as a queue.

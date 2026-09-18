@@ -210,6 +210,15 @@ const STRINGS = Object.freeze({
     attributions: 'Attributed collection events',
     disposals: 'Disposal events',
     uniqueSkus: 'Distinct products',
+    // EPR-28.2 requires these on the document: units, the distinct bins and
+    // districts, and the unattributed pool.
+    totalUnits: 'Items collected',
+    distinctBins: 'Distinct bins',
+    distinctDistricts: 'Distinct districts',
+    unattributed: 'Disposals not attributed to any product',
+    unattributedNote:
+      'Collected in this period and not matched to a registered product, so '
+      + 'they are not counted in the mass above.',
     estimatedShare: 'Share resting on estimated mass',
     reversed: 'Reversed attributions',
     carbon: 'Indicative avoided emissions',
@@ -281,6 +290,13 @@ const STRINGS = Object.freeze({
     attributions: 'চিহ্নিত সংগ্রহের ঘটনা',
     disposals: 'নিষ্কাশনের ঘটনা',
     uniqueSkus: 'পৃথক পণ্য',
+    totalUnits: 'সংগৃহীত একক',
+    distinctBins: 'পৃথক বিন',
+    distinctDistricts: 'পৃথক জেলা',
+    unattributed: 'কোনো পণ্যের সঙ্গে মেলানো যায়নি এমন নিষ্কাশন',
+    unattributedNote:
+      'এই সময়কালে সংগৃহীত, কিন্তু নিবন্ধিত কোনো পণ্যের সঙ্গে মেলানো যায়নি — '
+      + 'তাই উপরের ভরের হিসাবে এগুলি ধরা হয়নি।',
     estimatedShare: 'অনুমিত ভরের উপর নির্ভরশীল অংশ',
     reversed: 'বাতিলকৃত সংযুক্তি',
     carbon: 'পরিহারকৃত নিঃসরণের সূচক হিসাব',
@@ -1373,7 +1389,10 @@ function drawEvidence(ctx) {
   const rows = [
     [t.attributions, localeNumber(f.attributionCount, locale)],
     [t.disposals, localeNumber(f.disposalCount, locale)],
+    [t.totalUnits, localeNumber(intOr0(f.totalUnits), locale)],
     [t.uniqueSkus, localeNumber(f.uniqueSkuCount, locale)],
+    [t.distinctBins, localeNumber(intOr0(f.distinctBinCount), locale)],
+    [t.distinctDistricts, localeNumber(intOr0(f.distinctDistrictCount), locale)],
     // EPR-25: the estimated share is stated on the artefact, not buried.
     [t.estimatedShare, formatPercent(f.estimatedShare ?? 0, locale)],
   ];
@@ -1381,6 +1400,27 @@ function drawEvidence(ctx) {
   if (f.reversedCount > 0) {
     rows.push([t.reversed, localeNumber(f.reversedCount, locale)]);
   }
+
+  // ALWAYS, INCLUDING AT ZERO — unlike the reversed row above.
+  //
+  // The two look alike and are not. "No attribution was reversed" is the
+  // ordinary case and says nothing a reader needs; a row for it would be
+  // noise. "No disposal went unattributed" is a CLAIM about completeness, and
+  // it is the claim the certificate was making silently by omitting the line
+  // altogether — a reader had no way to tell a period where everything matched
+  // from one where a third of it did not.
+  //
+  // EPR-28.2 lists the unattributed pool as required content for exactly this
+  // reason: it is the figure that says what the mass above does NOT cover.
+  rows.push([
+    t.unattributed,
+    localeNumber(intOr0(f.unattributedDisposalCount), locale),
+    // The note travels WITH the row rather than being drawn after the block.
+    // Emitted at the end it landed under the emission factor version, several
+    // lines from the figure it explains, where "they are not counted in the
+    // mass above" reads as though it were about the carbon estimate.
+    intOr0(f.unattributedDisposalCount) > 0 ? t.unattributedNote : null,
+  ]);
 
   if (f.declarationAttestedByName) {
     rows.push([t.attestedBy, f.declarationAttestedByName]);
@@ -1413,8 +1453,18 @@ function drawEvidence(ctx) {
     ]);
   }
 
-  for (const [label, value] of rows) {
+  for (const [label, value, note] of rows) {
     labelled(ctx, label, value);
+    if (note) {
+      const noteLeft = doc.page.margins.left;
+      const noteWidth = doc.page.width - noteLeft - doc.page.margins.right;
+      doc.moveDown(0.15);
+      writeFlow(doc, body, note, noteLeft + 12, doc.y, noteWidth - 24, {
+        size: 8,
+        color: '#475569',
+      });
+      doc.moveDown(0.15);
+    }
   }
 
   const caveats = carbonCaveatsFor(t, f);

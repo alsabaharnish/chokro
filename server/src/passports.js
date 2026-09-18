@@ -239,6 +239,16 @@ function canonicalPayload(figures) {
   lines.push(`attributionCount=${intOr0(figures.attributionCount)}`);
   lines.push(`disposalCount=${intOr0(figures.disposalCount)}`);
   lines.push(`uniqueSkuCount=${intOr0(figures.uniqueSkuCount)}`);
+  // Hashed like every other figure the page asserts. A number printed on the
+  // certificate but absent from the digest is a number the hash does not
+  // defend — which is the argument this payload's own comment makes about the
+  // producer-identity fields, and it applies to a count as much as to a name.
+  lines.push(`totalUnits=${intOr0(figures.totalUnits)}`);
+  lines.push(`distinctBinCount=${intOr0(figures.distinctBinCount)}`);
+  lines.push(`distinctDistrictCount=${intOr0(figures.distinctDistrictCount)}`);
+  lines.push(
+    `unattributedDisposalCount=${intOr0(figures.unattributedDisposalCount)}`,
+  );
   lines.push(`uncertainMassMg=${intOr0(figures.uncertainMassMg)}`);
   lines.push(`estimatedShare=${(figures.estimatedShare ?? 0).toFixed(6)}`);
   lines.push(`reversedCount=${intOr0(figures.reversedCount)}`);
@@ -447,6 +457,27 @@ async function assembleFigures({ orgId, periodId, scope = 'period' }) {
     attributionCount: intOr0(period?.attributionCount),
     disposalCount: intOr0(period?.disposalCount),
     uniqueSkuCount: Array.isArray(period?.skuIds) ? period.skuIds.length : 0,
+
+    // EPR-28.2: "units; number of distinct disposal events; number of distinct
+    // bins and districts; the unattributed pool".
+    //
+    // Three of those were absent from the certificate entirely. The
+    // unattributed pool is the one that changes what the document SAYS rather
+    // than what it omits: without it a reader has no way to know that any
+    // disposal in the period went unattributed, so the certificate reads as
+    // though every one of them was accounted for.
+    //
+    // COUNTS, never the members. `binIds` is a set of locations and stays on
+    // the server; the district figure is the number of keys in the breakdown
+    // the producer can already see.
+    totalUnits: Object.values(period?.unitsByCategory ?? {}).reduce(
+      (sum, units) => sum + intOr0(units),
+      0,
+    ),
+    distinctBinCount: Array.isArray(period?.binIds) ? period.binIds.length : 0,
+    distinctDistrictCount: Object.keys(period?.massMgByDistrict ?? {}).length,
+    unattributedDisposalCount: intOr0(period?.unattributedDisposalCount),
+
     uncertainMassMg,
     estimatedShare,
     reversedCount: intOr0(period?.reversedCount),

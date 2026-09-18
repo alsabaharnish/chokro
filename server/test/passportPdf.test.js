@@ -1349,3 +1349,81 @@ describe('the carbon figure is rounded like every other figure', () => {
     expect(pdf.formatCarbonKg(0, 'en')).toBe('0');
   });
 });
+
+describe('the unattributed pool is on the page (EPR-28.2)', () => {
+  test('its label and note exist in both editions', () => {
+    for (const locale of ['en', 'bn']) {
+      const t = pdf.STRINGS[locale];
+      expect(typeof t.unattributed).toBe('string');
+      expect(t.unattributed.length).toBeGreaterThan(5);
+      expect(typeof t.unattributedNote).toBe('string');
+      expect(t.unattributedNote.length).toBeGreaterThan(20);
+      expect(typeof t.totalUnits).toBe('string');
+      expect(typeof t.distinctBins).toBe('string');
+      expect(typeof t.distinctDistricts).toBe('string');
+    }
+  });
+
+  test('a period with an unattributed pool renders', async () => {
+    const buffer = await pdf.renderPassportPdf({
+      passport: passport({
+        figures: {
+          totalUnits: 212000,
+          distinctBinCount: 47,
+          distinctDistrictCount: 3,
+          unattributedDisposalCount: 1840,
+        },
+      }),
+      verifyBaseUrl: 'https://chokro.app',
+    });
+
+    expect(buffer.slice(0, 5).toString('latin1')).toBe('%PDF-');
+  });
+
+  test('the Bangla edition renders the same figures', async () => {
+    // The check that matters for newly written Bengali: `splitRuns` refuses
+    // rather than emitting mojibake, so an uncoverable code point throws here.
+    const buffer = await pdf.renderPassportPdf({
+      passport: passport({
+        locale: 'bn',
+        figures: {
+          totalUnits: 212000,
+          distinctBinCount: 47,
+          distinctDistrictCount: 3,
+          unattributedDisposalCount: 1840,
+        },
+      }),
+      verifyBaseUrl: 'https://chokro.app',
+    });
+
+    expect(buffer.toString('latin1')).toMatch(/NotoSansBengali/);
+  });
+
+  test('a period with nothing unattributed still renders the line', async () => {
+    // Zero is a claim about completeness, unlike a reversal count of zero
+    // which says nothing a reader needs. Omitting the line is what let the
+    // certificate read as though every disposal had been accounted for.
+    const buffer = await pdf.renderPassportPdf({
+      passport: passport({ figures: { unattributedDisposalCount: 0 } }),
+      verifyBaseUrl: 'https://chokro.app',
+    });
+
+    expect(buffer.slice(0, 5).toString('latin1')).toBe('%PDF-');
+  });
+
+  test('every new string is renderable in both faces', () => {
+    for (const locale of ['en', 'bn']) {
+      const { body } = newBody(locale);
+      const t = pdf.STRINGS[locale];
+      for (const text of [
+        t.unattributed,
+        t.unattributedNote,
+        t.totalUnits,
+        t.distinctBins,
+        t.distinctDistricts,
+      ]) {
+        expect(() => pdf.splitRuns(body, text)).not.toThrow();
+      }
+    }
+  });
+});
