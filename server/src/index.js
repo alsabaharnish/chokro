@@ -1029,6 +1029,29 @@ app.post('/epr/invitations/redeem', redeemLimit, async (req, res) => {
     if (err.code !== 'invalid_invitation') {
       console.error('Invitation redemption failed:', err.message);
     }
+
+    // AN OUTAGE IS NOT AN INVALID LINK, AND SAYING SO LEAKS NOTHING.
+    //
+    // The collapse above exists so a stolen link cannot be used to enumerate
+    // organisations or invited addresses. "The account service is temporarily
+    // unavailable" discloses neither: it is a fact about Chokro, true of every
+    // endpoint at that moment, and an attacker learns it by calling any of
+    // them.
+    //
+    // What the collapse cost was the person holding a GENUINE invitation. Told
+    // their link "is no longer valid. Ask for a new one", they ask — which
+    // invalidates the working link they had, and the new one fails the same
+    // way while the outage lasts. `organizations.js` builds this code
+    // deliberately and the message was being thrown away.
+    if (err.code === 'unavailable') {
+      return res.status(503).json({
+        error: 'unavailable',
+        message:
+          'The account service is temporarily unavailable. Your invitation is '
+          + 'still valid — try the same link again in a few minutes.',
+      });
+    }
+
     return res.status(400).json({
       error: 'invalid_invitation',
       message: 'This invitation link is no longer valid. Ask for a new one.',
@@ -2578,14 +2601,36 @@ app.post(
         adminName: req.user.name,
       });
 
-      // EPR-30: "a re-verified unit mass that changes a period already
+      // EPR-30: "a RE-verified unit mass that changes a period already
       // certified" must supersede every affected passport. After the change
       // commits, and never allowed to throw.
-      const supersession = await passports.supersedeForMassChange({
-        orgId: result.orgId,
-        skuId: result.skuId,
-        actorUid: req.user.uid,
-      });
+      //
+      // Only on a genuine re-verification, and the word carries weight. This
+      // ran on every call, so weighing a BRAND-NEW product marked every
+      // currently-issued certificate for that organisation `superseded` —
+      // certificates in third parties' hands, invalidated because a different
+      // product was measured for the first time. A first verification replaces
+      // no earlier figure: there was none for an issued certificate to have
+      // been computed from, so nothing any of them states has changed.
+      //
+      // Re-setting the same mass is likewise not a change. It is an ordinary
+      // thing to do when correcting the note or the reason on a revision, and
+      // spending every certificate's status on it would teach producers and
+      // their customers to ignore supersession — which makes it useless
+      // exactly when it matters.
+      const previous = result.previousVerifiedUnitMassMg;
+      const massActuallyChanged =
+        previous !== null
+        && previous !== undefined
+        && previous !== result.verifiedUnitMassMg;
+
+      const supersession = massActuallyChanged
+        ? await passports.supersedeForMassChange({
+          orgId: result.orgId,
+          skuId: result.skuId,
+          actorUid: req.user.uid,
+        })
+        : { superseded: 0, reason: 'firstVerificationOrUnchanged' };
 
       return res.json({ ok: true, ...result, supersession });
     } catch (err) {

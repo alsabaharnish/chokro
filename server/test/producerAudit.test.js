@@ -747,3 +747,90 @@ describe('what a producer may see of its own verification (SEC-12)', () => {
     expect(seen.findings).toEqual([]);
   });
 });
+
+// ---------------------------------------------------------------------------
+
+describe('the head carries a digest, and it is checked (SEC-12)', () => {
+  async function seedThree() {
+    for (const action of [
+      audit.ACTIONS.ORG_APPROVED,
+      audit.ACTIONS.MEMBER_INVITED,
+      audit.ACTIONS.MEMBER_ACTIVATED,
+    ]) {
+      await audit.append({
+        orgId: 'org_cola', action, actorUid: 'admin_1', summary: action,
+      });
+    }
+  }
+
+  test('a head whose digest contradicts the log is a finding', async () => {
+    // Only `head.sequence` was ever compared. The head stores a digest
+    // alongside it, written in the same transaction as the entry it points at,
+    // and a head disagreeing with the last surviving entry passed silently.
+    await seedThree();
+    const head = fs._store.get('producerAuditHeads/org_cola');
+    fs._store.set('producerAuditHeads/org_cola', {
+      ...head,
+      digest: 'f'.repeat(64),
+    });
+
+    const result = await audit.verifyChain({ orgId: 'org_cola' });
+
+    expect(result.intact).toBe(false);
+    expect(result.state).toBe('broken');
+    expect(
+      result.findings.some((f) => f.problem === 'headDigestMismatch'),
+    ).toBe(true);
+  });
+
+  test('an untouched head reports no digest finding', async () => {
+    await seedThree();
+    const result = await audit.verifyChain({ orgId: 'org_cola' });
+
+    expect(result.intact).toBe(true);
+    expect(
+      result.findings.some((f) => f.problem === 'headDigestMismatch'),
+    ).toBe(false);
+  });
+
+  test('the partial cover-up is caught: tail deleted, sequence wound back', async () => {
+    // Deleting the tail and winding `sequence` back defeats the truncation
+    // check. The attacker also has to rewrite the digest, and a head still
+    // pointing at an entry that is no longer there is the trace this catches.
+    await seedThree();
+    const third = [...fs._store.entries()].find(
+      ([k, v]) => k.startsWith('producerAuditLog/') && v.sequence === 3,
+    );
+    fs._store.delete(third[0]);
+
+    const head = fs._store.get('producerAuditHeads/org_cola');
+    fs._store.set('producerAuditHeads/org_cola', { ...head, sequence: 2 });
+
+    const result = await audit.verifyChain({ orgId: 'org_cola' });
+
+    expect(result.intact).toBe(false);
+    // The sequence now agrees with what survives, so truncation is silent...
+    expect(result.findings.some((f) => f.problem === 'truncated')).toBe(false);
+    // ...and the head's digest is what gives it away.
+    expect(
+      result.findings.some((f) => f.problem === 'headDigestMismatch'),
+    ).toBe(true);
+  });
+
+  test('an empty log reports truncation, not a digest mismatch', async () => {
+    // With no last entry there is nothing to compare against, and reporting
+    // the same fault twice under a name that does not describe it would send a
+    // reader looking for the wrong thing.
+    await seedThree();
+    [...fs._store.keys()]
+      .filter((k) => k.startsWith('producerAuditLog/'))
+      .forEach((k) => fs._store.delete(k));
+
+    const result = await audit.verifyChain({ orgId: 'org_cola' });
+
+    expect(result.findings.some((f) => f.problem === 'truncated')).toBe(true);
+    expect(
+      result.findings.some((f) => f.problem === 'headDigestMismatch'),
+    ).toBe(false);
+  });
+});

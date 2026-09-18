@@ -509,7 +509,20 @@ class AppShell extends ConsumerWidget {
     // reports nothing on failure leaves the user believing they signed out on a
     // handset the codebase itself describes as often shared or borrowed.
     final notify = AppSnackBar.of(context);
+
     await ref.read(authControllerProvider.notifier).signOut();
+
+    // `WidgetRef` throws once the widget is gone — "This widget has been
+    // unmounted, so the State no longer has a context" — a real error, not a
+    // debug assert.
+    //
+    // And it is the SUCCESS path that unmounts this: signing out redirects to
+    // the login screen and disposes the shell, so the read below ran after the
+    // widget was gone on every successful sign-out. A failure leaves the user
+    // where they are, still mounted, which is exactly when the message
+    // matters — so guarding costs nothing that this method exists to do.
+    if (!context.mounted) return;
+
     final error = ref.read(authControllerProvider).error;
     if (error != null) {
       notify.failure('Could not sign out. ${friendlyErrorMessage(error)}');

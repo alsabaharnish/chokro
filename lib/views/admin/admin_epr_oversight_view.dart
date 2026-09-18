@@ -916,6 +916,13 @@ class _MismatchCardState extends ConsumerState<_MismatchCard> {
         orgId: widget.row.orgId,
         periodId: widget.row.periodId,
       );
+
+      // `ref` is a `WidgetRef` and throws once the widget is gone — "This
+      // widget has been unmounted, so the State no longer has a context" —
+      // which is a real error, not a debug assert. Leaving an Admin screen
+      // while an action is in flight is ordinary, and the work has already
+      // succeeded by this point; there is simply nothing left to refresh.
+      if (!mounted) return;
       ref.invalidate(reconciliationProvider);
 
       // A partial pass is reported as partial. Its "variance" compares a full
@@ -1199,6 +1206,13 @@ class _SampledMatchCardState extends ConsumerState<_SampledMatchCard> {
         confirmationId: widget.match.id,
         verdict: verdict,
       );
+
+      // `ref` is a `WidgetRef` and throws once the widget is gone — "This
+      // widget has been unmounted, so the State no longer has a context" —
+      // which is a real error, not a debug assert. Leaving an Admin screen
+      // while an action is in flight is ordinary, and the work has already
+      // succeeded by this point; there is simply nothing left to refresh.
+      if (!mounted) return;
       ref.invalidate(accuracyQueueProvider);
       ref.invalidate(accuracySnapshotProvider);
       snack.success('Recorded as ${AccuracyVerdict.label(verdict).toLowerCase()}.');
@@ -1465,6 +1479,13 @@ class _CertificateRowState extends ConsumerState<_CertificateRow> {
     setState(() => _busy = true);
     try {
       await action();
+
+      // `ref` is a `WidgetRef` and throws once the widget is gone — "This
+      // widget has been unmounted, so the State no longer has a context" —
+      // which is a real error, not a debug assert. Leaving an Admin screen
+      // while an action is in flight is ordinary, and the work has already
+      // succeeded by this point; there is simply nothing left to refresh.
+      if (!mounted) return;
       ref.invalidate(issuanceRegisterProvider);
     } on OrgActionException catch (error) {
       snack.failure(error.message);

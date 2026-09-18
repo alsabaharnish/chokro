@@ -477,3 +477,49 @@ a regression would render perfectly, say nothing, and pass every render test.
 The decision is split into `carbonCaveatsFor` and asserted directly; the
 rendering path is the same `writeFlow` loop every other block uses. Both
 editions were also rendered and inspected by eye.
+
+### MEDIUM, `index.js` / `producerAudit.js` / `fontkitNullAnchorFix.js`
+
+**Most were already closed.** The report download re-checks the report's own
+`minRole` inside `signedUrlFor`. `lastAttributionAt` is named in
+`projectForProducer`'s deliberately-absent list. `carried` is validated against
+an allowlist. Issuance pre-renders both editions before committing. Session age
+is capped and the client has an idle guard. The digest covers `actorName`,
+`actorRole`, `ip` and `userAgent`; `listForOrg` orders by `sequence`; the chain
+is keyed; a missing head is a finding. `fontkit` is a declared dependency.
+
+**Three were live and are fixed.**
+
+*The chain head's digest was never checked.* Only `head.sequence` was compared.
+The head stores a digest written in the same transaction as the entry it points
+at, and a head contradicting the last surviving entry passed silently. It is
+the cheap half of a partial cover-up: deleting the tail and winding `sequence`
+back defeats the truncation check, but the attacker must also rewrite the
+digest, and a head still pointing at an entry that is gone is the trace this
+catches. Two fields to keep consistent is strictly harder than one.
+
+*A first verification superseded every certificate.* EPR-30 says a
+"RE-verified unit mass that changes a period already certified", and
+`supersedeForMassChange` ran on every `setVerifiedMass` — so weighing a
+brand-new product marked every currently-issued certificate for that
+organisation `superseded`, in third parties' hands, because a different product
+was measured for the first time. `openRevisionInTransaction` now reports
+`previousVerifiedUnitMassMg`, and the route supersedes only on a genuine change.
+
+*A service outage told the holder of a valid invitation their link was dead.*
+The catch block collapsed every failure into `invalid_invitation`, deliberately,
+so a stolen link cannot enumerate organisations or invited addresses — but that
+argument does not cover an outage, which is a fact about Chokro true of every
+endpoint at that moment. The cost fell on the genuine invitee: told to "ask for
+a new one", they invalidate the working link they had. `unavailable` now returns
+503 and says the invitation is still valid.
+
+**One is recorded, and the code already records it.** The NULL-anchor shim
+cannot detect marks placed in the *wrong position* — only ones that fail to
+shape. The module says so itself and states why: "catching it needs a reference
+rendering to compare against, which this project does not have." A new test
+file covers what is reachable, including that a real anchor is still applied
+rather than skipped. Worth noting that the obvious version of that test —
+counting skips on the self-test string — cannot work, because that string
+reaches `applyAnchor` exactly once and a guard skipping everything reports the
+same count. Measured rather than assumed, and the test's comment now says so.

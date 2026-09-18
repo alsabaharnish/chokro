@@ -311,6 +311,22 @@ class _DeclarationViewState extends ConsumerState<DeclarationView> {
     });
     try {
       await action();
+
+      // GUARDED LIKE EVERY `setState` BELOW, AND FOR A STRONGER REASON.
+      //
+      // The catch branches check `mounted` before calling `setState`; this
+      // path did not, and `WidgetRef` is less forgiving than `setState` —
+      // touching it after the widget is gone throws "This widget has been
+      // unmounted, so the State no longer has a context", a real error rather
+      // than a debug-only assert. Verified, not assumed: see
+      // `test/ref_after_unmount_test.dart`.
+      //
+      // Navigating away during a save is ordinary — filings are slow, the
+      // instance may be waking — and it produced an uncaught exception where
+      // the work had actually succeeded. There is nothing to refresh once the
+      // screen is gone, so returning is the whole fix.
+      if (!mounted) return;
+
       ref.invalidate(declarationProvider);
       ref.invalidate(compliancePositionProvider);
       ref.invalidate(passportsProvider);

@@ -297,12 +297,28 @@ void main() {
       // A figure reaching a screen from two places will eventually be rendered
       // from the wrong one. The workspace reads its position from `eprPeriods`;
       // the certificate's own figures live in the PDF that was issued.
-      final passport = parse({
+      final withFigures = parse({
         'figures': {'collectionRate': 0.95, 'collectedMassMg': 999},
       });
+      final without = parse(const {});
 
-      expect(passport.serial, 'CHKR-PP-9F2K-7T4D');
-      expect(passport.toString(), isNot(contains('0.95')));
+      // Asserted field by field, not through `toString()`.
+      //
+      // This read `expect(passport.toString(), isNot(contains('0.95')))`, and
+      // `PlasticPassportModel` has no `toString()` override — so the value
+      // compared was always `Instance of 'PlasticPassportModel'` and the
+      // assertion could not fail whatever the model did with the payload. A
+      // test that cannot fail is worse than no test: it is a claim of coverage
+      // over the thing it does not check.
+      expect(withFigures.serial, without.serial);
+      expect(withFigures.periodId, without.periodId);
+      expect(withFigures.status, without.status);
+      expect(withFigures.contentHash, without.contentHash);
+      expect(withFigures.scope, without.scope);
+      expect(withFigures.issuedAt, without.issuedAt);
+      expect(withFigures.supersededBy, without.supersededBy);
+      expect(withFigures.supersededReason, without.supersededReason);
+      expect(withFigures.revocationReason, without.revocationReason);
     });
 
     test('shortens the hash without losing the full one', () {

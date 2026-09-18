@@ -911,7 +911,20 @@ function openRevisionInTransaction(
   // invalidates (EPR-30). A certificate's mass is units multiplied by the unit
   // mass Chokro established, so establishing a different one makes every
   // already-certified period state a figure Chokro no longer stands behind.
-  return { revision: nextRevision, verifiedUnitMassMg, orgId: sku.orgId, skuId };
+  //
+  // `previousVerifiedUnitMassMg` travels with it because EPR-30 says a
+  // "RE-verified unit mass that changes a period already certified", and the
+  // caller cannot tell a re-verification from a first one without it. Null
+  // here means this SKU had no verified mass before — there was no figure for
+  // an issued certificate to have been computed from, so nothing it states has
+  // changed.
+  return {
+    revision: nextRevision,
+    verifiedUnitMassMg,
+    previousVerifiedUnitMassMg: sku.verifiedUnitMassMg ?? null,
+    orgId: sku.orgId,
+    skuId,
+  };
 }
 
 /** Refuses a submitted declaration, with a reason the producer will read. */

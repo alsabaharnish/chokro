@@ -17,6 +17,128 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-09-18 15:05 (+06) — Leaving a screen mid-save threw, in five places
+
+MEDIUM triage, client side. Most were already closed — `_hydratedFor` replaced
+the one-shot `_hydrated` latch, `compliancePositionProvider` guards
+`detail.hasError`, the SDG view branches on all three `RateAbsence` values, the
+carbon figure uses `CarbonEstimate.label` rather than a local `.round()`, the
+uncertainty ceiling reads the server policy with the constant only as fallback,
+`/auth/signout` revokes refresh tokens, and `_run` catches transport failures.
+
+**Four were live.**
+
+**`ref` after an `await`, with no `mounted` guard.** The finding named
+`declaration_view.dart`. I checked the claim rather than taking it —
+`WidgetRef` throws "This widget has been unmounted, so the State no longer has
+a context", a real error and not a debug assert, confirmed on a minimal widget
+in `test/ref_after_unmount_test.dart` before changing anything.
+
+Then swept for the shape rather than fixing the one instance: **five call
+sites**, four of them not in the finding — three admin oversight actions
+(recompute, accuracy review, certificate revoke) and the sign-out in
+`app_shell`. Leaving a screen while an action is in flight is ordinary, and the
+work had already succeeded by the time it threw.
+
+The sign-out one is the interesting one. Reading the error off `ref` after the
+await threw on every SUCCESSFUL sign-out, because success is what unmounts the
+shell. A failure leaves the user where they are, still mounted, which is
+exactly when the message matters — so guarding costs nothing the method exists
+to do. My first attempt captured the notifier and read `.state` instead; that
+is `@protected` in Riverpod 3, and the analyzer said so.
+
+**The dashboard could assert two gazette targets at once.**
+`_ReportingPosition` read the target from `DateTime.now()` while
+`CollectedMassCard`, directly below it, carries a period selector reaching back
+twelve months. So "15% (obligation year 1)" could sit above a collected figure
+from a month in year 2, whose target is a different number.
+`obligationYearForPeriod` already existed for exactly this question and says so
+in its doc comment — "which year does this reporting month belong to", as
+distinct from "which year are we in at this instant".
+
+**The target's disclaimer appeared only when there was no target.**
+`targetIsNotAnAssessment` — "Chokro states the gazette target beside your
+figure; whether it is met is the Department of Environment's finding, not ours"
+— was rendered in the `missing` branch. It is written for the case where a
+target IS on screen, and vanished at the moment the screen put the law's number
+next to the producer's own. `_Fact` now takes a `note` shown with the value.
+
+**A test that could not fail.** `carries no figures` asserted
+`expect(passport.toString(), isNot(contains('0.95')))` and
+`PlasticPassportModel` has no `toString()` override, so the compared value was
+always `Instance of 'PlasticPassportModel'`. Now parsed with and without the
+`figures` payload and compared field by field. A test that cannot fail is worse
+than no test: it is a claim of coverage over the thing it does not check.
+
+Files: lib/views/producer/declaration_view.dart,
+lib/views/producer/producer_dashboard_view.dart,
+lib/views/admin/admin_epr_oversight_view.dart, lib/views/shared/app_shell.dart,
+test/ref_after_unmount_test.dart, test/compliance_position_test.dart
+Checks: 1176 Flutter tests, 1262 server tests, analyze clean.
+Remaining untriaged: 4 MEDIUM, 22 LOW.
+
+## 2026-09-18 13:40 (+06) — Weighing a new product invalidated every certificate
+
+MEDIUM triage across `index.js`, `producerAudit.js` and
+`fontkitNullAnchorFix.js`. Most were already closed — the report download
+re-checks the report's own `minRole`, `lastAttributionAt` is in
+`projectForProducer`'s deliberately-absent list, `carried` is validated,
+issuance pre-renders both editions, session age is capped, the digest covers
+every displayed field, `listForOrg` orders by `sequence`, and `fontkit` is a
+declared dependency.
+
+**Three were live.**
+
+**The chain head's digest was never checked.** Only `head.sequence` was
+compared. The head stores a digest written in the same transaction as the entry
+it points at, and a head contradicting the last surviving entry passed
+verification silently. It is the cheap half of a partial cover-up: deleting the
+tail and winding `sequence` back defeats the truncation check, but the attacker
+also has to rewrite the digest, and a head still pointing at an entry that is
+gone is exactly the trace this catches. Two fields to keep consistent is
+strictly harder than one.
+
+**A first verification superseded every certificate the organisation held.**
+EPR-30 says a "RE-verified unit mass that changes a period already certified",
+and `supersedeForMassChange` ran on every `setVerifiedMass` — so weighing a
+BRAND-NEW product marked every currently-issued certificate for that
+organisation `superseded`. Certificates in third parties' hands, invalidated
+because a different product was measured for the first time. A first
+verification replaces no earlier figure: there was none for an issued
+certificate to have been computed from. `openRevisionInTransaction` now reports
+`previousVerifiedUnitMassMg` and the route supersedes only on a real change —
+re-setting the same mass is not one either, and spending every certificate's
+status on a corrected note would teach everyone to ignore supersession.
+
+**An outage told the holder of a valid invitation their link was dead.** The
+catch block collapses every failure into `invalid_invitation` deliberately, so
+a stolen link cannot enumerate organisations or invited addresses. That argument
+does not cover a service outage, which is a fact about Chokro true of every
+endpoint at that moment and learnable by calling any of them. The cost fell on
+the genuine invitee: told to "ask for a new one", they invalidate the working
+link they had, and the replacement fails the same way. `unavailable` now returns
+503 and says the invitation is still valid.
+
+**A new test file for the fontkit shim, and one thing it deliberately does not
+claim.** The obvious discrimination test — count skips while shaping the
+self-test string — cannot work: `পাসপোর্ট` reaches `applyAnchor` exactly once,
+so a guard skipping EVERYTHING reports the same count as the correct one. I
+measured that rather than assuming it, after writing the test and watching the
+mutation survive. The test that does catch it shapes a nukta sequence and
+asserts a real anchor was applied. The first test's comment now says what it
+proves instead of what I had hoped it proved.
+
+The shim still cannot detect marks placed in the WRONG position, only ones that
+fail to shape. The module already states that and why — it needs a reference
+rendering this project does not have — so it stays recorded rather than fixed.
+
+Files: server/src/producerAudit.js, server/src/producerSkus.js,
+server/src/index.js, server/test/producerAudit.test.js,
+server/test/eprRouteGuards.test.js, server/test/fontkitNullAnchorFix.test.js,
+docs/RECOVERED_AUDIT_FINDINGS.md
+Checks: 1262 server tests (44 suites). All three fixes verified by mutation.
+Remaining untriaged: 9 MEDIUM, 22 LOW.
+
 ## 2026-09-18 12:20 (+06) — The certificate stated a carbon figure and none of its caveats
 
 MEDIUM triage, `passportPdf.js`: eleven findings, eight distinct. Six already

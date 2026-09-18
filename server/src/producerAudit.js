@@ -603,6 +603,33 @@ async function verifyChain({ orgId, limit = 500 }) {
     });
   }
 
+  // THE HEAD CARRIES A DIGEST TOO, AND IT WAS NEVER READ.
+  //
+  // Only `head.sequence` was compared. The head stores a digest alongside it,
+  // written in the same transaction as the entry it points at, and a head
+  // whose digest contradicts the last surviving entry passed verification
+  // silently.
+  //
+  // It is the cheap half of a partial cover-up. Deleting the tail and winding
+  // `sequence` back defeats the truncation check above — but the attacker has
+  // to remember to rewrite the digest as well, and a head still pointing at an
+  // entry that is no longer there is exactly the trace this catches. Two
+  // fields to keep consistent is strictly harder than one.
+  //
+  // Guarded on there being a last entry: with none, `truncated` above has
+  // already fired on the sequence, and comparing against nothing would report
+  // the same fault twice under a name that does not describe it.
+  if (complete && head && entries.length > 0) {
+    const lastDigest = entries[entries.length - 1].digest || null;
+    if ((head.digest || null) !== lastDigest) {
+      findings.push({
+        problem: 'headDigestMismatch',
+        expected: head.digest || null,
+        found: lastDigest,
+      });
+    }
+  }
+
   // A MISSING HEAD IS ITSELF A FINDING.
   //
   // Without this, the most complete attack available scored best: delete every

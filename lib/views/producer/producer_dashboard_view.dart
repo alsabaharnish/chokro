@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../../controllers/attribution_controller.dart';
 import '../../controllers/producer_workspace_controller.dart';
 import '../../core/constants.dart';
 import '../../core/epr_categories.dart';
@@ -286,17 +287,30 @@ class _OrganizationHeader extends StatelessWidget {
 /// Every line here is either a stored fact or an explicit statement that a fact
 /// is missing. There is no arithmetic in this widget (QA-1) because there is
 /// nothing yet to compute — and when there is, it will be computed in a model.
-class _ReportingPosition extends StatelessWidget {
+class _ReportingPosition extends ConsumerWidget {
   const _ReportingPosition({required this.organization});
 
   final OrganizationModel organization;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final theme = Theme.of(context);
-    final now = DateTime.now();
-    final obligationYear = organization.obligationYearAt(now);
-    final collectionTarget = organization.collectionTargetAt(now);
+
+    // THE SELECTED PERIOD, NOT `DateTime.now()`.
+    //
+    // This card sits directly above `CollectedMassCard`, which carries a
+    // period selector reaching back twelve months. Reading the target from the
+    // current instant meant the screen could state "15% (obligation year 1)"
+    // above a collected figure for a month in year 2, whose target is a
+    // different number — two gazette targets asserted at once, with nothing
+    // saying which one the figure below should be read against.
+    //
+    // `obligationYearForPeriod` exists for exactly this question and says so:
+    // "which year does this reporting month belong to", as distinct from
+    // "which year are we in at this instant".
+    final periodId = ref.watch(selectedPeriodProvider);
+    final obligationYear = organization.obligationYearForPeriod(periodId);
+    final collectionTarget = organization.collectionTargetForPeriod(periodId);
 
     return Card(
       child: Padding(
@@ -326,9 +340,17 @@ class _ReportingPosition extends StatelessWidget {
                   ? null
                   : '${(collectionTarget * 100).toStringAsFixed(collectionTarget * 100 % 1 == 0 ? 0 : 1)}% '
                         'of what you place on the market',
-              missing:
-                  '${EprAbsenceReasons.noTargetWithoutObligationYear} '
-                  '${EprAbsenceReasons.targetIsNotAnAssessment}',
+              missing: EprAbsenceReasons.noTargetWithoutObligationYear,
+              // SHOWN WHEN THE TARGET IS, WHICH IS WHEN IT IS NEEDED.
+              //
+              // `targetIsNotAnAssessment` — "Chokro states the gazette target
+              // beside your figure; whether it is met is the Department of
+              // Environment's finding, not ours" — is written for the case
+              // where a target IS on screen. It was rendered only in the
+              // `missing` branch, so it appeared when there was no target to
+              // qualify and vanished at the moment the screen put the law's
+              // number next to the producer's own.
+              note: EprAbsenceReasons.targetIsNotAnAssessment,
             ),
 
             const Divider(height: AppTheme.gapXl),
@@ -503,7 +525,12 @@ class _NoMembershipNotice extends StatelessWidget {
 }
 
 class _Fact extends StatelessWidget {
-  const _Fact({required this.label, required this.value, required this.missing});
+  const _Fact({
+    required this.label,
+    required this.value,
+    required this.missing,
+    this.note,
+  });
 
   final String label;
 
@@ -513,6 +540,13 @@ class _Fact extends StatelessWidget {
   final String? value;
 
   final String missing;
+
+  /// A qualification of the fact itself, shown only when there IS one.
+  ///
+  /// Distinct from [missing], which explains an absence. A sentence that
+  /// qualifies a stated figure belongs beside the figure, not in the branch
+  /// where there is nothing to qualify.
+  final String? note;
 
   @override
   Widget build(BuildContext context) {
@@ -542,6 +576,15 @@ class _Fact extends StatelessWidget {
                     fontStyle: FontStyle.italic,
                   ),
           ),
+          if (known && note != null) ...[
+            const SizedBox(height: AppTheme.gapXs),
+            Text(
+              note!,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ],
         ],
       ),
     );

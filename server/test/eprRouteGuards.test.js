@@ -491,3 +491,41 @@ describe('the events that must supersede a certificate (EPR-30)', () => {
       .toBeLessThan(issue.indexOf('txn.get(declarationRef)'));
   });
 });
+
+describe('a first verification is not a re-verification (EPR-30)', () => {
+  const SRC = path.resolve(__dirname, '../src');
+  // Comments stripped, so an assertion cannot pass on prose describing the
+  // guard rather than on the guard.
+  const readCode = (name) =>
+    fs
+      .readFileSync(path.join(SRC, name), 'utf8')
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .replace(/\/\/[^\n]*/g, '');
+
+  test('the route guards supersession on the mass having actually changed', () => {
+    // This ran on every `setVerifiedMass`, so weighing a BRAND-NEW product
+    // marked every currently-issued certificate for that organisation
+    // `superseded` — certificates in third parties' hands, invalidated because
+    // a different product was measured for the first time.
+    //
+    // EPR-30 says "a RE-verified unit mass that changes a period already
+    // certified". A first verification replaces no earlier figure: there was
+    // none for an issued certificate to have been computed from.
+    const code = readCode('index.js');
+    const route = code.slice(
+      code.indexOf("'/epr/admin/skus/:skuId/verified-mass'"),
+      code.indexOf("'/epr/admin/skus/:skuId/reject'"),
+    );
+
+    expect(route).toMatch(/previousVerifiedUnitMassMg/);
+    expect(route).toMatch(/massActuallyChanged/);
+    // The call is conditional, not unconditional.
+    expect(route).toMatch(/massActuallyChanged[\s\S]{0,80}supersedeForMassChange\(/);
+  });
+
+  test('the revision writer reports what the mass was before', () => {
+    // The route cannot tell a re-verification from a first one without it.
+    const code = readCode('producerSkus.js');
+    expect(code).toMatch(/previousVerifiedUnitMassMg:\s*sku\.verifiedUnitMassMg/);
+  });
+});
