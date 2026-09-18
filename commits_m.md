@@ -17,6 +17,106 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-09-18 19:10 (+06) — Unit bounds on a figure that was never a unit
+
+Second pass over LOW, and the end of the recovered-findings backlog as a queue.
+
+**Ten more verified closed**, including the fontkit docblock — whose measured
+counts have been corrected and which now names a test file that exists — and
+`install()` failing on the English path, which is caught and degrades to "no
+Bengali face" with a comment making exactly the finding's argument.
+
+**One was live and is fixed.** `PutOnMarketLine.tryParse` fell back to
+`milligramsFromGrams`, which enforces 100 mg to 5 kg — the bounds of a SINGLE
+UNIT, because that is what can be verified by sampling one item. A declaration
+line is a total: the whole mass of a gazette category placed on the market in a
+period, tonnes routinely. Run through the unit converter, anything over five
+kilograms returned null and the line was dropped from the denominator without a
+word — and a smaller denominator OVERSTATES the collection percentage computed
+against it. Now `totalMilligramsFromGrams`, which still refuses non-figures and
+negatives but allows zero, because "we placed none of this on the market" is a
+declaration rather than an absence.
+
+**Four recorded rather than fixed**, each with its reason in the findings doc:
+`declaredUnitMassMg ?? 0` (a nullable-field refactor across 27 consumers, worth
+proposing on its own); `_components` dropping entries silently (it surfaces as
+a misleading error rather than a wrong number, and needs a drop count on the
+model); the NULL-anchor patch not falling through to the next subtable
+(verifying a change needs a reference rendering the project does not have); and
+`verifySerial`'s sixth field, already recorded as a decision for the spec
+author.
+
+**One is a genuine content gap, and it is what I would do next.** EPR-28.2
+requires units, distinct bins and districts, and the unattributed pool on the
+certificate. None is rendered, and `unattributedDisposalCount` is not read by
+`assembleFigures` at all — so the document reads as though every disposal in the
+period was attributed. It needs figure assembly, canonical payload and PDF work
+in both languages, and it moves `contentHash` — which costs nothing today,
+because production has issued no certificates.
+
+Files: lib/core/mass_math.dart, lib/models/put_on_market_model.dart,
+test/core/mass_math_test.dart, docs/RECOVERED_AUDIT_FINDINGS.md
+Checks: 1272 server tests (44 suites), 1182 Flutter tests, analyze clean.
+
+**The 127 recovered findings are now triaged end to end.** 18 CRITICAL, 42
+HIGH, 45 MEDIUM and 22 LOW: the great majority were already closed by earlier
+fix passes, 24 were live and are fixed across these triage sessions, and 6 are
+recorded with the reasoning for leaving them.
+
+## 2026-09-18 17:50 (+06) — Three more tests that could not fail
+
+First pass over the LOW findings. Five verified closed — the carbon row is
+localised, `listJobs` projects away `storagePath`, `normaliseForRender` turns
+line breaks into spaces before shaping, the App Check comment now justifies all
+four exemptions, and `/epr/periods` projects rather than spreading.
+
+**Four were live.**
+
+**An admin-guard test that was empty by construction.** `adminRoutes()` is
+DEFINED as the routes carrying `requireAdmin`, and the test filtered those by
+`!has('requireAdmin')` — so the result was empty whatever the source contained.
+The question it means to ask is "did anyone add an admin route and forget the
+guard", and only the PATH can answer that: the guard cannot be evidence of
+itself. Now checked by `/epr/admin/` prefix, with a canary so a prefix matching
+nothing cannot pass it the same way. Removing `requireAdmin` from a real route
+now fails 8 tests; it previously failed none of this one.
+
+**A denial check that accepted "another".** The SDG claims test required each
+sentence containing "recycled", "carbon credit", "offset" or "jobs created" to
+also contain `'not'` — as a SUBSTRING, so "another", "note", "notable" and
+"nothing" all satisfied it. Now whole words, and case-insensitive: the old
+matcher would also have missed a sentence opening "No jobs created figure...",
+because it was comparing letters rather than words in both directions.
+
+**Supersession stopped at fifty certificates.** `supersedeForMassChange` read
+one capped page and nothing checked whether the cap was hit. A producer
+accumulates one certificate per period, so an organisation in its fifth year is
+past fifty — and the periods beyond it were never considered, leaving
+certificates `issued` that state a mass computed from a unit mass Chokro had
+just replaced. Paged rather than given a bigger number, because a bigger number
+is the same bug with a later trigger.
+
+**The claims scan did not look at Phase D.** It covered four producer screens
+and not the declaration form, the certificates screen or the SDG page — the
+three where a recycling or offset claim is easiest to write by accident. The
+recovered finding predicted that adding them would fail immediately on inline
+copy, and it did: `passports_view.dart` said the recycling boundary in its own
+words rather than using `EprAbsenceReasons.recyclingNotCovered`.
+`findProhibitedClaims` strips the shared statements and flags what is left, so
+retyped copy is invisible to it by construction. Now the shared sentence.
+
+**One fixture error of mine, worth recording.** My paging test seeded periods in
+2020 and asserted nothing was superseded — because `isValidPeriodId` refuses
+anything before 2026, the gazette year, so every call was a no-op. Second time
+this session a test of mine failed on its own fixture rather than on the code.
+
+Files: server/src/passports.js, server/test/passports.test.js,
+server/test/eprRouteGuards.test.js, lib/views/producer/passports_view.dart,
+test/producer_sdg_model_test.dart, test/epr_claim_boundaries_test.dart
+Checks: 1272 server tests (44 suites), 1177 Flutter tests, analyze clean.
+All four verified by mutation.
+Remaining untriaged: 13 LOW.
+
 ## 2026-09-18 16:30 (+06) — The rollup kept one item's mass and dropped the rest
 
 Last of the MEDIUM findings. Five already closed — storage rules exist and are

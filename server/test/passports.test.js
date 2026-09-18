@@ -1492,3 +1492,63 @@ describe('a supersession that cannot be logged does not happen (SEC-12)', () => 
     );
   });
 });
+
+describe('supersession after a mass change reaches every period', () => {
+  test('past the old fifty-certificate cap', async () => {
+    // A producer accumulates one certificate per period, so an organisation in
+    // its fifth year is past fifty. The single `.limit(50)` simply never
+    // considered the rest, and their certificates stayed `issued` — stating a
+    // mass computed from a unit mass Chokro had just replaced, with nothing
+    // anywhere saying so.
+    for (let i = 0; i < 60; i += 1) {
+      // From 2026: `isValidPeriodId` refuses anything earlier, because the
+      // gazette was published that year and a period before it carries no
+      // obligation. A fixture using 2020 makes every call a no-op.
+      const period = `20${26 + Math.floor(i / 12)}-${String((i % 12) + 1).padStart(2, '0')}`;
+      fs._seed('plasticPassports', `CHKR-PP-SEED-${String(i).padStart(3, '0')}`, {
+        serial: `CHKR-PP-SEED-${String(i).padStart(3, '0')}`,
+        orgId: 'org_cola',
+        periodId: period,
+        status: 'issued',
+        contentHash: 'a'.repeat(64),
+        issuedAt: { toDate: () => new Date('2026-10-03T05:12:00Z') },
+      });
+    }
+
+    const result = await passports.supersedeForMassChange({
+      orgId: 'org_cola',
+      skuId: 'sku_cola',
+      actorUid: 'uid_admin',
+    });
+
+    // Every one of the sixty, not the first fifty.
+    expect(result.superseded).toBe(60);
+
+    const stillIssued = [...fs._store.entries()]
+      .filter(([k]) => k.startsWith('plasticPassports/CHKR-PP-SEED-'))
+      .filter(([, v]) => v.status === 'issued');
+    expect(stillIssued).toHaveLength(0);
+  });
+
+  test("another organisation's certificates are untouched", async () => {
+    // The paging must not widen the blast radius while it widens the reach.
+    fs._seed('plasticPassports', 'CHKR-PP-OTHER-01', {
+      serial: 'CHKR-PP-OTHER-01',
+      orgId: 'org_pran',
+      periodId: '2026-09',
+      status: 'issued',
+      contentHash: 'b'.repeat(64),
+      issuedAt: { toDate: () => new Date('2026-10-03T05:12:00Z') },
+    });
+
+    await passports.supersedeForMassChange({
+      orgId: 'org_cola',
+      skuId: 'sku_cola',
+      actorUid: 'uid_admin',
+    });
+
+    expect(fs._store.get('plasticPassports/CHKR-PP-OTHER-01').status).toBe(
+      'issued',
+    );
+  });
+});

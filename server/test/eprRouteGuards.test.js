@@ -245,10 +245,35 @@ describe('every producer EPR route', () => {
 
 describe('every admin EPR route', () => {
   test('requires an admin', () => {
-    const missing = adminRoutes()
+    // BY PATH, not by guard.
+    //
+    // This read `adminRoutes().filter((r) => !r.has('requireAdmin'))`, and
+    // `adminRoutes()` is DEFINED as the routes that have `requireAdmin` — so
+    // the result was empty by construction and the assertion could not fail
+    // whatever the source contained. The question it means to ask is "did
+    // anyone add an admin route and forget the guard", and only the path can
+    // answer that: the guard cannot be evidence of itself.
+    //
+    // `adminRoutes()` stays guard-defined for the assertion below, which is
+    // about how admin routes behave rather than about which ones exist — and
+    // for `POST /epr/config/policy`, which is admin-guarded outside the
+    // `/epr/admin/` prefix.
+    const missing = ROUTES.filter((r) => r.path.startsWith('/epr/admin/'))
       .filter((r) => !r.has('requireAdmin'))
       .map((r) => `${r.method} ${r.path}`);
+
     expect(missing).toEqual([]);
+  });
+
+  test('there are admin routes to check, and the filter finds them', () => {
+    // The canary for the test above: a path prefix that matched nothing would
+    // pass it exactly as the tautology did.
+    const byPath = ROUTES.filter((r) => r.path.startsWith('/epr/admin/'));
+
+    expect(byPath.length).toBeGreaterThan(10);
+    // And the guard-defined set is at least as large, because it also holds
+    // the admin routes that live outside the prefix.
+    expect(adminRoutes().length).toBeGreaterThanOrEqual(byPath.length);
   });
 
   test('never uses requireOrgRole, which would resolve the admin as a member', () => {

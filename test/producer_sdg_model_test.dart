@@ -91,12 +91,52 @@ void main() {
         if (!all.contains(claim)) continue;
         final sentences = all.split(RegExp(r'[.\n]'));
         for (final sentence in sentences.where((s) => s.contains(claim))) {
+          // WHOLE WORDS. `contains('not')` matched inside "another",
+          // "note", "notable" and "nothing" — so a sentence making exactly
+          // the forbidden claim could satisfy the denial check by containing
+          // an unrelated word. The check that guards the claim boundary is
+          // not the place for a substring match.
           expect(
             sentence,
-            anyOf(contains('not'), contains('does not'), contains('no ')),
+            matches(
+              RegExp(
+                r'\b(not|no|never|cannot|neither|nor)\b',
+                caseSensitive: false,
+              ),
+            ),
             reason: '"$claim" appears outside a denial: $sentence',
           );
         }
+      }
+    });
+
+    test('the denial matcher does not accept an unrelated word', () {
+      // The point of the change above. Proven rather than assumed: the old
+      // matcher passed any sentence containing the letters "not", and these
+      // are the words that supplied them.
+      // Case-insensitive: a sentence opening "No jobs created figure..." is
+      // a denial, and the previous matcher missed it for the same reason it
+      // accepted "another" — it was comparing letters, not words.
+      final denial = RegExp(
+        r'\b(not|no|never|cannot|neither|nor)\b',
+        caseSensitive: false,
+      );
+
+      for (final decoy in [
+        'Another measure of recycled output.',
+        'Note that this counts recycled tonnage.',
+        'Nothing here, a notable offset.',
+      ]) {
+        expect(denial.hasMatch(decoy), isFalse, reason: decoy);
+      }
+
+      for (final real in [
+        'Chokro does not claim this was recycled.',
+        'This is not a carbon credit.',
+        'Chokro cannot observe an offset.',
+        'No jobs created figure is stated.',
+      ]) {
+        expect(denial.hasMatch(real), isTrue, reason: real);
       }
     });
 

@@ -66,7 +66,16 @@ class PutOnMarketLine {
     if (category is! String || !GazetteCategory.isValid(category)) return null;
 
     final units = _int(raw['units']);
-    final massMg = _int(raw['massMg']) ?? milligramsFromGrams(raw['massG']);
+    // `totalMilligramsFromGrams`, not the unit converter.
+    //
+    // A line states the whole mass of a category placed on the market — tonnes
+    // routinely — and `milligramsFromGrams` enforces the single-unit bounds of
+    // 100 mg to 5 kg. So a line delivered as grams and heavier than five
+    // kilograms returned null and was dropped here without a word, taking its
+    // mass out of the denominator and overstating the collection percentage
+    // computed against it.
+    final massMg =
+        _int(raw['massMg']) ?? totalMilligramsFromGrams(raw['massG']);
 
     if (units == null || units < 0) return null;
     if (massMg == null || massMg < 0) return null;

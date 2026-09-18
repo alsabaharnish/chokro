@@ -565,3 +565,61 @@ and never throws synchronously, so the assertion passed for every key whatever
 the switch contained. Now asserted on the rejection, with a companion test
 proving the missing-builder string is the one a missing builder actually
 produces.
+
+### LOW — triaged
+
+**Ten verified closed.** The carbon row is localised. `listJobs` projects away
+`storagePath`. `normaliseForRender` turns line breaks into spaces before
+shaping. The App Check comment justifies all four exemptions. `/epr/periods`
+projects rather than spreading. `install()` failing is caught and degrades to
+"no Bengali face", leaving Latin-only certificates unaffected. The fontkit
+docblock's measurement has been corrected and names a test file that exists.
+The declaration view no longer converts grams on the client.
+
+**Six fixed** — the three tautological tests, the fifty-certificate supersession
+cap, the claims scan's missing Phase D screens, and the inline boundary copy in
+`passports_view.dart` that widening the scan exposed. Plus put-on-market lines,
+below.
+
+*Unit bounds were applied to a total.* `PutOnMarketLine.tryParse` fell back to
+`milligramsFromGrams`, which enforces 100 mg–5 kg because that is what a single
+unit can be verified against by sampling. A declaration line states the whole
+mass of a category placed on the market in a period — tonnes, routinely — so a
+line delivered as grams and heavier than five kilograms returned null and was
+dropped from the denominator without a word. A smaller denominator overstates
+the collection percentage computed against it. Now `totalMilligramsFromGrams`,
+which refuses non-figures and negatives and allows zero, because "we placed
+none of this on the market" is a declaration rather than an absence.
+
+**Four recorded rather than fixed, with reasons.**
+
+*`declaredUnitMassMg: declaredMg ?? 0`* turns a refusal into a figure. Real, but
+the field is a non-nullable `int` with 27 consumers, and the arithmetic already
+guards `<= 0` in the places that matter. A nullable-field refactor is worth
+proposing on its own, not slipping into a triage pass.
+
+*`_components` drops unparseable entries silently*, unlike `sumMilligrams`,
+which reports `MassSum.skipped`. Lower stakes than it first appears: a dropped
+component makes `componentsSumToDeclared` fail, so the producer does get an
+error — a misleading one ("the parts do not sum") rather than a silent wrong
+number. Fixing it properly means carrying a drop count on the model.
+
+*The NULL-anchor patch does not fall through to the next subtable.* fontkit's
+`applyLookup` still returns true, where the OpenType spec and HarfBuzz treat an
+absent anchor as "this subtable has nothing for this class". Verifying a change
+here needs a reference rendering the project does not have — the same reason
+the module already records for its other known gap.
+
+*`verifySerial` returns `supersededBy`*, a sixth field beyond EPR-29's five.
+Already recorded above as a decision for the spec author: removing it breaks a
+real use case (the holder of a superseded certificate finding the current one),
+keeping it hands an unauthenticated caller a second valid serial.
+
+**One is a genuine content gap and is the recommended next piece of work.**
+EPR-28.2 requires units, distinct bins and districts, and the unattributed pool
+on the certificate. None of the three is rendered, and
+`unattributedDisposalCount` is not even read by `assembleFigures` — so the
+document reads as though every disposal in the period was attributed. It needs
+figure assembly, canonical-payload and PDF changes in both languages, and it
+changes `contentHash` — which costs nothing today, because no certificate has
+been issued in production.

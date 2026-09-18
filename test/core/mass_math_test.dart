@@ -437,4 +437,40 @@ void main() {
       expect(maxUnitMassMg, 5000 * mgPerGram);
     });
   });
+
+  group('a total is not a unit (put-on-market lines)', () {
+    test('accepts a figure far heavier than any single item', () {
+      // `milligramsFromGrams` caps at 5 kg, which is right for one item and
+      // wrong for a sum. A declaration line states the whole mass of a
+      // category placed on the market in a period — tonnes, routinely — and
+      // run through the unit converter it returned null and the line was
+      // dropped from the denominator without a word. A smaller denominator
+      // OVERSTATES the collection percentage computed against it.
+      expect(milligramsFromGrams(18000000), isNull);
+      expect(totalMilligramsFromGrams(18000000), 18000000000);
+    });
+
+    test('accepts zero, which is a legitimate declaration', () {
+      // "We placed none of this category on the market" is a statement, not an
+      // absence.
+      expect(totalMilligramsFromGrams(0), 0);
+    });
+
+    test('still refuses what is not a figure', () {
+      expect(totalMilligramsFromGrams(null), isNull);
+      expect(totalMilligramsFromGrams('eighteen tonnes'), isNull);
+      expect(totalMilligramsFromGrams(double.nan), isNull);
+      expect(totalMilligramsFromGrams(double.infinity), isNull);
+      expect(totalMilligramsFromGrams(-1), isNull);
+    });
+
+    test('reads a numeric string, as the unit converter does', () {
+      expect(totalMilligramsFromGrams('18000000'), 18000000000);
+      expect(totalMilligramsFromGrams(' 8.2 '), 8200);
+    });
+
+    test('rounds to the milligram', () {
+      expect(totalMilligramsFromGrams(8.2004), 8200);
+    });
+  });
 }

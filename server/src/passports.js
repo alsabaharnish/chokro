@@ -1210,17 +1210,65 @@ async function supersedeForReversal({ orgId, periodId, massMg, actorUid }) {
  */
 async function supersedeForMassChange({ orgId, skuId, actorUid, reason }) {
   try {
-    const issued = await db()
-      .collection(PASSPORTS)
-      .where('orgId', '==', orgId)
-      .where('status', '==', 'issued')
-      .limit(50)
-      .get();
+    // ======================================================================
+    // EVERY ISSUED CERTIFICATE, NOT THE FIRST FIFTY
+    // ======================================================================
+    //
+    // This was a single `.limit(50)` with nothing checking whether the cap had
+    // been reached. A producer accumulates one certificate per period, so an
+    // organisation in its fifth year is past fifty — and the periods beyond
+    // the cap were simply never considered. The certificates for them stayed
+    // `issued`, stating a mass computed from a unit mass Chokro had just
+    // replaced, and nothing anywhere said so.
+    //
+    // Paged rather than given a bigger number, because a bigger number is the
+    // same bug with a later trigger. Only the distinct period ids are kept, so
+    // what this accumulates stays small however many certificates there are.
+    const periodSet = new Set();
+    let cursor = null;
+    let scanned = 0;
 
-    if (issued.empty) return { superseded: 0 };
+    for (;;) {
+      let query = db()
+        .collection(PASSPORTS)
+        .where('orgId', '==', orgId)
+        .where('status', '==', 'issued')
+        .orderBy(admin.firestore.FieldPath.documentId())
+        .limit(100);
 
-    // Distinct periods, so one call per period rather than one per certificate.
-    const periods = [...new Set(issued.docs.map((d) => d.data().periodId))];
+      if (cursor) query = query.startAfter(cursor);
+
+      const page = await query.get();
+      if (page.empty) break;
+
+      for (const doc of page.docs) {
+        const { periodId } = doc.data();
+        if (periodId) periodSet.add(periodId);
+      }
+
+      scanned += page.size;
+      cursor = page.docs[page.docs.length - 1].id;
+
+      if (page.size < 100) break;
+
+      // A bound that cannot be reached by legitimate data — one certificate
+      // per period per scope, over any plausible number of years — so hitting
+      // it means something is wrong rather than large. Reported rather than
+      // silently truncated, which is what the old cap did.
+      if (scanned >= 5000) {
+        console.error(
+          `[passports] supersession scan for ${orgId} stopped at ${scanned} `
+          + 'issued certificates. Some periods may not have been superseded.',
+        );
+        break;
+      }
+    }
+
+    if (periodSet.size === 0) return { superseded: 0 };
+
+    // Sorted, so the audit entries land in a stable order rather than
+    // whatever order the pages happened to arrive in.
+    const periods = [...periodSet].sort();
 
     let superseded = 0;
     for (const periodId of periods) {

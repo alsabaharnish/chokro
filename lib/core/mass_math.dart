@@ -96,6 +96,35 @@ int? milligramsFromGrams(Object? grams) {
   return mg;
 }
 
+/// Grams to milligrams for a TOTAL, with no single-unit bounds.
+///
+/// [milligramsFromGrams] enforces [minUnitMassMg]–[maxUnitMassMg], which is
+/// right for one item: a mass outside those cannot be verified by sampling a
+/// single unit. It is wrong for a figure that is a SUM.
+///
+/// A put-on-market declaration line states the whole mass of a category placed
+/// on the market in a period — tonnes, routinely. Run through the unit
+/// converter, anything over five kilograms returned null and the line was
+/// dropped from the denominator without a word, which understates the
+/// denominator and therefore OVERSTATES the collection percentage on the
+/// certificate.
+///
+/// Still refuses what is not a figure: non-numeric, non-finite, or negative.
+/// Zero is allowed, because "we placed none of this on the market" is a
+/// legitimate declaration and is not the same as an absent one.
+int? totalMilligramsFromGrams(Object? grams) {
+  final double? value = switch (grams) {
+    final num n => n.toDouble(),
+    final String s => double.tryParse(s.trim()),
+    _ => null,
+  };
+
+  if (value == null || !value.isFinite || value < 0) return null;
+
+  final mg = (value * mgPerGram).round();
+  return mg < 0 ? null : mg;
+}
+
 /// The exact mass of [units] items each weighing [unitMassMg].
 ///
 /// Integer multiplication, so it is exact by construction. Returns null for a

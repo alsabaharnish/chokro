@@ -29,6 +29,13 @@ const _producerFacingSources = <String>[
   'lib/views/producer/sku_editor_dialog.dart',
   'lib/views/producer/sku_import_view.dart',
   'lib/views/producer/invitation_redeem_view.dart',
+  // Phase D. The claim-sensitive ones: the form where a producer attests a
+  // figure, the certificates screen, and the page that reads collection
+  // through the SDGs — where a recycling or offset claim would be easiest to
+  // write by accident.
+  'lib/views/producer/declaration_view.dart',
+  'lib/views/producer/passports_view.dart',
+  'lib/views/producer/producer_sdg_view.dart',
   'lib/views/admin/admin_producers_view.dart',
   'lib/views/admin/admin_mass_queue_view.dart',
 ];

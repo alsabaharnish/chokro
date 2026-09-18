@@ -6,6 +6,7 @@ import 'package:printing/printing.dart';
 import '../../controllers/compliance_controller.dart';
 import '../../core/api_config.dart';
 import '../../core/epr_period.dart';
+import '../../core/epr_claims.dart';
 import '../../core/theme.dart';
 import '../../models/plastic_passport_model.dart';
 import '../../services/organization_service.dart' show OrgActionException;
@@ -110,9 +111,20 @@ class _Explainer extends StatelessWidget {
               'It states what Chokro collected of your packaging in a period, '
               'and — if you filed a declaration — what share that is of what '
               'you placed on the market. It is not a statement of compliance '
-              'with the 2024 gazette, and it does not state a recycling rate: '
-              'Chokro records collection and holds no evidence of what was '
-              'recycled downstream.',
+              'with the 2024 gazette.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: AppTheme.gapXs),
+            // The shared sentence, not a paraphrase of it.
+            //
+            // This screen used to say the recycling boundary in its own words.
+            // Two wordings of one boundary are two things to keep in step, and
+            // the one that drifts is the one nobody is reading — which is why
+            // `findProhibitedClaims` strips the shared statements and flags
+            // whatever is left. Retyped copy is invisible to that check by
+            // construction.
+            Text(
+              EprAbsenceReasons.recyclingNotCovered,
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: AppTheme.gapSm),
