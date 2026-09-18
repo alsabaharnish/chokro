@@ -36,20 +36,52 @@ const SOURCE = fs.readFileSync(
 /**
  * The route table, read out of the source.
  *
- * Matches `app.<method>('<path>', <middleware...>, async (req, res)` and
- * captures everything between the path and the handler. Comments inside the
- * chain are stripped, so a route explaining *why* it omits a guard is not
- * credited with having it.
+ * Finds each `app.<method>('<path>', ...)` and takes the WHOLE call as the
+ * chain, by balancing parentheses from the opening one. Comments inside are
+ * stripped, so a route explaining *why* it omits a guard is not credited with
+ * having it.
+ *
+ * ## Why this is not a regex any more
+ *
+ * It used to end each chain at the first literal `(req, res)`. Four routes do
+ * not have one — the photo uploads end in `photoUploadHandler('claims')`, a
+ * handler FACTORY — so the pattern ran past them looking for the next inline
+ * handler it could find.
+ *
+ * That failed in both directions at once. The four routes vanished from the
+ * table, so nothing asserted their guards; and the route before each of them
+ * swallowed their middleware into its own chain, so it appeared to carry
+ * guards it does not have. A test that silently drops what it cannot parse is
+ * worse than one that fails, because the report it prints is a pass.
+ *
+ * Balancing parentheses has no such blind spot: a route is matched by how it
+ * begins, not by how its handler happens to be written.
  */
 function routeTable() {
   const routes = [];
-  const pattern =
-    /app\.(get|post|put|patch|delete)\(\s*'([^']+)'\s*,([\s\S]*?)(?:async\s*)?\(req,\s*res\)/g;
+  const start = /app\.(get|post|put|patch|delete)\(\s*'([^']+)'/g;
 
-  let match = pattern.exec(SOURCE);
+  let match = start.exec(SOURCE);
   while (match !== null) {
-    const [, method, routePath, rawChain] = match;
-    const chain = rawChain
+    const [, method, routePath] = match;
+
+    // From the `(` of `app.method(` to its partner.
+    const open = SOURCE.indexOf('(', match.index);
+    let depth = 0;
+    let end = open;
+    for (let i = open; i < SOURCE.length; i += 1) {
+      const ch = SOURCE[i];
+      if (ch === '(') depth += 1;
+      else if (ch === ')') {
+        depth -= 1;
+        if (depth === 0) {
+          end = i;
+          break;
+        }
+      }
+    }
+
+    const chain = SOURCE.slice(open + 1, end)
       .replace(/\/\*[\s\S]*?\*\//g, '')
       .replace(/\/\/[^\n]*/g, '');
 
@@ -59,9 +91,17 @@ function routeTable() {
       chain,
       has: (guard) => new RegExp(`\\b${guard}\\b`).test(chain),
     });
-    match = pattern.exec(SOURCE);
+
+    start.lastIndex = end;
+    match = start.exec(SOURCE);
   }
   return routes;
+}
+
+/** Every `app.<method>('<path>'` in the source, however its handler is written. */
+function declaredRoutes() {
+  return [...SOURCE.matchAll(/app\.(get|post|put|patch|delete)\(\s*'([^']+)'/g)]
+    .map((m) => `${m[1].toUpperCase()} ${m[2]}`);
 }
 
 const ROUTES = routeTable();
@@ -121,6 +161,29 @@ test('the route table was actually parsed', () => {
   expect(eprRoutes().length).toBeGreaterThan(15);
   expect(adminRoutes().length).toBeGreaterThan(4);
   expect(ROUTES.some((r) => r.path === '/passports/verify/:serial')).toBe(true);
+});
+
+test('every declared route is in the table', () => {
+  // The bound above is far too loose to notice a handful going missing, and a
+  // handful did: four `/photos/*` routes end in a handler factory rather than
+  // an inline `(req, res)`, so the old parser skipped them AND folded their
+  // middleware into the route before each one. Exact equality is the only
+  // version of this check that cannot be passed by accident.
+  const parsed = ROUTES.map((r) => `${r.method} ${r.path}`);
+  const declared = declaredRoutes();
+
+  expect(parsed.sort()).toEqual(declared.sort());
+});
+
+test('a route whose handler is a factory is parsed like any other', () => {
+  // The specific shape that defeated the regex.
+  const claim = ROUTES.find((r) => r.path === '/photos/claim');
+
+  expect(claim).toBeDefined();
+  expect(claim.has('requireAuth')).toBe(true);
+  expect(claim.has('photoLimit')).toBe(true);
+  // And it did not swallow the next route's middleware.
+  expect(claim.chain).not.toContain('/photos/profile');
 });
 
 describe('every producer EPR route', () => {

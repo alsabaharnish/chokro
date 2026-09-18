@@ -807,18 +807,48 @@ describe('the report catalogue', () => {
     expect(reportJobs.REPORT_TYPES.periodCollectionStatement.minRole).toBe('orgViewer');
   });
 
-  test('names no report Chokro cannot produce', () => {
+  test('names no report Chokro cannot produce', async () => {
     // Listing a type with no builder would let a client enqueue a job that
     // fails after the producer has been told it was accepted.
+    //
+    // Asserted on the REJECTION, not with `.not.toThrow()`. `buildReport` is
+    // `async`, so its `default:` branch — the one this test exists to catch —
+    // arrives as a rejected promise and never throws synchronously. The old
+    // assertion therefore passed for every key whatever the switch contained,
+    // including for a type with no case at all.
     for (const key of Object.keys(reportJobs.REPORT_TYPES)) {
-      expect(() =>
-        reportJobs.buildReport({
+      let error = null;
+      try {
+        await reportJobs.buildReport({
           reportType: key, orgId: ORG, periodId: PERIOD, year: 1,
           format: reportJobs.REPORT_TYPES[key].formats[0],
           label: reportJobs.REPORT_TYPES[key].label,
-        }),
-      ).not.toThrow();
+        });
+      } catch (err) {
+        error = err;
+      }
+
+      // A builder that exists and fails on these fixtures is not this test's
+      // subject; a builder that does not exist is.
+      expect(String(error?.message ?? '')).not.toContain('has no builder');
     }
+  });
+
+  test('and the missing-builder check can actually fail', async () => {
+    // The assertion above is only worth having if the string it looks for is
+    // the one a missing builder produces. Proven rather than assumed, because
+    // the version this replaced could not fail at all.
+    let error = null;
+    try {
+      await reportJobs.buildReport({
+        reportType: 'aReportNobodyWrote', orgId: ORG, periodId: PERIOD,
+        format: 'json', label: 'Invented',
+      });
+    } catch (err) {
+      error = err;
+    }
+
+    expect(String(error?.message ?? '')).toContain('has no builder');
   });
 });
 

@@ -523,3 +523,45 @@ rather than skipped. Worth noting that the obvious version of that test —
 counting skips on the self-test string — cannot work, because that string
 reaches `applyAnchor` exactly once and a guard skipping everything reports the
 same count. Measured rather than assumed, and the test's comment now says so.
+
+### MEDIUM, the remainder — MEDIUM section closed
+
+**Five were already closed.** `storage.rules` exists and `firebase.json`
+declares it. `/passports/verify/` is exempt from App Check via
+`EXEMPT_PREFIXES`. Both index findings are covered by declared indexes.
+`resolveMembership` fetches the organisation and derives `orgWritable`, which
+`requireActiveOrganization` enforces. QA-2's five named rules tests exist across
+`epr_skus`, `epr_tenancy`, `epr_attribution` and `epr_passports` — including
+the disposals allowlist, by name.
+
+**Three were live and are fixed.**
+
+*The period rollup dropped mass.* `update` is a plain object and each figure
+was written into it inside the match loop, so a second match sharing a key
+REPLACED the first rather than adding to it — `increment()` is a sentinel, not
+a running total. District is the worst case: every match in one disposal comes
+from one bin, so they always share the key, and a bag holding three of a
+producer's items contributed one item's mass to the district breakdown.
+Category and polymer collide whenever two items share either. These figures are
+printed on the Plastic Passport, so the loss was certified. Now totalled into
+plain numbers and incremented once per key.
+
+**No live data is affected**, confirmed read-only: production holds 0
+attributions, 0 period rollups and 0 passports. Nothing to recompute.
+
+*The route-guard test silently dropped four routes.* Its parser ended each
+chain at the first literal `(req, res)`, and the four `/photos/*` routes end in
+a handler factory instead — so they vanished from the table AND the route
+before each of them swallowed their middleware, appearing to carry guards it
+does not have. Replaced with a balanced-paren scan, plus an exact
+parsed-equals-declared assertion; the loose `> 30` bound could never have
+noticed four going missing. 89 routes became 93, and every existing guard
+assertion still passes, so nothing had been relying on a borrowed guard.
+
+*A catalogue test that could not fail.* `names no report Chokro cannot produce`
+wrapped an `async` call in `expect(() => …).not.toThrow()`. `buildReport`'s
+`default:` branch — the one the test exists to catch — arrives as a rejection
+and never throws synchronously, so the assertion passed for every key whatever
+the switch contained. Now asserted on the rejection, with a companion test
+proving the missing-builder string is the one a missing builder actually
+produces.

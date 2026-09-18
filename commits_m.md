@@ -17,6 +17,68 @@ Checks: <analyze / test results, when the change is verifiable>
 
 ---
 
+## 2026-09-18 16:30 (+06) — The rollup kept one item's mass and dropped the rest
+
+Last of the MEDIUM findings. Five already closed — storage rules exist and are
+declared, `/passports/verify/` is App Check-exempt, both indexes are declared,
+`resolveMembership` derives `orgWritable` from the organisation, and QA-2's five
+named rules tests exist across four suites.
+
+**Three were live, and the first is the most serious thing this triage found.**
+
+**The period rollup dropped mass.** `update` is a plain object, and each figure
+was written into it inside the loop over matches:
+
+    update[`massMgByDistrict.${key}`] = increment(match.massMg);
+
+A second match sharing that key does not add to the first — it REPLACES it,
+because `increment()` is a sentinel rather than a running total and assigning
+twice to one property keeps the last value. District is the worst case: every
+match in a disposal comes from one bin, so they ALWAYS share the key. A bag
+holding three of a producer's items contributed one item's mass to the district
+breakdown, and looked entirely consistent doing it. Category and polymer
+collide whenever two items share either, which is ordinary for a crate of the
+same product. `uncertainMassMg` had it too.
+
+These figures are printed on the Plastic Passport, so the loss was certified.
+
+**No live data is affected.** Confirmed read-only against production: 0
+attributions, 0 period rollups, 0 passports — 39 disposals, none attributed.
+Nothing needs recomputing. The bug was reachable and never reached.
+
+Four tests now cover multi-match disposals, including the cross-check an
+auditor would actually make: the district total must equal the sum of the
+attribution rows behind it. That is the assertion that would have caught this,
+and it did not exist.
+
+**The route-guard test silently dropped four routes.** Its parser ended each
+chain at the first literal `(req, res)`, and the four `/photos/*` routes end in
+`photoUploadHandler('claims')` — a factory. So they vanished from the table,
+and the route before each of them swallowed their middleware into its own
+chain, appearing to carry guards it does not have. Both directions wrong at
+once, and the canary's `> 30` bound could never notice four going missing.
+Replaced with a balanced-paren scan and an exact parsed-equals-declared
+assertion. 89 became 93, and every existing guard assertion still passes — so
+nothing had been passing on a borrowed guard.
+
+**A catalogue test that could not fail.** `names no report Chokro cannot
+produce` wrapped an `async` call in `expect(() => …).not.toThrow()`.
+`buildReport` is async, so its `default: throw` — the exact case the test is
+named for — arrives as a rejection and never throws synchronously. Now asserted
+on the rejection, with a companion test proving the string it looks for is the
+one a missing builder actually produces.
+
+**MEDIUM is closed.** Of 45: 31 already fixed by earlier passes, 13 fixed
+across these five triage sessions, 1 recorded with its reasoning (durable report
+cursors, an EPR-34 determinism question rather than a pagination one).
+
+Files: server/src/attribute.js, server/test/attribute.test.js,
+server/test/eprRouteGuards.test.js, server/test/reportJobs.test.js,
+docs/RECOVERED_AUDIT_FINDINGS.md
+Checks: 1269 server tests (44 suites), 353 rules tests (10 suites) against the
+emulator, 1176 Flutter tests. The rollup fix verified by mutation.
+Remaining untriaged: 22 LOW.
+
 ## 2026-09-18 15:05 (+06) — Leaving a screen mid-save threw, in five places
 
 MEDIUM triage, client side. Most were already closed — `_hydratedFor` replaced

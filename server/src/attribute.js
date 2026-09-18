@@ -469,29 +469,77 @@ async function commitAttributions({
         lastAttributionAt: serverTimestamp(),
       };
 
+      // ====================================================================
+      // TOTALLED FIRST, INCREMENTED ONCE — BECAUSE `update` IS A PLAIN OBJECT
+      // ====================================================================
+      //
+      // Each figure used to be written straight into `update` inside this
+      // loop:
+      //
+      //     update[`massMgByDistrict.${key}`] = increment(match.massMg);
+      //
+      // A second match sharing that key does not add to the first — it
+      // REPLACES it, because assigning to the same property twice keeps only
+      // the last value, and `increment()` is a sentinel rather than a running
+      // total. Every mass but the final one was silently dropped.
+      //
+      // District is the worst of them: every match in this loop comes from one
+      // disposal at one bin, so they ALL share a district key. A bag with
+      // three of a producer's items contributed one item's mass to the
+      // district breakdown and looked perfectly consistent doing it. Category
+      // and polymer collide whenever two items share either, which is the
+      // ordinary case for a crate of the same product.
+      //
+      // These are figures printed on the Plastic Passport, so the loss was
+      // certified. Accumulating into plain numbers and applying a single
+      // `increment` per key is the whole fix; the sums below are within one
+      // disposal and cannot overflow anything an integer milligram can hold.
+      const massByCategory = new Map();
+      const unitsByCategory = new Map();
+      const massByDistrict = new Map();
+      const massByPolymer = new Map();
+      let uncertainMassMg = 0;
+
+      const add = (map, key, value) =>
+        map.set(key, (map.get(key) ?? 0) + value);
+
       for (const match of matches) {
         const category = match.revision.gazetteCategory;
         if (category) {
-          update[`massMgByCategory.${category}`] = increment(match.massMg);
-          update[`unitsByCategory.${category}`] = increment(match.units);
+          add(massByCategory, category, match.massMg);
+          add(unitsByCategory, category, match.units);
         }
 
         const district = bin?.district;
         if (district) {
-          update[`massMgByDistrict.${sanitizeKey(district)}`] = increment(
-            match.massMg,
-          );
+          add(massByDistrict, sanitizeKey(district), match.massMg);
         }
 
         for (const [polymer, mg] of Object.entries(match.polymerSplit)) {
-          update[`massMgByPolymer.${polymer}`] = increment(mg);
+          add(massByPolymer, polymer, mg);
         }
 
         // EPR-17/EPR-37: a producer that cannot see how much of its number is
         // uncertain will publish the number as if it were certain.
         if (match.tier === 'medium') {
-          update.uncertainMassMg = increment(match.massMg);
+          uncertainMassMg += match.massMg;
         }
+      }
+
+      for (const [category, mg] of massByCategory) {
+        update[`massMgByCategory.${category}`] = increment(mg);
+      }
+      for (const [category, units] of unitsByCategory) {
+        update[`unitsByCategory.${category}`] = increment(units);
+      }
+      for (const [district, mg] of massByDistrict) {
+        update[`massMgByDistrict.${district}`] = increment(mg);
+      }
+      for (const [polymer, mg] of massByPolymer) {
+        update[`massMgByPolymer.${polymer}`] = increment(mg);
+      }
+      if (uncertainMassMg > 0) {
+        update.uncertainMassMg = increment(uncertainMassMg);
       }
 
       txn.set(periodRef, update, { merge: true });

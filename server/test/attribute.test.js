@@ -742,3 +742,100 @@ describe('failure never propagates (EPR-16)', () => {
     ).resolves.toMatchObject({ outcome: 'attributed' });
   });
 });
+
+// ---------------------------------------------------------------------------
+// Two matches in one disposal (MEDIUM triage, 2026-09-18)
+// ---------------------------------------------------------------------------
+
+describe('a disposal holding two of a producer’s products', () => {
+  /** A second SKU for the same org, same category, same bin. */
+  function seedSecondSku() {
+    fs._seed('producerSkus', 'sku_sprite', {
+      orgId: 'org_cola',
+      name: 'Sprite 500 ml PET bottle',
+      brand: 'Sprite',
+      gazetteCategory: 'rigid',
+      polymer: 'pet',
+      massStatus: 'verified',
+      status: 'active',
+      verifiedUnitMassMg: 5000,
+      declaredUnitMassMg: 5000,
+      revision: 1,
+      gtin: '8901234567891',
+    });
+    fs._seed('skuRevisions', 'sku_sprite_1', {
+      skuId: 'sku_sprite',
+      orgId: 'org_cola',
+      revision: 1,
+      declaredUnitMassMg: 5000,
+      verifiedUnitMassMg: 5000,
+      gazetteCategory: 'rigid',
+      polymer: 'pet',
+      components: [{ part: 'body', polymer: 'pet', massMg: 5000 }],
+      activeFrom: { toDate: () => new Date('2026-09-01T00:00:00Z') },
+      activeTo: null,
+    });
+  }
+
+  beforeEach(() => {
+    seedWorkedExample({
+      skuMatches: [
+        { skuId: 'sku_cola', units: 2, confidence: 0.91 },
+        { skuId: 'sku_sprite', units: 1, confidence: 0.88 },
+      ],
+    });
+    seedSecondSku();
+  });
+
+  test('both masses reach the district, not just the last one', async () => {
+    // THE DEFECT THIS EXISTS FOR. The rollup `update` is a plain object, and
+    // each figure was written into it inside the match loop:
+    //
+    //     update[`massMgByDistrict.${key}`] = increment(match.massMg);
+    //
+    // A second match sharing the key REPLACES the first — `increment()` is a
+    // sentinel, not a running total — so every mass but the last was dropped.
+    // District is the worst case: every match in one disposal comes from one
+    // bin, so they always share the key. These figures are printed on the
+    // Plastic Passport, so the loss was certified.
+    await attribute.attributeDisposal({ disposalId: 'disposal_anik' });
+
+    const period = fs._store.get('eprPeriods/org_cola_2026-09');
+
+    // 2 × 9800 + 1 × 5000. The old code stored 5000.
+    expect(period.massMgByDistrict.Dhaka).toBe(24600);
+  });
+
+  test('both masses reach the gazette category', async () => {
+    await attribute.attributeDisposal({ disposalId: 'disposal_anik' });
+    const period = fs._store.get('eprPeriods/org_cola_2026-09');
+
+    expect(period.massMgByCategory.rigid).toBe(24600);
+    expect(period.unitsByCategory.rigid).toBe(3);
+  });
+
+  test('polymer masses accumulate across both products', async () => {
+    await attribute.attributeDisposal({ disposalId: 'disposal_anik' });
+    const period = fs._store.get('eprPeriods/org_cola_2026-09');
+
+    // Cola: 19600 split pet/pp by its components. Sprite: 5000 all pet.
+    expect(period.massMgByPolymer.pet).toBe(19600 - 2548 + 5000);
+    expect(period.massMgByPolymer.pp).toBe(2548);
+  });
+
+  test('the district total equals the sum of the attribution rows', async () => {
+    // The cross-check an auditor would make, and the one that would have
+    // caught this: the breakdown has to reconcile with the rows behind it.
+    const result = await attribute.attributeDisposal({
+      disposalId: 'disposal_anik',
+    });
+    const period = fs._store.get('eprPeriods/org_cola_2026-09');
+    const rowTotal = fs
+      ._find('attributions')
+      .reduce((sum, row) => sum + row.massMg, 0);
+
+    expect(result.attributions).toBe(2);
+    expect(period.massMgByDistrict.Dhaka).toBe(rowTotal);
+    expect(period.massMgByCategory.rigid).toBe(rowTotal);
+  });
+});
